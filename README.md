@@ -84,6 +84,10 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 python scripts/zoo.py check           # 索引 ↔ 源码路径 ↔ 许可证
 python scripts/check_project.py       # 配置一致性、文档链接、生成物漂移、残留缓存、第三方来源
 python scripts/smoke_adapters.py      # 适配层 + 指标 + 工件溯源 + 排序适配器（合成数据）
+
+# 数据缓存校验（1–2 秒；不一致会提示 --force 重建）
+python -m recsys.data.kuasar_store --check
+python -m recsys.data.kuasar_features --check
 ```
 
 ## 三条约定

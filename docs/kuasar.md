@@ -231,6 +231,22 @@ codes = feats.column("category_first_code")
 - 指纹写进 checkpoint 的 `provenance.item_features`，换特征表会立刻可见；
 - 广告过滤能力已就位（`is_ad`），但**默认不过滤**（2026-11-06 决定，贴近线上曝光分布）。
 
+## 4.8 数据版本与缓存校验（Phase 1.6）
+
+`processed/` 与特征表都会在读取时校验，防止「代码换了、缓存还是旧的」：
+
+| 机制 | 说明 |
+| --- | --- |
+| 文件指纹 | 每个 npy 的 sha256 记在 `protocol.json`（processed）与 `features/schema.json`（特征表） |
+| `data_version` | 所有文件哈希的汇总短哈希（当前 `a643b5958660f7df`），便于人工对比 |
+| 读取即校验 | `load_processed()` / `load_item_features()` 默认校验（约 1–2 秒 / 0.5 秒），不一致直接抛错 |
+| 构建可复用 | 不带 `--force` 时先校验，通过则打印 `[reuse]` 直接返回；失败则提示并重建 |
+| 命令 | `python -m recsys.data.kuasar_store --check` / `--force`；`python -m recsys.data.kuasar_features --check` / `--force` |
+
+实测：把 `ids/user_ids.npy` 追加一个字节后，`verify_store` 返回「哈希不一致」；
+删除文件返回「缺少文件」；正常状态下 `--check` 输出 `data_version`。
+
+
 ## 5. 对设计的影响
 
 1. **正样本**：MVP 用 `click == 1`；`like/follow/forward` 作为多任务标签（Phase 8）。
@@ -258,9 +274,10 @@ codes = feats.column("category_first_code")
 - [x] 召回样本（交互对）与序列样本可在数组后端上构造（`InteractionDataset` / `SASRecTrainDataset`）
 - [x] **物品特征通道**：12 列 npy（类目/作者/上传类型/日期/caption token/`is_ad`），139 MB，
       `PreparedData.item_features` 已接通，指纹写进 provenance
+- [x] **数据版本与缓存校验**：每个 npy 的 sha256 + `data_version`，读取时默认校验，
+      构建可复用（`[reuse]`），`--check` / `--force` 两个入口（见 §4.8）
 - [ ] 排序候选 + 特征样本（特征表已就位，候选集构造待做）
 - [ ] 全量训练的资源规划：4.05M 物品 × 64 维 embedding ≈ 1 GB，Adam 状态再 2 GB，
       16 GB/CPU 机器上先做小维度试跑（Phase 2 正式定）
-- [ ] 数据版本校验：`load_processed` 比对 `protocol.json` 指纹，防止用了旧缓存
 
 

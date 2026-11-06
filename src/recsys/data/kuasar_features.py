@@ -123,8 +123,29 @@ def _code(values: np.ndarray) -> tuple[np.ndarray, int]:
     return codes, int(unique.size)
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_feature_store(dataset_root: Path, schema: dict[str, Any]) -> list[str]:
+    """逐列核对 npy 的 sha256；返回不一致清单（空表示缓存有效）。"""
+    base = features_dir(dataset_root)
+    problems: list[str] = []
+    for name, expected in (schema.get("fingerprints") or {}).items():
+        path = base / f"{name}.npy"
+        if not path.exists():
+            problems.append(f"缺少 {name}.npy")
+        elif _file_sha256(path) != expected:
+            problems.append(f"{name}.npy 哈希不一致")
+    return problems
+
+
 def build_feature_store(
-    data_dir: Path = DEFAULT_DATA_DIR, *, max_rows: int | None = None
+    data_dir: Path = DEFAULT_DATA_DIR, *, max_rows: int | None = None, force: bool = False
 ) -> dict[str, Any]:
     dataset_root = dataset_dir(data_dir)
     processed = dataset_root / "processed"
@@ -136,6 +157,16 @@ def build_feature_store(
         )
     if not source.exists():
         raise FileNotFoundError(f"找不到 {source}；先运行 python -m recsys.data.kuasar。")
+
+    target = features_dir(dataset_root)
+    schema_path = target / "schema.json"
+    if schema_path.exists() and not force:
+        existing = json.loads(schema_path.read_text(encoding="utf-8"))
+        problems = verify_feature_store(dataset_root, existing)
+        if not problems:
+            print(f"[reuse] {target} 特征表校验通过（{len(existing['columns'])} 列）")
+            return existing
+        print(f"[stale] 特征表校验失败，重建：{problems[:3]}", flush=True)
 
     started = time.time()
     item_ids = np.load(item_ids_path)  # 已排序，供 searchsorted 使用
@@ -223,14 +254,14 @@ def build_feature_store(
     arrays["author_freq"] = asr_freq
 
     print("[3/3] 保存 npy 与 schema …", flush=True)
-    target = features_dir(dataset_root)
     target.mkdir(parents=True, exist_ok=True)
     fingerprints: dict[str, str] = {}
     fill_rates: dict[str, float] = {}
     for name in COLUMNS:
         array = arrays[name]
-        np.save(target / f"{name}.npy", array)
-        fingerprints[name] = hashlib.sha256(np.ascontiguousarray(array).tobytes()).hexdigest()
+        path = target / f"{name}.npy"
+        np.save(path, array)
+        fingerprints[name] = _file_sha256(path)
         if name.endswith("_id") or name.endswith("_code"):
             fill_rates[name] = round(float((array >= 0).mean()), 6)
         elif name == "upload_valid":
@@ -266,14 +297,26 @@ def build_feature_store(
     return schema
 
 
-def load_item_features(dataset_root: Path | None = None) -> dict[str, Any] | None:
-    """mmap 读取特征表；没有构建过时返回 None（特征是可选的）。"""
+def load_item_features(
+    dataset_root: Path | None = None, *, verify: bool = True
+) -> dict[str, Any] | None:
+    """mmap 读取特征表；没有构建过时返回 None（特征是可选的）。
+
+    默认按 `schema.json` 里的 sha256 校验每列（约 0.5 秒），防止旧特征配新词表。
+    """
     dataset_root = dataset_root or dataset_dir(DEFAULT_DATA_DIR)
     base = features_dir(dataset_root)
     schema_path = base / "schema.json"
     if not schema_path.exists():
         return None
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    if verify:
+        problems = verify_feature_store(dataset_root, schema)
+        if problems:
+            raise ValueError(
+                f"特征表校验失败（{len(problems)} 项，前 3 项：{problems[:3]}）；"
+                "重新运行 python -m recsys.data.kuasar_features --force。"
+            )
     arrays = {name: np.load(base / f"{name}.npy", mmap_mode="r") for name in COLUMNS}
     return {"schema": schema, "arrays": arrays}
 
@@ -282,13 +325,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--max-rows", type=int, default=None, help="抽样行数（调试用）")
+    parser.add_argument("--force", action="store_true", help="忽略已有缓存，强制重建")
+    parser.add_argument("--check", action="store_true", help="只校验缓存指纹，不重建")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    schema = build_feature_store(args.data_dir, max_rows=args.max_rows)
-    print(json.dumps({k: schema[k] for k in ("num_items", "matched_items", "is_ad_items", "cardinality", "elapsed_s")}, indent=2, ensure_ascii=False))
+    if args.check:
+        dataset_root = dataset_dir(args.data_dir)
+        schema_path = features_dir(dataset_root) / "schema.json"
+        if not schema_path.exists():
+            print("[error] 特征表不存在")
+            return 2
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        problems = verify_feature_store(dataset_root, schema)
+        if problems:
+            print(f"[fail] {len(problems)} 项不一致：{problems[:5]}")
+            return 1
+        print(f"[ok] 特征表有效：{len(schema['columns'])} 列")
+        return 0
+
+    schema = build_feature_store(args.data_dir, max_rows=args.max_rows, force=args.force)
+    print(
+        json.dumps(
+            {k: schema[k] for k in ("num_items", "matched_items", "is_ad_items", "cardinality", "elapsed_s")},
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 

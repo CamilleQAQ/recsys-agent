@@ -248,8 +248,16 @@ def _exposure_csr(
     return {"indptr": indptr, "items": kept_items.astype(np.int32)}
 
 
-def _sha256(array: np.ndarray) -> str:
-    return hashlib.sha256(np.ascontiguousarray(array).tobytes()).hexdigest()
+def _file_sha256(path: Path) -> str:
+    """文件级 sha256（分块读，不把 55 MB 数组整体载入内存）。
+
+    用文件哈希而不是数组字节哈希：校验时不必反序列化，1 秒内能检查完 250 MB。
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _save(
@@ -264,30 +272,81 @@ def _save(
     for directory in (ids_dir, split_dir, exposure_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    np.save(ids_dir / "user_ids.npy", mapped["user_ids"])
-    np.save(ids_dir / "item_ids.npy", mapped["item_ids"])
+    def save(array: np.ndarray, path: Path, key: str, fingerprints: dict[str, str]) -> None:
+        np.save(path, array)
+        fingerprints[key] = _file_sha256(path)
+
+    fingerprints: dict[str, str] = {}
+    save(mapped["user_ids"], ids_dir / "user_ids.npy", "ids/user_ids", fingerprints)
+    save(mapped["item_ids"], ids_dir / "item_ids.npy", "ids/item_ids", fingerprints)
 
     split = split_data["split"]
-    outputs: dict[str, Any] = {"arrays": {}}
     for name, code in (("train", 0), ("validation", 1), ("test", 2)):
         mask = split == code
-        np.save(split_dir / f"{name}_users.npy", split_data["users"][mask])
-        np.save(split_dir / f"{name}_items.npy", split_data["items"][mask])
-        np.save(split_dir / f"{name}_timestamps.npy", split_data["timestamps"][mask])
-        outputs["arrays"][f"split/{name}_items"] = _sha256(split_data["items"][mask])
+        save(split_data["users"][mask], split_dir / f"{name}_users.npy", f"split/{name}_users", fingerprints)
+        save(split_data["items"][mask], split_dir / f"{name}_items.npy", f"split/{name}_items", fingerprints)
+        save(
+            split_data["timestamps"][mask],
+            split_dir / f"{name}_timestamps.npy",
+            f"split/{name}_timestamps",
+            fingerprints,
+        )
 
     for name, csr in exposure.items():
-        np.save(exposure_dir / f"{name}_indptr.npy", csr["indptr"])
-        np.save(exposure_dir / f"{name}_items.npy", csr["items"])
-        outputs["arrays"][f"exposure/{name}_items"] = _sha256(csr["items"])
-    return outputs
+        save(csr["indptr"], exposure_dir / f"{name}_indptr.npy", f"exposure/{name}_indptr", fingerprints)
+        save(csr["items"], exposure_dir / f"{name}_items.npy", f"exposure/{name}_items", fingerprints)
+
+    return {"arrays": fingerprints, "data_version": _data_version(fingerprints)}
+
+
+def _data_version(fingerprints: dict[str, str]) -> str:
+    """把「所有文件哈希 + 排序后的键名」压成一个短版本号，便于人工对比。"""
+    digest = hashlib.sha256()
+    for key in sorted(fingerprints):
+        digest.update(f"{key}={fingerprints[key]}\n".encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def verify_store(processed: Path, fingerprints: dict[str, str]) -> list[str]:
+    """逐个文件核对 sha256；返回不一致清单（空表示缓存有效）。"""
+    problems: list[str] = []
+    for key in sorted(fingerprints):
+        path = processed / f"{key}.npy"
+        if not path.exists():
+            problems.append(f"缺少文件 {key}.npy")
+            continue
+        actual = _file_sha256(path)
+        if actual != fingerprints[key]:
+            problems.append(f"{key}.npy 哈希不一致")
+    return problems
 
 
 def build_processed_store(
-    data_dir: Path = DEFAULT_DATA_DIR, *, max_rows: int | None = None
+    data_dir: Path = DEFAULT_DATA_DIR,
+    *,
+    max_rows: int | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
-    """`data_dir` 是仓库根下的 `data/`（里面是 `kuasar/`）。"""
+    """`data_dir` 是仓库根下的 `data/`（里面是 `kuasar/`）。
+
+    已存在且指纹校验通过时直接复用（除非 `force=True`）；不一致则重建并给出提示。
+    """
     dataset_root = dataset_dir(data_dir)
+    target = processed_dir(dataset_root)
+    if target.exists() and not force:
+        existing = _read_protocol(target)
+        if existing is not None:
+            problems = verify_store(target, _fingerprints_of(existing))
+            if not problems:
+                print(f"[reuse] {target} 指纹校验通过（data_version={existing.get('data_version')}）")
+                return {
+                    "stats": existing.get("stats", {}),
+                    "protocol": existing,
+                    "output_dir": target,
+                    "reused": True,
+                }
+            print(f"[stale] {target} 校验失败，重建：{problems[:3]}", flush=True)
+
     source = _rec_inter_path(dataset_root)
     if not source.exists():
         raise FileNotFoundError(
@@ -322,7 +381,6 @@ def build_processed_store(
     }
 
     print("[5/5] 保存 npy 与元信息 …", flush=True)
-    target = processed_dir(dataset_root)
     fingerprints = _save(target, mapped, positives, exposure)
 
     split_counts = {
@@ -360,28 +418,56 @@ def build_processed_store(
         "ad_items": "kept",
         "stats": stats,
         "fingerprints": fingerprints,
+        "data_version": fingerprints["data_version"],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     (target / "stats.json").write_text(json.dumps(stats, indent=2, ensure_ascii=False), encoding="utf-8")
     (target / "protocol.json").write_text(json.dumps(protocol, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"[ok] 写入 {target}", flush=True)
-    return {"stats": stats, "protocol": protocol, "output_dir": target}
+    print(f"[ok] 写入 {target}（data_version={protocol['data_version']}）", flush=True)
+    return {"stats": stats, "protocol": protocol, "output_dir": target, "reused": False}
 
 
-def load_processed(dataset_root: Path | None = None, mmap: bool = True) -> dict[str, Any]:
+def _read_protocol(base: Path) -> dict[str, Any] | None:
+    path = base / "protocol.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _fingerprints_of(protocol: dict[str, Any]) -> dict[str, str]:
+    """兼容两种格式：新格式 `fingerprints.arrays`，旧格式直接是 dict。"""
+    payload = protocol.get("fingerprints") or {}
+    return payload.get("arrays", payload) if isinstance(payload, dict) else {}
+
+
+def load_processed(
+    dataset_root: Path | None = None, mmap: bool = True, *, verify: bool = True
+) -> dict[str, Any]:
     """读取 processed 存储；默认 mmap，常驻内存接近 0。
 
-    `dataset_root` 是 `data/kuasar`；不传时用 `data/kuasar` 的默认位置。
+    默认会按 `protocol.json` 里的 sha256 校验每个 npy（约 1–2 秒），
+    防止「代码改了、缓存还是旧的」这类静默错误；`verify=False` 可跳过。
     """
     dataset_root = dataset_root or dataset_dir(DEFAULT_DATA_DIR)
     base = processed_dir(dataset_root)
-    if not (base / "protocol.json").exists():
+    protocol = _read_protocol(base)
+    if protocol is None:
         raise FileNotFoundError(
             f"{base} 还没有构建；先运行 python -m recsys.data.kuasar_store。"
         )
+    if verify:
+        problems = verify_store(base, _fingerprints_of(protocol))
+        if problems:
+            raise ValueError(
+                f"processed 缓存校验失败（{len(problems)} 项，前 3 项：{problems[:3]}）；"
+                "重新运行 python -m recsys.data.kuasar_store --force。"
+            )
     mode = "r" if mmap else None
     return {
-        "protocol": json.loads((base / "protocol.json").read_text(encoding="utf-8")),
+        "protocol": protocol,
         "stats": json.loads((base / "stats.json").read_text(encoding="utf-8")),
         "user_ids": np.load(base / "ids" / "user_ids.npy", mmap_mode=mode),
         "item_ids": np.load(base / "ids" / "item_ids.npy", mmap_mode=mode),
@@ -485,12 +571,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--max-rows", type=int, default=None, help="抽样行数（调试用）")
+    parser.add_argument("--force", action="store_true", help="忽略已有缓存，强制重建")
+    parser.add_argument("--check", action="store_true", help="只校验缓存指纹，不重建")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    result = build_processed_store(args.data_dir, max_rows=args.max_rows)
+    if args.check:
+        base = processed_dir(dataset_dir(args.data_dir))
+        protocol = _read_protocol(base)
+        if protocol is None:
+            print(f"[error] {base} 不存在或缺少 protocol.json")
+            return 2
+        problems = verify_store(base, _fingerprints_of(protocol))
+        if problems:
+            print(f"[fail] {len(problems)} 项不一致：{problems[:5]}")
+            return 1
+        print(f"[ok] 缓存有效，data_version={protocol.get('data_version')}")
+        return 0
+
+    result = build_processed_store(args.data_dir, max_rows=args.max_rows, force=args.force)
     print(json.dumps(result["stats"], indent=2, ensure_ascii=False))
     return 0
 

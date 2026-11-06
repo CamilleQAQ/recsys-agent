@@ -163,4 +163,15 @@ ItemFeatures(arrays: Mapping[str, np.ndarray], schema: Mapping[str, object])
 KuaiSAR 的 12 列（类目 2×2、作者 id/频次、item_type、upload_type、上传日期、caption token 数、`is_ad`）
 由 `python -m recsys.data.kuasar_features` 生成，详见 [kuasar.md §4.7](kuasar.md)。
 
+## 9. 数据版本与缓存
+
+`processed/` 与特征表都是**可重建的派生数据**，因此必须能判断「这份缓存对应哪次构建」：
+
+- 每个 npy 记录 sha256（`protocol.json` / `features/schema.json`），并汇总成 `data_version`；
+- `load_processed()` / `load_item_features()` 默认校验（1–2 秒），不一致直接抛错，
+  提示重跑 `--force`——宁可失败，也不要拿旧词表评新数据；
+- 构建命令默认复用已通过校验的缓存（打印 `[reuse]`），`--force` 强制重建，`--check` 只校验不构建；
+- checkpoint 的 `provenance` 另外记录**内容指纹**（切分行数 + 每切分哈希、ID 映射哈希、特征表指纹），
+  即使缓存被重建，也能看出两次实验用的是不是同一份数据。
+
 
