@@ -186,6 +186,26 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ---
 
+### 2.11 Phase 1.3 实施：processed npy 存储（2026-11-06）
+
+内存清理后（可用 1.4 GB → 5.6 GB）按数组化方案落地 `src/recsys/data/kuasar_store.py`：
+
+- [x] 流式解析 14,605,716 行 → 数组（int32/int64/int8），不构造 `Interaction` 对象
+- [x] 正样本按 `(user, item)` 去重保留首次点击：7,244,890 → **7,237,037**
+- [x] **切分单位从「点击」改为「请求」**：`timestamp` 是按请求记录的，旧规则只有 3,752 用户可评测；
+      改为 `(user_id, timestamp)` 请求级切分后 **24,128 / 25,877（93.2%）** 用户可评测
+- [x] 用户级时间边界校验：24,128 个用户 `train_max < val_min`、`val_max < test_min` 均为 **100%**；
+      验证/测试目标物品在训练历史中的比例 **0.00%**
+- [x] 曝光历史按用户 CSR（验证 14,311,397 对 / 测试 14,443,563 对，含 click=0）
+- [x] 产出 `data/kuasar/processed/`：**253 MB / 17 个 npy**（`ids/`、`split/`、`exposure/` + `stats.json` + `protocol.json`）
+- [x] 全量烘焙 **35.8 秒**，峰值内存约 1.5 GB（可用内存 5.3 GB，无压力）
+- [x] `load_processed()` 用 mmap 读取，常驻内存接近 0
+
+**结论**：数据层从「放不下」变成「253 MB 落盘 + 零常驻」，1.3 的存储部分完成。
+剩余：把 npy 视图接进 `PreparedData`/loader（1.4），并让 checkpoint 的 `split_strategy` 按数据集取值。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -196,14 +216,13 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
       验收：下载 + md5 + 解压 + 勘查一次跑通；重跑复用本地压缩包（`--survey-only` 可离线复查）
 - [x] **1.2 字段核对与数据画像**：全量扫描完成（`analyze_kuasar.py`），结论写入 `docs/kuasar.md`
       验收：画像脚本可复现（`artifacts/kuasar_profile.json`）；结论已用于 1.3 的标签与 Phase 2 的成本估算
-- [ ] **1.3 行为与正样本定义**：口径已定 —— 正样本 `click == 1`；**广告物品保留**、搜索侧**不纳入** Phase 1
-      （2026-11-06 决定，见 2.10）
-      剩余工作：`prepare_kuasar` —— **受数据表示与内存限制阻塞**（当前 `list[Interaction]` + 稠密 mask 放不下
-      14.6M 行 / 4M 物品 / 105 GB mask；机器可用内存仅约 1.4 GB），需先改数据结构
-      验收：同数据同阈值 → 同词表规模、同测试集大小；全流程可复现
-- [ ] **1.4 样本构建**：召回交互对 / 序列样本 / 排序候选+特征（第三类尚无实现）
-- [ ] **1.5 特征通道**：`FeatureStore` 或 `PreparedData.item_features`，特征版本写入 `provenance.extra`
-- [ ] **1.6 数据版本与缓存**：`processed/` 可读 + `protocol.json` 校验（当前只写不读）
+- [x] **1.3 口径与 processed 存储**：正样本 `click == 1` + 按对去重；广告物品保留；搜索侧不纳入；
+      请求级切分产出 npy/CSR（253 MB，24,128 可评测用户，见 2.11）
+- [ ] **1.4 样本构建与 `PreparedData` 数组后端**：把 `processed/` 视图接进 `loader`，让训练/评测入口能读 KuaiSAR；
+      召回交互对 / 序列样本 / 排序候选+特征（第三类尚无实现）
+      另需：`split_strategy` 按数据集取值（KuaiSAR 是 `per_user_last_two_requests`）
+- [ ] **1.5 特征通道**：`FeatureStore` 或 `PreparedData.item_features`（含 `is_ad`），特征版本写入 `provenance.extra`
+- [ ] **1.6 数据版本与缓存**：`load_processed` 校验 `protocol.json` 指纹，防止读到旧缓存
 
 ### 3.2 Phase 2：Two-Tower + FAISS 在 KuaiSAR 上跑通
 
@@ -309,6 +328,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | **Phase 1.2** | 全量画像：新增 `analyze_kuasar.py`（流式，3.5 GB）；14.6M 行 / 25.9k 用户 / 4.05M 物品、61.4% 物品只出现 1 次、交互物品特征覆盖 99.9999%、含数据质量清单；更新 `kuasar.toml` 与台账 | `src/recsys/experiments/analyze_kuasar.py`、`docs/kuasar.md`、`configs/datasets/kuasar.toml` |
 | 2026-11-06 | **Phase 0 收尾** | 移除 MovieLens 数据线（不在 PROJECT_MASTER §2 内）：删模块/配置/数据/checkpoint，`MovieLensDataset` → `InteractionDataset`，三个训练入口与评测脚本改为数据集无关；`SUPPORTED_DATASETS` 仅剩 kuairec | `src/recsys/data/`、`src/recsys/evaluation/`、`src/recsys/experiments/`、`scripts/check_project.py` |
 | 2026-11-06 | **Phase 1.3（口径）** | 定稿：正样本 `click==1` 且按对去重、广告物品保留、搜索侧不纳入 Phase 1；同时发现 1.3 编码被数据表示阻塞（稠密 mask 105 GB、list 表示约 1 GB、机器仅剩 1.4 GB 内存） | `configs/datasets/kuasar.toml`、`docs/kuasar.md`、本文件 |
+| 2026-11-06 | **Phase 1.3（存储）** | 新增 `kuasar_store.py`：14.6M 行 → npy + 按用户 CSR 曝光（253 MB / 17 文件，35.8 秒）；切分单位改为**请求级**，可评测用户 3,752 → **24,128（93.2%）**；时间边界与目标泄漏校验均通过 | `src/recsys/data/kuasar_store.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

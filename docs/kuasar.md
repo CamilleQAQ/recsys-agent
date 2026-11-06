@@ -151,28 +151,76 @@ keyword, item_id, click_cnt, item_type, time
 | 广告类物品 `item_type == AD` | 63,634 个物品 | **保留**（2026-11-06 决定），过滤能力等 1.5 特征通道 |
 | `(user,item)` 重复 | 0.2111% | 正样本按对去重保留首次点击；曝光保留全部行 |
 
+## 4.6 切分与 processed 存储（Phase 1.3）
+
+### 为什么按「请求」切分，而不是按单条点击
+
+KuaiSAR 的 `timestamp` 是**按请求记录**的：同一次推荐请求里点开的多个视频共享同一个毫秒时间戳。
+按「最后三次点击严格递增」的旧规则，实测 **25,877 个用户里只有 3,752 个（14.5%）**能进评测
+（14,684 人最后两次点击同毫秒、7,710 人最后三次都在同一毫秒）。
+
+因此改为 **请求 = `(user_id, timestamp)`** 为单位切分：最后一个请求做测试、倒数第二个做验证。
+这样既恢复了评测覆盖，也避免「同一请求内的物品被拆到 train/test」造成的泄漏。
+
+### 全量切分结果（`data/kuasar/processed/`，253 MB / 17 个 npy）
+
+| 项 | 数值 |
+| --- | --- |
+| 正样本（去重后） | 7,237,037（原始 7,244,890，按 `(user,item)` 去重 7,853 条） |
+| 训练集 | 7,118,891 |
+| 验证集（倒数第二个请求） | 67,517 行 |
+| 测试集（最后一个请求） | 50,629 行 |
+| 可评测用户 | **24,128 / 25,877（93.2%）** |
+| 请求不足 3 个的用户 | 1,749 |
+| 每用户请求数中位 | 33 |
+| 曝光对（验证 / 测试） | 14,311,397 / 14,443,563 |
+| 介于验证与测试之间被丢弃的行 | 0 |
+
+**完整性校验**（脚本实跑）：
+
+- 24,128 个可评测用户中，`train_max < val_min` 与 `val_max < test_min` 的比例均为 **100%**；
+- 验证/测试目标物品**在训练历史中的比例均为 0.00%**（去重 + 请求切分共同保证无泄漏）。
+
+### 存储布局
+
+```
+data/kuasar/processed/          （gitignore，可由 --force 重建）
+├── ids/{user_ids,item_ids}.npy             index -> 原始 ID（可逆）
+├── split/{train,validation,test}_{users,items,timestamps}.npy
+├── exposure/{validation,test}_{indptr,items}.npy   按用户 CSR，含 click=0 的曝光
+├── stats.json
+└── protocol.json              口径、指纹（各数组 sha256）、生成时间
+```
+
+读取用 `recsys.data.kuasar_store.load_processed()`，默认 `mmap`，常驻内存接近 0。
+烘焙一次 36 秒（14.6M 行解析 + 去重 + 切分 + 落盘）。
+
 ## 5. 对设计的影响
 
 1. **正样本**：MVP 用 `click == 1`；`like/follow/forward` 作为多任务标签（Phase 8）。
    KuaiSAR 没有 `watch_ratio`，不要套 KuaiRec 阈值。
-2. **曝光 mask**：`rec_inter` 全部行（含 click=0）即曝光集合，按时间切分后构造 seen 历史，
-   与 PROJECT_MASTER §6.1 的召回评估口径一致。
-3. **切分**：推荐任务继续用 `per_user_last_two_strict_timestamp_v2`；
+2. **曝光 mask**：`rec_inter` 全部行（含 click=0）即曝光集合，已按用户存成 CSR，
+   评测时按目标时刻过滤，与 PROJECT_MASTER §6.1 的召回评估口径一致。
+3. **切分**：请求级 `per_user_last_two_requests`（不是 KuaiRec 的点击级规则）；
    **搜索侧不纳入 Phase 1**（2026-11-06 决定），`src_inter` 留到 Phase 5 搜推联合。
 4. **渠道字段** `search`：默认不按渠道过滤，但保留字段，便于后续「搜索来自的交互是否提升推荐」的实验。
 5. **特征**：`item_features` 6.95M 行、caption 是 token 列表，读取必须按列取、按需切分，不能整表进内存。
 6. **规模（关键约束）**：物品词表 4M 级，当前的 `PreparedData` 表示方式放不下——
-   14.6M 条 `Interaction` 对象约 1 GB+，而**稠密 seen_mask = 25,877 × 4,046,367 bool ≈ 105 GB**，
-   完全不可行。1.3 的实现必须改成「npy 数组 + 按用户稀疏曝光历史」，见 6 节。
-7. **当前机器内存**：15.7 GB 总量、运行开发时可用仅约 1.4 GB（负载 91%）。
-   全量 `prepare` 与后续训练都要求先释放内存或换更大内存的机器。
+   7.24M 条 `Interaction` 对象约 1.2 GB，而**稠密 seen_mask = 25,877 × 4,046,367 bool ≈ 97.5 GiB**，
+   完全不可行。因此 1.3 落的是「npy 数组 + 按用户稀疏曝光」的 processed 存储（见 4.6），
+   `PreparedData` 的数组后端在 1.4 接。
+7. **内存**：15.7 GB 总量；清理后台后可用 5.3–5.6 GB。全量烘焙一次约 36 秒，峰值约 1.5 GB；
+   后续训练仍建议先确认可用内存 ≥ 6 GB。
 
 ## 6. 尚未完成（Phase 1.3 / 1.4 / 1.5 / 1.6）
 
 - [x] 口径决定：正样本 `click == 1`；广告物品保留；搜索侧不纳入 Phase 1（2026-11-06）
-- [ ] `prepare_kuasar`：需要**先改数据表示**（npy 数组 + 稀疏曝光历史），不能用当前的 `list[Interaction]` + 稠密 mask
-- [ ] ID 映射以 npy 保存（4M 物品的 dict 映射约 400–600 MB，不能常驻）
-- [ ] 接入 `loader.SUPPORTED_DATASETS` 并产出可复现的 `protocol.json`（数据指纹 + 切分参数）
+- [x] **processed 存储**：`kuasar_store.py` 产出 npy + CSR 曝光 + `protocol.json`（253 MB，24,128 可评测用户）
+- [ ] `PreparedData` 数组后端：把 npy 视图接进 `loader`，让现有训练/评测入口能读 KuaiSAR
+- [ ] 切分策略参数化：checkpoint 的 `split_strategy` 目前只有 KuaiRec 的点击级常量，
+      KuaiSAR 需要按数据集写 `per_user_last_two_requests`
 - [ ] 序列样本与候选+特征样本
 - [ ] 特征通道（类目/作者/活跃度、`is_ad`）
+- [ ] 数据版本校验：`load_processed` 比对 `protocol.json` 指纹，防止用了旧缓存
+
 

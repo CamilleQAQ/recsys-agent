@@ -64,5 +64,10 @@ ad_items = "kept"          # item_type == AD 的 63,634 个物品保留，贴近
 dedupe_positives = "by_user_item_keep_first"  # 正样本按 (user,item) 去重保留首次点击；重复播放不算新正样本
 
 [split]
-strategy = "per_user_last_two_strict_timestamp_v2"
-note = "推荐任务按用户切分；搜索任务若要评估需按 search_session_id 切分（Phase 1.3 决定）"
+# 按「请求」切分：timestamp 是按请求记录的，同一请求里多个点击共享毫秒时间戳。
+# 按单条点击切只有 14.5% 用户可评测；按请求切恢复到 93.2%，且不会把同一请求的物品拆到两边。
+strategy = "per_user_last_two_requests"
+unit = "request=(user_id, timestamp)"
+holdout = "最后两个请求 = test / validation；早于验证请求的正样本 = train"
+note = "介于验证与测试请求之间的正样本丢弃（实测 0 行）；用户请求数 < 3 不参与评测"
+
