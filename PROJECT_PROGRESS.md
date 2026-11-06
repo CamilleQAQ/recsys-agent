@@ -231,6 +231,22 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ---
 
+### 2.13 Phase 1.5：物品特征通道（2026-11-06）
+
+- [x] `src/recsys/data/kuasar_features.py`：流式读 `item_features.csv`（6,949,990 行），
+      只保留交互词表内的 **4,046,363 / 4,046,367（99.9999%）** 物品，按 item_idx 对齐
+- [x] 产出 12 列 npy（139 MB）：类目 id/编码（一级 37 类、二级 293 类）、作者 id 与频次、
+      item_type（3 类）、upload_type（30 种）、上传日期与有效性、caption token 数、`is_ad`
+- [x] `ItemFeatures` 接入 `PreparedData.item_features`；`prepare_kuasar` 校验长度一致，
+      特征指纹写入 `provenance.item_features`
+- [x] 广告标记：交互词表内 **10,265** 个 AD 物品（全表 63,634 个），默认不过滤
+- [x] 对齐抽查：随机 CSV 行 ↔ 特征数组逐列比对，5/5 一致
+- [x] 构建耗时 **45.6 秒**，填充率：类目/作者/类型 100%、上传日期 99.73%（1970 哨兵）
+
+**下一步**：排序候选+特征样本（用 `is_ad` + 类目/作者构造候选特征），然后 Phase 2 的资源规划。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -246,7 +262,8 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 - [x] **1.4 样本构建与 `PreparedData` 数组后端**：数组后端（`ArrayInteractions` / `SparseExposure` /
       `SortedIndexLookup`）接入 `loader`；`split_strategy` 按数据集取值；交互对与序列样本可直接构造
       剩余：排序候选+特征样本（依赖 1.5）
-- [ ] **1.5 特征通道**：`FeatureStore` 或 `PreparedData.item_features`（含 `is_ad`），特征版本写入 `provenance.extra`
+- [x] **1.5 特征通道**：`ItemFeatures` 接入 `PreparedData`；12 列物品特征（类目/作者/上传类型/日期/
+      caption token/`is_ad`），139 MB，指纹进 provenance；排序候选样本依赖它，下一步做
 - [ ] **1.6 数据版本与缓存**：`load_processed` 校验 `protocol.json` 指纹，防止读到旧缓存
 
 ### 3.2 Phase 2：Two-Tower + FAISS 在 KuaiSAR 上跑通
@@ -355,6 +372,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | **Phase 1.3（口径）** | 定稿：正样本 `click==1` 且按对去重、广告物品保留、搜索侧不纳入 Phase 1；同时发现 1.3 编码被数据表示阻塞（稠密 mask 105 GB、list 表示约 1 GB、机器仅剩 1.4 GB 内存） | `configs/datasets/kuasar.toml`、`docs/kuasar.md`、本文件 |
 | 2026-11-06 | **Phase 1.3（存储）** | 新增 `kuasar_store.py`：14.6M 行 → npy + 按用户 CSR 曝光（253 MB / 17 文件，35.8 秒）；切分单位改为**请求级**，可评测用户 3,752 → **24,128（93.2%）**；时间边界与目标泄漏校验均通过 | `src/recsys/data/kuasar_store.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 | 2026-11-06 | **Phase 1.4** | `PreparedData` 数组后端（ArrayInteractions / SparseExposure / SortedIndexLookup）、`prepare_dataset("kuasar")` 打通、`split_strategy` 按数据集、稠密真值表护栏、去掉隐式 `list()` 复制；默认数据集改为 kuasar | `src/recsys/data/{schema,loader,dataset}.py`、`src/recsys/data/kuasar_store.py`、`src/recsys/training/*`、`src/recsys/evaluation/*` |
+| 2026-11-06 | **Phase 1.5** | 物品特征通道：`kuasar_features.py` 把 695 万行宽表压成 12 列 npy（139 MB，覆盖 99.9999% 交互物品）；`ItemFeatures` 接入 `PreparedData`，指纹进 provenance；`is_ad` 覆盖交互词表内 10,265 个广告物品 | `src/recsys/data/kuasar_features.py`、`src/recsys/data/schema.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

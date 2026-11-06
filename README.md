@@ -60,9 +60,10 @@ python -m venv .venv
 pip install -e .
 pip install -r requirements/optional-faiss.txt
 
-# 2. 数据主线：下载 KuaiSAR → 构建 processed 存储
+# 2. 数据主线：下载 KuaiSAR → 构建 processed 存储 → 物品特征表
 python -m recsys.data.kuasar          # 805.9 MB，带 md5 校验，解压 3.5 GB
-python -m recsys.data.kuasar_store    # 约 36 秒，产出 data/kuasar/processed（253 MB，24,128 可评测用户）
+python -m recsys.data.kuasar_store    # 约 36 秒，产出 processed（253 MB，24,128 可评测用户）
+python -m recsys.data.kuasar_features # 约 46 秒，12 列物品特征（139 MB，含 is_ad）
 #   流程模板（辅助线）：python -m recsys.data.prepare --dataset kuairec
 
 # 3. 训练（默认数据集已是 kuasar；4M 物品词表在 CPU/16GB 机器上很吃资源，

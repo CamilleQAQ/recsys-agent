@@ -59,9 +59,26 @@ note = "全量：click 49.60% / like 3.15% / follow 0.45% / forward 0.31%；纯�
 [scope]
 # 2026-11-06 决定
 search_side = "excluded"   # src_inter / 搜索任务不纳入 Phase 1，留到 Phase 5（搜推联合）
-ad_items = "kept"          # item_type == AD 的 63,634 个物品保留，贴近线上曝光分布；
-                           # 过滤能力等 1.5 特征通道（is_ad 列）到位后再提供，不作为隐式过滤
+ad_items = "kept"          # 广告物品保留（交互词表内 10,265 个），贴近线上曝光分布；
+                           # 过滤能力已由 [features].ad_flag 提供，但默认不过滤
 dedupe_positives = "by_user_item_keep_first"  # 正样本按 (user,item) 去重保留首次点击；重复播放不算新正样本
+
+[features]
+# 由 python -m recsys.data.kuasar_features 生成（12 列 npy，139 MB，46 秒）
+source = "data/kuasar/processed/features"
+schema = "data/kuasar/processed/features/schema.json"
+columns = [
+  "category_first_id", "category_first_code",
+  "category_second_id", "category_second_code",
+  "author_id", "author_freq",
+  "item_type_code", "upload_type_code",
+  "upload_days", "upload_valid",
+  "caption_tokens", "is_ad",
+]
+cardinality = { category_first = 37, category_second = 293, item_type = 3, upload_type = 30 }
+ad_flag = "is_ad"                     # 1 = 广告物品；默认不用于过滤
+missing_policy = "类目/作者填 -1；upload_days 无效填 -1 且 upload_valid=0；计数列填 0"
+
 
 [split]
 # 按「请求」切分：timestamp 是按请求记录的，同一请求里多个点击共享毫秒时间戳。

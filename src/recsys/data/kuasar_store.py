@@ -40,6 +40,7 @@ from recsys.data.kuasar import KUASAR_ARCHIVE_MD5, KUASAR_DATASET_DIRNAME
 from recsys.data.schema import (
     ArrayInteractions,
     IdMappings,
+    ItemFeatures,
     PreparedData,
     SparseExposure,
     SortedIndexLookup,
@@ -402,6 +403,22 @@ def load_processed(dataset_root: Path | None = None, mmap: bool = True) -> dict[
     }
 
 
+def _load_item_features(dataset_root: Path, num_items: int) -> ItemFeatures | None:
+    """特征表是可选的：没构建就返回 None，构建过但长度对不上则直接报错。"""
+    from recsys.data.kuasar_features import load_item_features
+
+    payload = load_item_features(dataset_root)
+    if payload is None:
+        return None
+    features = ItemFeatures(arrays=payload["arrays"], schema=payload["schema"])
+    if features.num_items != num_items:
+        raise ValueError(
+            f"特征表长度 {features.num_items:,} 与物品词表 {num_items:,} 不一致；"
+            "请重新运行 python -m recsys.data.kuasar_features。"
+        )
+    return features
+
+
 def prepare_kuasar(dataset_root: Path | None = None) -> PreparedData:
     """把 processed 存储包装成统一的 `PreparedData`（数组后端 + 稀疏曝光）。
 
@@ -428,6 +445,8 @@ def prepare_kuasar(dataset_root: Path | None = None) -> PreparedData:
         payload = split_data[name]
         return ArrayInteractions(payload["users"], payload["items"], payload["timestamps"])
 
+    item_features = _load_item_features(dataset_root, num_items=mappings.index_to_item.size)
+
     prepared = PreparedData(
         train_interactions=interactions("train"),
         validation_interactions=interactions("validation"),
@@ -439,6 +458,7 @@ def prepare_kuasar(dataset_root: Path | None = None) -> PreparedData:
         test_seen=SparseExposure(
             store["exposure"]["test"]["indptr"], store["exposure"]["test"]["items"]
         ),
+        item_features=item_features,
         split_strategy=str(store["protocol"].get("split_strategy", "per_user_last_two_requests")),
     )
 

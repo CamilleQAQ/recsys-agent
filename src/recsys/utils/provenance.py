@@ -141,6 +141,21 @@ def environment_info() -> dict[str, str]:
     return info
 
 
+def item_feature_summary(data: PreparedData) -> dict[str, Any] | None:
+    """物品特征表的指纹与关键统计；没有特征通道时返回 None。"""
+    features = getattr(data, "item_features", None)
+    if features is None:
+        return None
+    schema = features.schema or {}
+    return {
+        "columns": list(features.names),
+        "num_items": features.num_items,
+        "fingerprint": features.fingerprint(),
+        "cardinality": schema.get("cardinality"),
+        "is_ad_items": schema.get("is_ad_items"),
+    }
+
+
 def build_provenance(
     data: PreparedData,
     *,
@@ -149,7 +164,7 @@ def build_provenance(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """组装挂到 checkpoint['provenance'] 的字典。"""
-    return {
+    provenance = {
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset": dataset,
         "positive_threshold": positive_threshold,
@@ -160,6 +175,10 @@ def build_provenance(
         "environment": environment_info(),
         "extra": extra or {},
     }
+    features = item_feature_summary(data)
+    if features is not None:
+        provenance["item_features"] = features
+    return provenance
 
 
 def describe_provenance(provenance: dict[str, Any]) -> str:

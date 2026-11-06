@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -150,6 +151,40 @@ class IdMappings:
 
 
 @dataclass(frozen=True)
+class ItemFeatures:
+    """按 item_idx 对齐的物品特征表（列名 → 数组）。
+
+    列可以是原始 id、连续编码、计数或布尔标记，具体语义写在 `schema["columns"]`
+    （由 `kuasar_features.py` 生成）。数组长度必须等于物品词表大小。
+    """
+
+    arrays: Mapping[str, np.ndarray]
+    schema: Mapping[str, object]
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(self.arrays)
+
+    @property
+    def num_items(self) -> int:
+        return int(next(iter(self.arrays.values())).size) if self.arrays else 0
+
+    def column(self, name: str) -> np.ndarray:
+        try:
+            return self.arrays[name]
+        except KeyError as error:
+            raise KeyError(f"未知物品特征列 {name!r}；可选：{', '.join(self.arrays)}") from error
+
+    def fingerprint(self) -> str:
+        """特征表指纹（取 schema 里记录的每列 sha256，按列名排序拼接）。"""
+        fingerprints = (self.schema or {}).get("fingerprints") or {}
+        digest = hashlib.sha256()
+        for name in sorted(fingerprints):
+            digest.update(f"{name}={fingerprints[name]}\n".encode("utf-8"))
+        return digest.hexdigest()
+
+
+@dataclass(frozen=True)
 class PreparedData:
     """The common data object consumed by every recommendation model."""
 
@@ -164,6 +199,8 @@ class PreparedData:
     # 稀疏曝光历史（KuaiSAR）：与 mask 二选一，优先使用。
     validation_seen: SparseExposure | None = None
     test_seen: SparseExposure | None = None
+    # 物品特征通道（Phase 1.5）；没有特征表时为 None。
+    item_features: ItemFeatures | None = None
     # 数据集自己的切分协议；写进 checkpoint，评测时据此校验。
     split_strategy: str = SPLIT_STRATEGY
 

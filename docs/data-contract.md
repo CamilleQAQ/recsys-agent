@@ -143,3 +143,24 @@ data = prepare_dataset("kuairec", Path("data"))
 指标下游一律走 `recsys.adapters.evaluate` 或 `recsys.evaluation.*`，
 `PreparedData` 的两种后端（list / 数组）对它们透明。
 
+## 8. 物品特征通道（`PreparedData.item_features`）
+
+```python
+from recsys.data.schema import ItemFeatures
+
+ItemFeatures(arrays: Mapping[str, np.ndarray], schema: Mapping[str, object])
+    .names / .num_items / .column(name) / .fingerprint()
+```
+
+- **可选**：没有特征表时 `item_features=None`，召回模型照常工作；
+- **对齐**：每列长度等于物品词表（KuaiSAR 4,046,367），下标就是 `item_idx`；
+- **列语义**写在 `schema["columns"]`（原始 id / 连续编码 / 计数 / 布尔标记 / 数值 + 填充率），
+  基数写在 `schema["cardinality"]`，供 embedding 维表或特征编码使用；
+- **指纹**：`schema["fingerprints"]` 是每列内容的 sha256，`prepared_data.item_features.fingerprint()`
+  会把它汇总；训练时自动写进 `provenance.item_features`，换特征表在 checkpoint 里一眼可见；
+- **一致性**：`prepare_kuasar` 会校验特征表长度与词表一致，不一致直接报错（避免旧缓存配新词表）。
+
+KuaiSAR 的 12 列（类目 2×2、作者 id/频次、item_type、upload_type、上传日期、caption token 数、`is_ad`）
+由 `python -m recsys.data.kuasar_features` 生成，详见 [kuasar.md §4.7](kuasar.md)。
+
+

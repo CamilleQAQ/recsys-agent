@@ -184,16 +184,52 @@ KuaiSAR 的 `timestamp` 是**按请求记录**的：同一次推荐请求里点�
 ### 存储布局
 
 ```
-data/kuasar/processed/          （gitignore，可由 --force 重建）
+data/kuasar/processed/          （gitignore，可重建）
 ├── ids/{user_ids,item_ids}.npy             index -> 原始 ID（可逆）
 ├── split/{train,validation,test}_{users,items,timestamps}.npy
 ├── exposure/{validation,test}_{indptr,items}.npy   按用户 CSR，含 click=0 的曝光
+├── features/*.npy                          12 列物品特征（1.5）
+├── features/schema.json                    列语义、基数、填充率、每列 sha256
 ├── stats.json
 └── protocol.json              口径、指纹（各数组 sha256）、生成时间
 ```
 
 读取用 `recsys.data.kuasar_store.load_processed()`，默认 `mmap`，常驻内存接近 0。
-烘焙一次 36 秒（14.6M 行解析 + 去重 + 切分 + 落盘）。
+烘焙一次 36 秒（14.6M 行解析 + 去重 + 切分 + 落盘）；特征表另需 46 秒、139 MB。
+
+## 4.7 物品特征通道（Phase 1.5）
+
+`item_features.csv` 有 6,949,990 行，但只保留**交互词表内的 4,046,363 个物品**
+（与词表 4,046,367 差 4 个，覆盖率 99.9999%），按 item_idx 对齐存成 12 列 npy：
+
+| 列 | 类型 | 说明 | 填充率 |
+| --- | --- | --- | --- |
+| `category_first_id` / `_code` | int32 | 一级类目（37 类） | 100% |
+| `category_second_id` / `_code` | int32 | 二级类目（293 类） | 100% |
+| `author_id` | int32 | 作者原始 ID | 100% |
+| `author_freq` | int32 | 作者在词表内的作品数（中位 7） | 100% |
+| `item_type_code` | int8 | NORMAL / AD / UNKNOWN（交互物品里出现 3 类） | 100% |
+| `upload_type_code` | int8 | 上传来源（30 种） | 100% |
+| `upload_days` | int32 | 上传日期（1970 起天数） | 99.73% |
+| `upload_valid` | int8 | 日期是否有效（1970 哨兵 = 0） | 99.73% |
+| `caption_tokens` | int32 | caption 的 token 数（不含内容） | 100% |
+| `is_ad` | int8 | 广告物品标记：**10,265** 个（全表 63,634 个 AD 物品中进入交互词表的部分） | — |
+
+用法：
+
+```python
+from recsys.data.loader import prepare_dataset
+data = prepare_dataset("kuasar", Path("data"))
+feats = data.item_features            # ItemFeatures | None
+codes = feats.column("category_first_code")
+```
+
+要点：
+
+- 特征表是**可选**的：没构建时 `item_features=None`，训练/评测不受影响；
+- 长度必须与物品词表一致，否则 `prepare_kuasar` 直接报错（防止用旧缓存的特征配新词表）；
+- 指纹写进 checkpoint 的 `provenance.item_features`，换特征表会立刻可见；
+- 广告过滤能力已就位（`is_ad`），但**默认不过滤**（2026-11-06 决定，贴近线上曝光分布）。
 
 ## 5. 对设计的影响
 
@@ -220,11 +256,11 @@ data/kuasar/processed/          （gitignore，可由 --force 重建）
       `prepare_dataset("kuasar")` 已可用（`prepare_kuasar`）
 - [x] 切分策略按数据集参数化：`split_strategy_for()`，checkpoint 写 `prepared_data.split_strategy`
 - [x] 召回样本（交互对）与序列样本可在数组后端上构造（`InteractionDataset` / `SASRecTrainDataset`）
-- [ ] 排序候选 + 特征样本（依赖 1.5 特征通道）
+- [x] **物品特征通道**：12 列 npy（类目/作者/上传类型/日期/caption token/`is_ad`），139 MB，
+      `PreparedData.item_features` 已接通，指纹写进 provenance
+- [ ] 排序候选 + 特征样本（特征表已就位，候选集构造待做）
 - [ ] 全量训练的资源规划：4.05M 物品 × 64 维 embedding ≈ 1 GB，Adam 状态再 2 GB，
       16 GB/CPU 机器上先做小维度试跑（Phase 2 正式定）
-- [ ] 特征通道（类目/作者/活跃度、`is_ad`）
-
 - [ ] 数据版本校验：`load_processed` 比对 `protocol.json` 指纹，防止用了旧缓存
 
 
