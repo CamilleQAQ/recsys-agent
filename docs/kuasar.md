@@ -148,27 +148,31 @@ keyword, item_id, click_cnt, item_type, time
 | `duration_ms == 0` | 529,225 行 | 不算完成率 |
 | `playing_time > duration_ms` | 3,172,382 行 | 截断或标记 |
 | 搜索来源脏枚举 | 36 行 | 归入 `UNKNOWN` |
-| 广告类物品 `item_type == AD` | 63,634 个物品 | 是否排除由实验口径决定，需在 1.3 明确 |
-| `(user,item)` 重复 | 0.2111% | 保留（按次曝光），若按对聚合需显式记录策略 |
+| 广告类物品 `item_type == AD` | 63,634 个物品 | **保留**（2026-11-06 决定），过滤能力等 1.5 特征通道 |
+| `(user,item)` 重复 | 0.2111% | 正样本按对去重保留首次点击；曝光保留全部行 |
 
 ## 5. 对设计的影响
 
 1. **正样本**：MVP 用 `click == 1`；`like/follow/forward` 作为多任务标签（Phase 8）。
    KuaiSAR 没有 `watch_ratio`，不要套 KuaiRec 阈值。
-2. **曝光 mask**：`rec_inter` 全部行（含 click=0）即曝光集合，按时间切分后构造 `seen_mask`，
+2. **曝光 mask**：`rec_inter` 全部行（含 click=0）即曝光集合，按时间切分后构造 seen 历史，
    与 PROJECT_MASTER §6.1 的召回评估口径一致。
 3. **切分**：推荐任务继续用 `per_user_last_two_strict_timestamp_v2`；
-   搜索侧是会话结构，若要评估搜索任务需按 `search_session_id` 切分（Phase 1.3 决定，且不阻塞推荐主线）。
+   **搜索侧不纳入 Phase 1**（2026-11-06 决定），`src_inter` 留到 Phase 5 搜推联合。
 4. **渠道字段** `search`：默认不按渠道过滤，但保留字段，便于后续「搜索来自的交互是否提升推荐」的实验。
 5. **特征**：`item_features` 6.95M 行、caption 是 token 列表，读取必须按列取、按需切分，不能整表进内存。
-6. **规模**：物品词表 4M 级 → 训练侧的 in-batch 负采样没问题，评测侧必须规划分块/FAISS；
-   `PreparedData` 目前用 Python list 存交互，14.6M 行会很吃内存（Phase 1.6 要换数组化/缓存）。
+6. **规模（关键约束）**：物品词表 4M 级，当前的 `PreparedData` 表示方式放不下——
+   14.6M 条 `Interaction` 对象约 1 GB+，而**稠密 seen_mask = 25,877 × 4,046,367 bool ≈ 105 GB**，
+   完全不可行。1.3 的实现必须改成「npy 数组 + 按用户稀疏曝光历史」，见 6 节。
+7. **当前机器内存**：15.7 GB 总量、运行开发时可用仅约 1.4 GB（负载 91%）。
+   全量 `prepare` 与后续训练都要求先释放内存或换更大内存的机器。
 
 ## 6. 尚未完成（Phase 1.3 / 1.4 / 1.5 / 1.6）
 
-- [ ] 正样本与阈值定稿，写入 `recsys.config` 与 `configs/datasets/kuasar.toml`；
-- [ ] 切分单位决定（推荐按用户 / 搜索按会话），并检查泄漏；
-- [ ] ID 映射 + `PreparedData` 构造（`prepare_kuasar`），并接入 `loader.SUPPORTED_DATASETS`；
-- [ ] 序列样本与候选+特征样本；
-- [ ] 特征通道（类目/作者/活跃度）；
-- [ ] `processed/` 缓存与 `protocol.json`（14.6M 行不做缓存，每次评测重解析不可接受）。
+- [x] 口径决定：正样本 `click == 1`；广告物品保留；搜索侧不纳入 Phase 1（2026-11-06）
+- [ ] `prepare_kuasar`：需要**先改数据表示**（npy 数组 + 稀疏曝光历史），不能用当前的 `list[Interaction]` + 稠密 mask
+- [ ] ID 映射以 npy 保存（4M 物品的 dict 映射约 400–600 MB，不能常驻）
+- [ ] 接入 `loader.SUPPORTED_DATASETS` 并产出可复现的 `protocol.json`（数据指纹 + 切分参数）
+- [ ] 序列样本与候选+特征样本
+- [ ] 特征通道（类目/作者/活跃度、`is_ad`）
+
