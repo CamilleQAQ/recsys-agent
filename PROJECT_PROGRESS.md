@@ -9,7 +9,7 @@
 > 3. 待办用 `- [ ]`，完成的用 `- [x]` 就地勾选，不删除历史；
 > 4. 每轮结束更新「当前状态快照」与「变更历史」两节。
 
-**最后更新**：2026-11-05
+**最后更新**：2026-11-06
 
 ---
 
@@ -18,6 +18,7 @@
 | 项目 | 状态 |
 | --- | --- |
 | 所处阶段 | **Phase 0 完成**（仓库审计 + Model Zoo + 工程底座），准备进入 **Phase 1**（KuaiSAR 数据层） |
+| 版本控制 | git `main`，远端 [CamilleQAQ/recsys-agent](https://github.com/CamilleQAQ/recsys-agent)；首次提交 `0bef337`（2026-11-06） |
 | 数据主线 | KuaiSAR（主，待接入）；KuaiRec / MovieLens 为流程模板与辅助线 |
 | 第三方仓库 | 13 个（[third_party/SOURCES.toml](third_party/SOURCES.toml)，含 commit / 许可 / 可用性） |
 | 模型索引 | 24 个：12 召回 / 9 排序 / 3 基础设施（[models/zoo.toml](models/zoo.toml)） |
@@ -93,6 +94,14 @@
 - [x] 依赖分层：`requirements/`（主环境 / 可选 / 遗留 TF1 / MMRec）
 - 证据：运行 `python scripts/check_project.py` 应输出「0 个错误」
 
+### 2.6 Phase 0-F：版本控制（2026-11-06）
+
+- [x] `git init -b main`，首次提交 `0bef337`：6,941 个文件，压缩后 47.9 MB
+- [x] 推送到 private 仓库 <https://github.com/CamilleQAQ/recsys-agent>，`main` 已跟踪 `origin/main`
+- [x] `.gitattributes`：只声明二进制类型，不强制换行（避免整目录变成 modified）
+- [x] `data/` 与 `artifacts/` 未被提交，仅保留各自的 `README.md`
+- 注意：沙箱访问不到 Windows 证书存储，**每次 `git push` 需要一次完全权限授权**（本地 commit 不受影响）
+
 ---
 
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
@@ -147,20 +156,28 @@
   ③ 先用 Two-Tower 多向量变体做最小对照。
 - 需要决定：**选哪条**，以及是否接受「MIND 在 Windows 上永远跑不了」这一约束。
 
-### 4.2 版本控制
-
-- 事实：仓库目前**没有 `git init`**，「版本」靠 `SOURCES.toml` + provenance 的代码指纹表达。
-- 建议：Phase 1 开始前初始化 git 并做首次提交，否则后续改动无法回溯（`.gitignore` 已就绪）。
-
-### 4.3 KuaiSAR 许可
+### 4.2 KuaiSAR 许可
 
 - 事实：CC BY-NC-SA 4.0（非商业 + 相同方式共享）。
 - 需要确认：本项目用途是否落在非商业范围；衍生数据/模型是否对外发布。
 
-### 4.4 TorchRec 何时引入
+### 4.3 TorchRec 何时引入
 
 - 当前后置：Two-Tower 已有自研实现，TorchRec 主要解决大规模分片与分布式训练。
 - 触发条件：单机训练成为瓶颈（Phase 2 之后评估）。
+
+### 4.4 仓库公开与第三方许可
+
+- 现状：仓库为 **private**。`third_party/` 内含 GPL-3.0（MMRec）与根 LICENSE 缺失的 OpenOneRec，
+  私有仓库不属于对外分发，暂无额外义务。
+- 若要开源：先把第三方代码拆出去（按 `SOURCES.toml` 的 commit 用脚本重建或改用 submodule），
+  只保留自研代码、索引与审计材料；否则 GPL 传染性与 OpenOneRec 授权范围说不清。
+
+### 4.5 推送需要完全权限
+
+- 事实：沙箱禁止访问 Windows 证书存储，`git push` 会报 `SEC_E_NO_CREDENTIALS`。
+- 现状：每次推送需要一次「完全权限」授权（本地 commit 不受影响）。
+- 可选缓解：配置 PAT + `http.sslBackend=openssl`（会绕过 Windows 证书存储，但凭据仍需可读）。
 
 ---
 
@@ -203,6 +220,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | --- | --- | --- | --- |
 | 2026-11-04 | Phase 0 | 11 个仓库整理：扁平化、删 `.git`/示例语料/缓存；建 Model Zoo 索引与文档骨架 | `third_party/README.md`、`models/zoo.toml`、`docs/cleanup-report.md` |
 | 2026-11-05 | Phase 0 | 补 FuxiCTR/genrec 与 `SOURCES.toml`；接口扩到 `retrieve/encode_*` 与 `RankingAdapter`；checkpoint 加 `provenance`；指标补 Precision/Coverage/AUC/LogLoss；建档案与校验脚本；数据主线改为 KuaiSAR | `src/recsys/adapters/`、`src/recsys/utils/provenance.py`、`src/recsys/evaluation/metrics.py`、`PROJECT_PROGRESS.md` |
+| 2026-11-06 | Phase 0 | 接入版本控制：`git init -b main` + 首次提交 `0bef337`（6,941 文件 / 压缩后 47.9 MB）推到 `CamilleQAQ/recsys-agent`；新增 `.gitattributes` 固定二进制判定；`data/`、`artifacts/` 未入库 | `.gitattributes`、`.gitignore`、本文件 |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。
