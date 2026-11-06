@@ -155,20 +155,32 @@ def check_generated_docs() -> list[str]:
     return errors
 
 
-def check_leftovers() -> list[str]:
-    """不应再出现的缓存/版本库残留。"""
-    errors = []
+def check_leftovers() -> tuple[list[str], list[str]]:
+    """版本库与缓存残留。
+
+    - 项目根的 `.git` 是正常仓库，不算残留；只有子目录里的 `.git`（嵌套仓库）才是错误；
+    - `__pycache__` 等缓存已被 `.gitignore` 排除，本地开发出现属正常，只做提醒。
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    cache_names = {
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".ipynb_checkpoints",
+    }
     for path in PROJECT_ROOT.rglob("*"):
         if not path.is_dir():
             continue
         relative = path.relative_to(PROJECT_ROOT)
         if relative.parts and relative.parts[0] in {"data", "artifacts"}:
             continue
-        if path.name in {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".ipynb_checkpoints"}:
-            errors.append(f"残留缓存目录：{relative}")
-        elif path.name == ".git":
-            errors.append(f"残留 .git：{relative}")
-    return errors
+        if path.name in cache_names:
+            warnings.append(f"本地缓存目录（已 gitignore）：{relative}")
+        elif path.name == ".git" and path.parent != PROJECT_ROOT:
+            errors.append(f"嵌套 .git：{relative}")
+    return errors, warnings
 
 
 def check_repo_hygiene() -> tuple[list[str], list[str]]:
@@ -233,7 +245,9 @@ def main() -> int:
     errors += check_model_configs()
     errors += check_markdown_links()
     errors += check_generated_docs()
-    errors += check_leftovers()
+    leftover_errors, leftover_warnings = check_leftovers()
+    errors += leftover_errors
+    warnings += leftover_warnings
     hygiene_errors, hygiene_warnings = check_repo_hygiene()
     errors += hygiene_errors
     warnings += hygiene_warnings
