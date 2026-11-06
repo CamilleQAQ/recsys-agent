@@ -1,0 +1,50 @@
+# KuaiSAR 2.0（短视频搜索 + 推荐联合行为，主数据线）
+#
+# 状态：Phase 1.1 完成（下载 + md5 校验 + 解压 + 结构勘查）；
+#       Phase 1.2 进行中（字段已核对，全量画像未跑）。
+# 字段与统计结论见 docs/kuasar.md；勘查原始结果见 artifacts/kuasar_archive_survey.json。
+#
+# 来源与许可已核实（Zenodo 8181109），对应代码常量在 src/recsys/data/kuasar.py，
+# 由 scripts/check_project.py 校验两边一致。数据不入库：.gitignore 已忽略 data/kuasar/。
+
+[dataset]
+name = "kuasar"
+display_name = "KuaiSAR 2.0（完整版 v2）"
+domain = "短视频：搜索与推荐联合行为"
+source_url = "https://zenodo.org/records/8181109/files/KuaiSAR_v2.zip"
+archive_md5 = "ed630f47fb013c5b31bb020c483ef262"
+small_source_url = "https://zenodo.org/records/8181109/files/KuaiSAR.zip"
+small_archive_md5 = "daea8cbf605db6bd5841740f0e4a12d9"
+license = "CC BY-NC-SA 4.0（非商业 + 相同方式共享）"
+paper = "https://arxiv.org/abs/2306.07705"
+status = "phase-1.2-in-progress"
+
+[layout]
+root = "data/kuasar"
+raw = "data/kuasar/raw"
+extracted = "data/kuasar/raw/KuaiSAR_v2"
+survey = "artifacts/kuasar_archive_survey.json"
+rec_inter = "KuaiSAR_v2/rec_inter.csv"          # 1102.6 MB
+src_inter = "KuaiSAR_v2/src_inter.csv"          # 527.8 MB
+item_features = "KuaiSAR_v2/item_features.csv"  # 1915.5 MB（caption 为 token 列表）
+user_features = "KuaiSAR_v2/user_features.csv"  # 0.4 MB
+social_network = "KuaiSAR_v2/social_network.csv"
+
+[columns]
+rec_inter = "user_id,item_id,duration_ms,playing_time,timestamp,forward,like,follow,search_photo_related,search,click,time"
+src_inter = "user_id,search_session_id,search_session_timestamp,search_session_source,keyword,item_id,click_cnt,item_type,time"
+item_features = "item_id,一级~四级类目 id/name(含英文),caption,author_id,item_type,upload_time,upload_type"
+user_features = "user_id,onehot_feat1,onehot_feat2,search_active_level,rec_active_level"
+
+[labels]
+# 草案（Phase 1.3 定稿）：MVP 用单击；like/follow/forward 留作多任务标签。
+positive_field = "click"
+positive_threshold = 1
+positive_definition = "rec_inter 中 click == 1"
+exposure_definition = "rec_inter 的全部行（含 click == 0 的曝光未点击）——数据集保留曝光，可比 KuaiRec 更严格地构造 seen_mask"
+channel_field = "search"
+note = "样本(30 万行)行为占比：click 49.6% / like 3.5% / follow 0.5% / forward 0.3%；48.9% 行全 0（纯曝光）"
+
+[split]
+strategy = "per_user_last_two_strict_timestamp_v2"
+note = "推荐任务按用户切分；搜索任务若要评估需按 search_session_id 切分（Phase 1.3 决定）"

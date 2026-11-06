@@ -63,10 +63,17 @@ def check_dataset_configs() -> list[str]:
         SPLIT_STRATEGY,
     )
     from recsys.data.kuairec import KUAIREC_ARCHIVE_MD5, KUAIREC_ARCHIVE_URL
+    from recsys.data.kuasar import (
+        KUASAR_ARCHIVE_MD5,
+        KUASAR_ARCHIVE_URL,
+        KUASAR_SMALL_ARCHIVE_MD5,
+        KUASAR_SMALL_ARCHIVE_URL,
+    )
 
     errors: list[str] = []
     kuairec = load_toml(PROJECT_ROOT / "configs" / "datasets" / "kuairec.toml")
     movielens = load_toml(PROJECT_ROOT / "configs" / "datasets" / "movielens.toml")
+    kuasar = load_toml(PROJECT_ROOT / "configs" / "datasets" / "kuasar.toml")
 
     pairs = [
         ("kuairec 正反馈阈值", kuairec["labels"]["positive_threshold"], KUAIREC_WATCH_RATIO_THRESHOLD),
@@ -74,6 +81,10 @@ def check_dataset_configs() -> list[str]:
         ("kuairec 下载地址", kuairec["dataset"]["source_url"], KUAIREC_ARCHIVE_URL),
         ("kuairec 压缩包 md5", kuairec["dataset"]["archive_md5"], KUAIREC_ARCHIVE_MD5),
         ("kuairec 切分协议", kuairec["split"]["strategy"], SPLIT_STRATEGY),
+        ("kuasar 下载地址", kuasar["dataset"]["source_url"], KUASAR_ARCHIVE_URL),
+        ("kuasar 压缩包 md5", kuasar["dataset"]["archive_md5"], KUASAR_ARCHIVE_MD5),
+        ("kuasar small 下载地址", kuasar["dataset"]["small_source_url"], KUASAR_SMALL_ARCHIVE_URL),
+        ("kuasar small 压缩包 md5", kuasar["dataset"]["small_archive_md5"], KUASAR_SMALL_ARCHIVE_MD5),
         ("movielens 正反馈阈值", movielens["labels"]["positive_threshold"], DEFAULT_MOVIELENS_POSITIVE_THRESHOLD),
         ("movielens 切分协议", movielens["split"]["strategy"], SPLIT_STRATEGY),
     ]

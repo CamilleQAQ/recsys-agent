@@ -19,7 +19,8 @@
 | --- | --- |
 | 所处阶段 | **Phase 0 完成**（仓库审计 + Model Zoo + 工程底座），准备进入 **Phase 1**（KuaiSAR 数据层） |
 | 版本控制 | git `main`，远端 [CamilleQAQ/recsys-agent](https://github.com/CamilleQAQ/recsys-agent)；首次提交 `0bef337`（2026-11-06） |
-| 数据主线 | KuaiSAR（主，待接入）；KuaiRec / MovieLens 为流程模板与辅助线 |
+| 数据主线 | KuaiSAR 2.0 **已下载**（805.9 MB 压缩包 → 3.5 GB / 5 个 CSV）；Phase 1.1 完成，1.2 进行中 |
+| 磁盘 | E: 可用 33.3 GB（下载前 37.7 GB）；项目本体 203 MB（不含 `data/`） |
 | 第三方仓库 | 13 个（[third_party/SOURCES.toml](third_party/SOURCES.toml)，含 commit / 许可 / 可用性） |
 | 模型索引 | 24 个：12 召回 / 9 排序 / 3 基础设施（[models/zoo.toml](models/zoo.toml)） |
 | 已接入统一接口 | 6 个 `ready`：Popularity、BPR-MF、Two-Tower、SASRec、FAISS、FAISS 索引封装 |
@@ -104,19 +105,31 @@
 
 ---
 
+### 2.7 Phase 1.1：KuaiSAR 下载与结构勘查（2026-11-06）
+
+- [x] `src/recsys/data/kuasar.py`：下载（带 UA、进度）→ md5 校验 → 安全解压（拒绝越界路径）→ 结构勘查
+- [x] `configs/datasets/kuasar.toml`：来源/md5/许可/文件布局/字段清单，`check_project.py` 校验配置与代码常量一致
+- [x] 实际下载：`KuaiSAR_v2.zip` **805.9 MB**，md5 匹配，解压后 **3.5 GB / 5 个 CSV**
+- [x] 勘查产物：`artifacts/kuasar_archive_survey.json`（文件清单 + 每个 CSV 的表头）
+- [x] 字段说明与样本统计：`docs/kuasar.md`（30 万行样本，标注为采样而非全量）
+- [x] 关键发现：`rec_inter.csv` 中 **48.9% 的行所有行为位为 0**，即保留了「曝光未点击」——可构造真实 seen-mask
+- 磁盘：下载前 E: 可用 37.7 GB → 完成后 **33.3 GB**
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
 
-详见 [docs/kuasar-roadmap.md](docs/kuasar-roadmap.md)。
+详见 [docs/kuasar-roadmap.md](docs/kuasar-roadmap.md)。字段与统计见 [docs/kuasar.md](docs/kuasar.md)。
 
-- [ ] **1.1 下载与校验**：`src/recsys/data/kuasar.py` + `configs/datasets/kuasar.toml`
-      （Zenodo 8181109，`KuaiSAR_v2.zip` 845 MB，md5 `ed630f47fb013c5b31bb020c483ef262`）
-      验收：`python -m recsys.data.prepare --dataset kuasar` 从零跑通，重复运行走本地
-- [ ] **1.2 字段核对与数据画像**：先 `head -1` 看列名，产出 `docs/kuasar.md`
-      验收：`PreparedData` 的规模与画像脚本一致
-- [ ] **1.3 行为与正样本定义**：MVP 先用「点击/播放」单行为；阈值与切分写进 config 与 `recsys.config`
-      验收：同数据同阈值 → 同词表规模、同测试集大小
+- [x] **1.1 下载与校验**：`src/recsys/data/kuasar.py` + `configs/datasets/kuasar.toml`
+      验收：下载 + md5 + 解压 + 勘查一次跑通；重跑复用本地压缩包（`--survey-only` 可离线复查）
+- [ ] **1.2 字段核对与数据画像**：字段已核对（见 `docs/kuasar.md`），**全量画像未跑**
+      待办：全量行数/用户/物品/行为占比/序列长度/时间覆盖/缺失值；`item_features` 与 `rec_inter` 的覆盖关系
+      验收：画像脚本可复现，结果与 `PreparedData` 规模一致
+- [ ] **1.3 行为与正样本定义**：草案 `click == 1`（曝光 = 全部行），待定稿并写入 `recsys.config`
+      验收：同数据同阈值 → 同词表规模、同测试集大小；搜索侧是否按 session 切分需明确
 - [ ] **1.4 样本构建**：召回交互对 / 序列样本 / 排序候选+特征（第三类尚无实现）
 - [ ] **1.5 特征通道**：`FeatureStore` 或 `PreparedData.item_features`，特征版本写入 `provenance.extra`
 - [ ] **1.6 数据版本与缓存**：`processed/` 可读 + `protocol.json` 校验（当前只写不读）
@@ -221,6 +234,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-04 | Phase 0 | 11 个仓库整理：扁平化、删 `.git`/示例语料/缓存；建 Model Zoo 索引与文档骨架 | `third_party/README.md`、`models/zoo.toml`、`docs/cleanup-report.md` |
 | 2026-11-05 | Phase 0 | 补 FuxiCTR/genrec 与 `SOURCES.toml`；接口扩到 `retrieve/encode_*` 与 `RankingAdapter`；checkpoint 加 `provenance`；指标补 Precision/Coverage/AUC/LogLoss；建档案与校验脚本；数据主线改为 KuaiSAR | `src/recsys/adapters/`、`src/recsys/utils/provenance.py`、`src/recsys/evaluation/metrics.py`、`PROJECT_PROGRESS.md` |
 | 2026-11-06 | Phase 0 | 接入版本控制：`git init -b main` + 首次提交 `0bef337`（6,941 文件 / 压缩后 47.9 MB）推到 `CamilleQAQ/recsys-agent`；新增 `.gitattributes` 固定二进制判定；`data/`、`artifacts/` 未入库 | `.gitattributes`、`.gitignore`、本文件 |
+| 2026-11-06 | **Phase 1.1** | KuaiSAR 下载与结构勘查：新增 `kuasar.py`（下载/md5/安全解压/勘查）与 `kuasar.toml`；实测 805.9 MB、解压 3.5 GB；核对 5 个 CSV 字段并写入 `docs/kuasar.md`；发现 48.9% 行为纯曝光记录 | `src/recsys/data/kuasar.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

@@ -12,7 +12,8 @@
 7. [dependencies.md](dependencies.md) —— 哪套环境装什么、为什么必须隔离；
 8. [kuairec.md](kuairec.md) —— KuaiRec 流程模板：口径、命令、坑；
 9. [kuasar-roadmap.md](kuasar-roadmap.md) —— Phase 1：接入 KuaiSAR 的工作清单；
-10. [cleanup-report.md](cleanup-report.md) —— 仓库整理与清理账目。
+10. [kuasar.md](kuasar.md) —— KuaiSAR 字段说明、文件清单与样本统计（数据说明）；
+11. [cleanup-report.md](cleanup-report.md) —— 仓库整理与清理账目。
 
 ## 写文档的规矩
 

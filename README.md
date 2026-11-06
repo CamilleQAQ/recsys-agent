@@ -105,6 +105,7 @@ python scripts/smoke_adapters.py      # 适配层 + 指标 + 工件溯源 + 排�
 | [docs/dependencies.md](docs/dependencies.md) | 依赖分层与版本冲突处理 |
 | [docs/kuairec.md](docs/kuairec.md) | KuaiRec 流程模板：口径、命令、坑 |
 | [docs/kuasar-roadmap.md](docs/kuasar-roadmap.md) | Phase 1：接入 KuaiSAR 的工作清单 |
+| [docs/kuasar.md](docs/kuasar.md) | KuaiSAR 文件、字段与行为统计（数据说明） |
 | [docs/cleanup-report.md](docs/cleanup-report.md) | 仓库整理与清理账目 |
 | [third_party/README.md](third_party/README.md) | 13 个仓库的来源、commit、许可、可用性 |
 
