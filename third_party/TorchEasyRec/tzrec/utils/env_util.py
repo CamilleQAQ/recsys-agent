@@ -1,0 +1,73 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+
+import torch
+
+from tzrec.utils.logging_util import logger
+
+
+def checkpoint_tag() -> str:
+    """Label recorded in each checkpoint's success marker, empty when unset."""
+    return os.environ.get("CHECKPOINT_TAG", "")
+
+
+def use_hash_node_id() -> bool:
+    """Use hash node id or not."""
+    return os.environ.get("USE_HASH_NODE_ID", "0") == "1"
+
+
+def use_rtp() -> bool:
+    """Use RTP for online inference or not."""
+    flag = os.environ.get("USE_RTP", "0") == "1"
+    if flag and os.environ.get("USE_FARM_HASH_TO_BUCKETIZE", "false") != "true":
+        logger.warning(
+            "you should set USE_FARM_HASH_TO_BUCKETIZE=true for "
+            "train/eval/export when use rtp for online inference."
+        )
+    return flag
+
+
+def enable_tma() -> bool:
+    """Enable TMA (Tensor Memory Accelerator) for triton ops."""
+    flag = os.environ.get("ENABLE_TMA", "0") == "1"
+    if flag:
+        if torch.cuda.is_available():
+            if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 9:
+                import triton
+                from packaging import version
+
+                if version.parse(triton.__version__) >= version.parse("3.5.0"):
+                    return True
+                else:
+                    logger.warning("triton version lower than 3.5.0, we disable TMA.")
+            else:
+                logger.warning("device capability lower than 9.0, we disable TMA.")
+        else:
+            logger.warning("CUDA not available, we disable TMA.")
+    return False
+
+
+def force_load_sharding_plan() -> bool:
+    """Force load sharding plan in checkpoint or not."""
+    return os.environ.get("FORCE_LOAD_SHARDING_PLAN", "0") == "1"
+
+
+def use_inplace_trunc_normal() -> bool:
+    """Use the in-place inverse-CDF trunc_normal_ initialization or not.
+
+    nn.init.trunc_normal_ in torch>=2.12 materializes several temporaries as
+    large as the tensor itself and can OOM when initializing a very large
+    embedding table at sharding time; enabling this flag initializes with the
+    in-place implementation of torch<=2.11 instead.
+    """
+    return os.environ.get("USE_INPLACE_TRUNC_NORMAL", "0") == "1"

@@ -1,0 +1,52 @@
+# KuaiRec 2.0（短视频，本项目主实验数据集）
+#
+# 本文件是对「数据从哪来、放哪、怎么变成统一交互」的记录，字段与 recsys.config /
+# recsys.data.kuairec 的常量一一对应，由 scripts/check_project.py 校验，避免文档漂移。
+
+[dataset]
+name = "kuairec"
+display_name = "KuaiRec 2.0"
+domain = "短视频推荐"
+source_url = "https://zenodo.org/records/18164998/files/KuaiRec.zip"
+archive_md5 = "261550d472c48eff4990fb13c0e5bcf7"
+license = "研究用途；使用前确认数据集页面条款"
+
+[layout]
+root = "data/kuairec"
+raw = "data/kuairec/raw"
+processed = "data/kuairec/processed"
+# 解压后按以下几种布局之一放置即可被自动发现
+matrix_candidates = [
+  "big_matrix.csv",
+  "raw/big_matrix.csv",
+  "raw/KuaiRec 2.0/data/big_matrix.csv",
+  "KuaiRec 2.0/data/big_matrix.csv",
+]
+small_matrix = "small_matrix.csv"
+item_features = "item_categories.csv"
+user_features = "user_features.csv"
+
+[matrix]
+required_columns = [
+  "user_id",
+  "video_id",
+  "play_duration",
+  "video_duration",
+  "timestamp",
+  "watch_ratio",
+]
+
+[labels]
+positive_field = "watch_ratio"
+positive_threshold = 1.0
+deduplicate_user_item_pairs = true
+
+[split]
+strategy = "per_user_last_two_strict_timestamp_v2"
+validation = "每个用户倒数第二个正反馈"
+test = "每个用户最后一个正反馈"
+note = "边界时间戳相同则整个用户留训练集；详见 recsys.data.schema.temporal_train_validation_test_split"
+
+[evaluation]
+seen_mask = "使用时间点之前真实曝光过的全部视频（含非正反馈）"
+metrics = ["Recall@k", "NDCG@k", "HitRate@k"]

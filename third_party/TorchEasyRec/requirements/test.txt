@@ -1,0 +1,6 @@
+alibabacloud-alikafka20190916
+click
+hypothesis
+parameterized
+pre-commit
+pyrefly==1.2.0

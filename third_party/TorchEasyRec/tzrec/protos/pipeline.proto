@@ -1,0 +1,49 @@
+syntax = "proto2";
+package tzrec.protos;
+
+import "tzrec/protos/train.proto";
+import "tzrec/protos/eval.proto";
+import "tzrec/protos/export.proto";
+import "tzrec/protos/data.proto";
+import "tzrec/protos/feature.proto";
+import "tzrec/protos/model.proto";
+import "tzrec/protos/prompt.proto";
+
+message EasyRecConfig {
+    required string train_input_path = 1;
+
+    required string eval_input_path = 2;
+
+    required string model_dir = 3;
+
+    optional TrainConfig train_config = 4;
+
+    optional EvalConfig eval_config = 5;
+
+    optional ExportConfig export_config = 6;
+
+    optional DataConfig data_config = 7;
+
+    repeated FeatureConfig feature_configs = 8;
+
+    optional ModelConfig model_config = 9;
+
+    optional PromptConfig prompt_config = 10;
+}
+
+// Minimal mirror of EasyRecConfig used to read custom_model.class_path before the
+// full config is parsed, so that the module defining the custom model registers
+// its protobuf descriptors first. Only the fields on the path to class_path are
+// declared, the rest of the config, including the not-yet-registered Any, is
+// skipped as unknown field. Keep the field names in sync with EasyRecConfig.
+message PreloadCustomModel {
+    optional string class_path = 1;
+}
+
+message PreloadModelConfig {
+    optional PreloadCustomModel custom_model = 1;
+}
+
+message PreloadConfig {
+    optional PreloadModelConfig model_config = 1;
+}

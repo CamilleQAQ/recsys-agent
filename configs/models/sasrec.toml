@@ -1,0 +1,21 @@
+# SASRec 序列推荐默认值（与 recsys.training.train_sasrec.SASRecTrainConfig 对齐）
+
+[model]
+id = "sasrec"
+entry = "recsys.training.train_sasrec"
+evaluator = "recsys.evaluation.sasrec_evaluator"
+checkpoint = "artifacts/{dataset}/sasrec.pt"
+
+[defaults]
+max_epochs = 30
+patience = 5
+batch_size = 256
+learning_rate = 0.001
+weight_decay = 0.0
+embedding_dim = 64
+num_blocks = 2
+num_heads = 2
+max_seq_len = 50
+dropout = 0.2
+seed = 42
+device = "auto"

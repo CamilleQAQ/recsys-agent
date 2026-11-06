@@ -1,0 +1,421 @@
+# 数据格式
+
+TorchEasyRec作为阿里云PAI的推荐算法包，可以无缝对接MaxCompute的数据表，也可以读取OSS、NAS或Local环境中的CSV, Parquet文件，同时支持Kafka和Datahub的流式消息。
+TorchEasyRec的OdpsDataset, ParquetDataset, KafkaDataset进一步可支持训练断点续训功能，当训练中断后可以从上次的数据位置继续训练，避免重复处理已消费的数据。
+
+**一个最简单的data config的配置**
+
+这个配置里面，读取MaxCompute的表作为输入数据（OdpsDataset），并且输入数据已经编码好，每个worker上以8192的batch_size，并行度为8来读取数据
+
+```
+data_config {
+    batch_size: 8192
+    dataset_type: OdpsDataset
+    fg_mode: FG_NONE
+    label_fields: "clk"
+    num_workers: 8
+}
+```
+
+目前支持以下几种dataset_type:
+
+## OdpsDataset
+
+输入数据为MaxCompute表
+
+- **前置条件**:
+
+  - 在[MaxCompute控制台](https://maxcompute.console.aliyun.com/)的「租户管理」->「租户属性」页面打开**开放存储(Storage API)开关**
+  - 「租户管理」->「新增成员」给相应用户授予「admin」权限；或参考[租户权限](https://help.aliyun.com/zh/maxcompute/user-guide/overview-1#cabfa502c288o)文档，精细授予用户Quota的使用权限
+
+- input_path: 按如下格式设置
+
+  - `odps://{project}/tables/{table_name}/{partition}`，多表按逗号分隔
+  - 如果单表需要设置多个分区，可以用`&`简写，来分隔多个分区，`odps://{project}/tables/{table_name}/{partition1}&{partition2}`
+
+- 运行训练/评估/导出/预测等命令时
+
+  - **本地环境**：
+    - 需要准备一个odps_conf文件，并在启动命令中设置在`ODPS_CONFIG_FILE_PATH`环境变量中
+    ```bash
+    cat << EOF >> odps_conf
+    project_name=${PROJECT_NAME}
+    access_id=${ACCESS_ID}
+    access_key=${ACCESS_KEY}
+    end_point=http://service.{region}-vpc.maxcompute.aliyun-inc.com/api
+    EOF
+
+    ODPS_CONFIG_FILE_PATH=odps_conf \
+    torchrun --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
+    --nnodes=$WORLD_SIZE --nproc-per-node=$NPROC_PER_NODE --node_rank=$RANK \
+    -m tzrec.train_eval \
+    --pipeline_config_path ${PIPELINE_CONFIG}
+    ```
+  - **PAI-DLC/PAI-DSW环境**：
+    - 需要设置`ODPS_ENDPOINT`的环境变量，并新建任务时，「角色信息」选择**PAI默认角色**
+    ```bash
+    ODPS_ENDPOINT=http://service.{region}-vpc.maxcompute.aliyun-inc.com/api \
+    torchrun --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
+    --nnodes=$WORLD_SIZE --nproc-per-node=$NPROC_PER_NODE --node_rank=$RANK \
+    -m tzrec.train_eval \
+    --pipeline_config_path ${PIPELINE_CONFIG}
+    ```
+
+- 如果是预付费Quota，参考[独享数据传输服务](https://help.aliyun.com/zh/maxcompute/user-guide/purchase-and-use-exclusive-resource-groups-for-dts)文档购买和授权，可通过`odps_data_quota_name`传入购买的Quota名
+
+- 如果CPU/GPU利用率都不高，可能是网络传输带宽瓶颈，可以尝试设置`odps_data_compression`为`ZSTD`来增大数据的压缩率，减少数据网络传输带宽
+
+## ParquetDataset
+
+输入数据为parquet格式
+
+- input_path: 按如下格式设置
+
+  - `${PATH_TO_DATA_DIR}/*.parquet`
+
+- 注意: 如果每个parquet文件中的数据量不相等或文件数据小于worker数，ParquetDataset会自动重分配数据，来保证每个worker读取的数据量相等。但仍建议parquet文件数是 `nproc-per-node * nnodes * num_workers`的倍数，并且每个parquet文件的数据量基本相等，减少数据自动重分配的IO开销。
+
+## CsvDataset
+
+- input_path: 按如下格式设置
+
+  - `${PATH_TO_DATA_DIR}/*.csv`
+
+- 需设置`data_config.delimiter`来指名列分隔符，默认为`,`
+
+- 需设置 `data_config.with_header`来指定是否有header行，默认为false
+
+- 按需设置 `data_config.input_fields` 来指定schema，详见下文input_fields参数说明
+
+- 注意:
+
+  - 训练和评估时需要csv文件数是 `nproc-per-node * nnodes * num_workers`的倍数，并且每个csv文件的数据量相等
+  - csv格式数据读性能有瓶颈
+
+## KafkaDataset
+
+输入数据为Kafka 或 [Datahub](https://help.aliyun.com/zh/datahub/product-overview/what-is-datahub) 消息流
+
+- 输入消息流的内容是序列化的ArrowRecordBatch，支持两种序列化格式:
+
+  - schema-less格式 (`record_batch.serialize()`): 需设置`data_config.input_fields`或`data_config.input_fields_str`来指定数据的schema
+  - 带schema的格式 (Arrow IPC Stream): 无需设置`input_fields`，schema从消息中自动推断，上游新增列或调整列顺序无需重启训练即可自动适配，上游删除或修改Reader所需列（列名/类型）时会报错，且schema会占用消息体大小
+
+- input_path: 按如下格式设置
+
+  - `kafka://broker:9092/topic?group.id=consumer_group&auto.offset.reset=earliest`
+  - 需以`&`分隔符来分隔kafka的参数，`group.id`是必选参数，其余参数参考[Kafka配置文档](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md)
+  - `enable.auto.commit`默认设置为`false`，KafkaDataset使用自身的checkpoint机制管理消费位点，不依赖Kafka broker端的offset提交。如需启用自动提交，可在URI中显式设置`enable.auto.commit=true`
+  - 支持`start.timestamp.ms`参数，指定从某个时间戳（毫秒）开始消费，消费者会从各分区中时间戳 >= 该值的最早offset开始读取。当同时存在checkpoint时，checkpoint优先级更高
+    - 示例:
+      - `kafka://broker:9092/topic?group.id=consumer_group&auto.offset.reset=earliest&start.timestamp.ms=1711929600000`
+    - 使用`start.timestamp.ms`时，时间戳到offset的解析（`offsets_for_times`）会分批请求并带重试，可通过如下环境变量调优，避免分区较多时单次请求超时：
+      - `TZREC_KAFKA_OFFSETS_FOR_TIMES_BATCH_SIZE`: 每次`offsets_for_times`请求解析的分区数，默认`32`
+      - `TZREC_KAFKA_OFFSETS_FOR_TIMES_TIMEOUT`: 每次`offsets_for_times`请求的超时时间（秒），默认`30.0`
+      - `TZREC_KAFKA_OFFSETS_FOR_TIMES_RETRIES`: 每批请求失败后的重试次数，默认`2`
+
+- 注意:
+
+  - Kafka 分片数需是 `nproc-per-node * nnodes * num_workers` 的倍数，否则会导致数据倾斜
+  - 当输入数据为Datahub时，Datahub需设置为[Kafka兼容模式的Datahub](https://help.aliyun.com/zh/datahub/use-cases/datahub-kafka-compatibility-mode)， input_path按如下格式设置
+    - `kafka://{dh_endpoint}/{dh_project.dh_topic}?group.id={dh_project.dh_group}&security.protocol=SASL_SSL&sasl.mechanism=PLAIN&sasl.username={access_id}&sasl.password={access_secrect}`
+  - 当使用 Arrow IPC Stream 格式 (带 schema) 时，每个 Kafka消息应只包含一个 record batch。如果单个消息包含多个 record batches，只有第一个 batch 会被读取，后续 batches 将被忽略。如需发送多个 batches，请将其作为多个独立的 Kafka消息发送。
+
+### 使用 Flink ArrowBatchUDTF 序列化数据
+
+TorchEasyRec 提供了 Flink UDTF 用于将 Flink 流数据序列化为 Arrow IPC 格式，写入 Kafka 供 KafkaDataset 消费。
+
+#### 下载 UDF JAR
+
+- JAR 下载地址: `https://tzrec.oss-accelerate.aliyuncs.com/third_party/flink/flink-arrow-batch-udf-0.1.jar`
+
+#### 在阿里云 Flink VVP 中使用
+
+1. **注册 UDF**: 参考[UDF管理文档](https://help.aliyun.com/zh/flink/realtime-flink/user-guide/manage-udfs)注册 ArrowBatchUDTF，类名为 `com.aliyun.pai.flinkjob.ArrowBatchUDTF`
+
+1. **SQL 使用示例**
+
+```sql
+-- 将数据序列化为 Arrow IPC 格式写入 Kafka
+INSERT INTO kafka_sink
+SELECT T.arrow_data
+FROM source_table,
+LATERAL TABLE(ArrowBatchUDTF(ROW(user_id, item_id, label, embedding))) AS T(arrow_data);
+```
+
+3. **配置参数**: 在 Flink Deployment Configuration 中添加 `pipeline.global-job-parameters`
+
+```yaml
+pipeline.global-job-parameters: |
+  'arrow.batch.udtf.batch-size:"128"',
+  'arrow.batch.udtf.bytes-limit:"917504"',
+  'arrow.batch.udtf.compression:"ZSTD"',
+  'arrow.batch.udtf.embed-schema:"true"',
+  'arrow.batch.udtf.input-typeinfo:"user_id:BIGINT;item_id:BIGINT;label:FLOAT;embedding:ARRAY<FLOAT>"'
+```
+
+#### 配置参数说明
+
+| 参数                            | 默认值 | 说明                                                                                                                                                                                                                                                                                   |
+| ------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| arrow.batch.udtf.batch-size     | 128    | 累积多少行后序列化为一个 Arrow IPC batch                                                                                                                                                                                                                                               |
+| arrow.batch.udtf.bytes-limit    | 917504 | 单个序列化 batch 的最大字节数，超出会自动拆分。设置为 0 表示不限制。注意：该值需小于 [Kafka 消息大小上限](https://help.aliyun.com/zh/apsaramq-for-kafka/cloud-message-queue-for-kafka/product-overview/terms#dt-w4l-kbb-3df)，Kafka 默认消息大小为 1MB，建议调整 Kafka 消息大小至 10MB |
+| arrow.batch.udtf.compression    | ZSTD   | 压缩编码，支持 ZSTD、LZ4_FRAME、UNCOMPRESSED                                                                                                                                                                                                                                           |
+| arrow.batch.udtf.embed-schema   | false  | 是否在输出中嵌入 schema。设置为 true 时使用 IPC Stream 格式（带 schema），KafkaDataset 可自动推断 schema；设置为 false 时使用 schema-less 格式，需在 KafkaDataset 中配置 input_fields                                                                                                  |
+| arrow.batch.udtf.input-typeinfo | 无     | 输入数据的 schema，格式为 `fieldName:TYPE;fieldName:TYPE;...`，支持的类型同下文`input_fields_str`                                                                                                                                                                                      |
+
+## data_config配置
+
+### fg_mode
+
+- FG(Feature Generator) 的运行模式，支持FG_DAG, FG_NONE, FG_BUCKETIZE, FG_NORMAL
+
+  - FG是进入模型推理前的一层特征变换，可以保证离在线特征变换的一致性，特征变换包含Combo/Lookup/Match/Expr等类型，详见[特征](./feature.md)章节。以LookupFeature的一种配置为例，特征变换为从`cate_map`中用`cate_key`查出值后，用`boundaries`进行分箱再进入模型推理
+
+  ```
+  feature_configs {
+      lookup_feature {
+          feature_name: "lookup_feat"
+          map: "user:cate_map"
+          key: "item:cate_key"
+          embedding_dim: 16
+          boundaries: [0, 1, 2, 3, 4]
+      }
+  }
+  ```
+
+  - 特征输入的side一共支持五种 \[`user`, `item`, `context`, `feature`, `const`\]，上述`lookup_feat`中的`cate_map`则是属于`user`side
+    - `user`: 用户侧特征输入，线上推理时从请求中传入
+    - `item`: 物品侧特征输入，线上推理时会从实时缓存在内存中的特征表里获取
+    - `context`: 由上下文产生物品侧特征输入，线上推理时从请求中传入，如`recall_name`等
+    - `feature`: 来自其他特征FG的输出，如下述`lookup_age_feat`的输入`age_binning`来自于RawFeature `age`的分箱结果
+    - `const`: 输入为常量
+    ```
+    feature_configs {
+        raw_feature {
+            feature_name: "age_binning"
+            expression: "user:age"
+            embedding_dim: 16
+            boundaries: [18, 25, 30]
+        }
+    }
+    feature_configs {
+        lookup_feature {
+            feature_name: "lookup_age_feat"
+            map: "item:age_map"
+            key: "feature:age_binning"
+            embedding_dim: 16
+            boundaries: [0, 1, 2, 3, 4]
+        }
+    }
+    feature_configs {
+        lookup_feature {
+            feature_name: "lookup_age_feat"
+            map: "item:age_map"
+            key: "const:age1"
+            embedding_dim: 16
+            boundaries: [0, 1, 2, 3, 4]
+        }
+    }
+    ```
+
+#### fg_mode=FG_DAG
+
+- 训练时会在Dataset中执行FG，数据列名与各**特征的FG所依赖字段来源**同名，详见[特征](./feature.md)，Dataset会自动分析所有特征依赖的字段来源来读取数据。
+  - 以上文LookupFeature为例，**特征FG所依赖字段来源**为`[cate_map, cate_key]`，Dataset会从输入表中读取名为`cate_map`和`cate_key`的列来做FG得到`lookup_feat`
+- 该模式可以帮忙我们快速验证FG的训练效果，调优FG的配置，但由于训练时多了FG的过程，训练速度会受到一定程度的影响
+
+#### fg_mode=FG_NORMAL
+
+- 训练时会在Dataset中执行FG，但不是以DAG方式运行。因此特征的输入中如果有`feature`,`const`side的输入，也需要在输入表中。目前更建议使用`FG_DAG`模式
+
+#### fg_mode=FG_NONE
+
+- 训练时不会在Dataset中执行FG，输入数据为Fg编码后的数据，数据列名与**特征名**(`feature_name`)同名，Dataset会自动分析所有特征的特征名来读取数据
+  - 以上文LookupFeature为例，**特征名**为`lookup_feat`，Dataset会从输入表中直接读取编码后的`lookup_feat`列直接进行模型训练和推理
+- 该模式训练速度最佳，但需提前对数据提前进行FG编码，目前仅提供MaxCompute方式，步骤如下：
+  - 在DLC/DSW/Local环境中生成fg json配置，上传至DataWorks的资源中，如果fg_output_dir中有vocab_file、自定义算子so等其他文件，也需要上传至资源中（`pyfg/lib/`开头的官方算子so由MaxCompute FG自行提供，不会输出到fg_output_dir中）
+    ```shell
+    cat <<EOF>> odps_conf
+    access_id=${ACCESS_ID}
+    access_key=${ACCESS_KEY}
+    end_point=http://service.${region}-vpc.maxcompute.aliyun-inc.com/api
+    EOF
+
+    ODPS_CONFIG_FILE_PATH=odps_conf \
+    python -m tzrec.tools.create_fg_json \
+        --pipeline_config_path ${PIPELINE_CONFIG_PATH} \
+        --fg_output_dir fg_output \
+        --reserves ${COLS_YOU_WANT_RESERVE} \
+        --fg_resource_name ${FG_RESOURCE_NAME} \
+        --odps_project_name ${PROJECT_NAME}
+    ```
+    - --pipeline_config_path: 模型配置文件。
+    - --fg_output_dir: fg json的输出文件夹。
+    - --reserves: 需要透传到输出表的列，列名用逗号分隔。一般需要保留Label列，也可以保留request_id，user_id，item_id列，注意：如果模型的feature_config中有user_id，item_id作为特征，feature_name需避免与样本中的user_id，item_id列名冲突。
+    - --fg_resource_name: 可选，fg json在MaxCompute中的资源名，默认为fg.json
+    - --odps_project_name: 可选，将fg json文件上传到MaxCompute项目名，该参数必须配合参数fg_resource_name和环境变量ODPS_CONFIG_FILE_PATH一起使用
+    - --ODPS_CONFIG_FILE_PATH: 该环境变量指向的是odpscmd的配置文件
+  - 在[DataWorks](https://workbench.data.aliyun.com/)的独享资源组中安装pyfg，「资源组列表」- 在一个调度资源组的「操作」栏 点「运维助手」-「创建命令」（选手动输入）-「运行命令」
+    ```shell
+    /home/tops/bin/pip3 install http://tzrec.oss-accelerate.aliyuncs.com/third_party/pyfg108-1.0.8-cp37-cp37m-linux_x86_64.whl --index-url=https://mirrors.aliyun.com/pypi/simple/ --trusted-host=mirrors.cloud.aliyuncs.com
+    ```
+  - 在DataWorks中建立`PyODPS 3`节点运行FG，节点调度参数中配置好bizdate参数
+    ```
+    from pyfg108 import offline_pyfg
+    offline_pyfg.run(
+      o,
+      input_table="YOU_PROJECT.TABLE_NAME",
+      output_table="YOU_PROJECT.TABLE_NAME",
+      fg_json_file="YOU_FG_FILE_NAME",
+      partition_value=args['bizdate']
+    )
+    ```
+
+| 参数                      | 默认值 | 说明                                                                                                                                                                                                 |
+| ------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| input_table               | 无     | 输入表                                                                                                                                                                                               |
+| output_table              | 无     | 输出表，会自动创建                                                                                                                                                                                   |
+| fg_json_file              | 无     | FG 配置文件，json 格式                                                                                                                                                                               |
+| partition_value           | 无     | 指定输入表的分区作为 FG 的输入，可支持多分区表，以逗号分隔                                                                                                                                           |
+| force_delete_output_table | False  | 是否删除输出表，设置为 True 时会先自动删除输出表, 再运行任务                                                                                                                                         |
+| force_update_resource     | False  | 是否更新资源，设置为 True 时会先自动更新资源, 再运行任务                                                                                                                                             |
+| set_sql                   | 无     | 任务执行的[flag](https://help.aliyun.com/zh/maxcompute/user-guide/flag-parameters?spm=a2c4g.11186623.0.0.383a20d9CQnpaR#concept-2278178)，如set odps.stage.mapper.split.size=32;，注意需要以分号结尾 |
+
+#### fg_mode=FG_BUCKETIZE
+
+- 训练时在Dataset中执行FG的Bucketize部分，输入数据为Fg编码但未进行Bucketize的数据，Bucketize配置包含`hash_bucket_size`,`boundaries`,`vocab_dict`,`vocab_list`,`num_buckets`
+
+  - 数据列名与**特征名**(`feature_name`)同名，Dataset会自动分析所有特征的特征名来读取数据
+  - 以上文LookupFeature为例，**特征名**为`lookup_feat`，Dataset会从输入表中直接读取编码后的`lookup_feat`列直接进行模型训练和推理
+
+- 该模式训练速度介于`FG_DAG`和`FG_NONE`之间，适用于在需要统计Bucketize前的数据分布来设置合适的Bucketize参数的情况，可以避免离线提前跑两次Fg编码
+
+- 注意：在这种模式下，对数据提前进行FG编码时，使用的fg json配置不应该包含Bucketize配置，可以在`create_fg_json`时增加`--remove_bucketizer`参数来去除fg json配置中的Bucketize配置
+
+  ```shell
+  python -m tzrec.tools.create_fg_json \
+      --pipeline_config_path ${PIPELINE_CONFIG_PATH} \
+      --fg_output_dir fg_output \
+      --reserves ${COLS_YOU_WANT_RESERVE} \
+      --remove_bucketizer
+
+  ```
+
+- 注意：特征输入中`feature`side的输入(如`feature:xxx`)读到的是被引用特征**Bucketize之后**的值，因此被引用的特征需要满足以下条件之一，否则`--remove_bucketizer`会改变离线FG的计算结果，`create_fg_json`时会报错
+
+  - 被引用的特征配置`stub_type: true`，即该特征只作为FG DAG的中间结果，不输出到表中。`--remove_bucketizer`会保留`stub_type: true`特征的Bucketize配置，如果该特征使用了`vocab_file`，该文件同样需要上传至资源中
+  - 被引用的特征不配置Bucketize参数，如果模型需要Bucketize后的该特征，可以另外增加一个带Bucketize配置的特征来引用它
+
+### fg_threads
+
+- 每个dataloader worker上fg的运行线程数，默认为1，`nproc-per-node * num_workers * fg_threads`建议小于单机CPU核数
+
+### label_fields
+
+- label相关的列名，至少设置一个，可以根据算法需要设置多个，如多目标算法
+
+  ```
+    label_fields: "click"
+    label_fields: "buy"
+  ```
+
+- label列的类型是数组时（例如上游表的类型为`array<bigint>`），会被解析成jagged label，
+  取其中的values后和普通label一样使用，无需额外配置
+
+### sample_weight_fields
+
+- 训练样本的样本权重列名
+
+### drop_remainder
+
+- 是否丢弃掉最后一个不足batch_size的batch数据，默认为false
+- 仅在训练时生效；等价于`min_batch_size`设置为`batch_size`；评估和预测不会因最后一个batch不足而丢弃数据
+
+### min_batch_size
+
+- 训练时，丢弃掉最后一个行数小于`min_batch_size`的batch，默认为0（不丢弃）；评估和预测时不生效
+- OdpsDataset和ParquetDataset按`proc`（rank）规划数据，每个`proc`每轮最多丢弃`min_batch_size - 1`行；CsvDataset按数据读取进程丢弃
+- 须满足`min_batch_size <= batch_size`，否则训练时报错
+- 使用BatchNorm等要求batch内至少2行样本的模型时，建议设置为2，避免样本表行数恰好使最后一个batch只剩1行导致训练失败
+
+### batch_cost_size
+
+- 用于限制一个batch数据的最大cost，主要适用于变长序列的模型（如DlrmHSTU）同步训练时，不同worker间由于序列长度差异过大，导致workload不一样导致的
+- 注：需结合data_config.sample_cost_field使用，sample_cost_field用于指定样本表中的表示样本cost的列名，dataset会根据样本中的cost列，裁切出batch_cost_size限制下的动态Batch。
+  - 对于DlrmHSTU模型，cost列一般可以考虑设置为进入模型的token数 (contextual feature num + uih seq length + cand seq length)
+- 注：需将data_config.batch_size设置得较大一些，来保证有足够的数据裁切够batch_cost_size
+
+### num_workers
+
+- 每个`proc`上的读数据并发度，`nproc-per-node * num_workers`建议小于单机CPU核数
+- 如果`num_workers==0`，数据进程和训练进程将会在一个进程中，便于调试
+
+### in_order
+
+- 是否按dataloader任务提交顺序返回batch，默认为true；仅在`num_workers > 0`时生效
+- 设置为false时，先处理完的worker可以先返回batch，避免慢worker阻塞其他worker，但可能降低可复现性，并改变训练样本或预测结果的输出顺序
+- 对于样本分布不均衡的数据，设置为false可能使训练过程看到的数据分布产生偏差
+
+### prefetch_factor
+
+- 每个dataloader worker预先准备的batch数，默认为2；仅在`num_workers > 0`时生效
+- `in_order=true`时，一个worker读数据变慢（如ODPS读取抖动）会阻塞该rank，其他worker最多只能提前准备`prefetch_factor`个batch；调大该值可以吸收读取抖动、减少训练等数据的时间，同时保持batch顺序
+- 每个rank最多缓存`num_workers * prefetch_factor`个batch，调大时需关注内存占用
+
+### shuffle
+
+- 是否训练时打散数据，默认为false
+
+### shuffle_buffer_size
+
+- 最多缓存多少个batch用于打散数据，默认为32
+
+### fg_encoded_multival_sep
+
+- fg_mode=FG_NONE 数据已经被FG编码好 时，数据的多值分割符，默认为chr(3)
+
+### input_fields
+
+```
+input_fields {
+    input_name: "input1"
+}
+input_fields {
+    input_name: "input2"
+    input_type: DOUBLE
+}
+```
+
+- 当使用CsvDataset，如果出现以下情况，需要按如下方式指定`input_fields`，其余Dataset可以自动推理字段类型
+  - 情况一：csv文件没有header行时 => 需至少设置`input_name`
+  - 情况二：csv文件中存在某列的整列为空值时，或遇到`column [xxx] with dtype null is not supported now`报错时 => 需进一步设置`input_type`，目前`input_type`支持设置 INT32 | INT64 | FLOAT | DOUBLE | STRING
+- 当使用KafkaDataset：
+  - `input_type` 支持设置 INT32 | INT64 | FLOAT | DOUBLE | STRING | ARRAY_INT32 | ARRAY_INT64 | ARRAY_FLOAT | ARRAY_DOUBLE | ARRAY_STRING | ARRAY_ARRAY_INT32 | ARRAY_ARRAY_INT64 | ARRAY_ARRAY_FLOAT | ARRAY_ARRAY_DOUBLE | ARRAY_ARRAY_STRING | MAP_STRING_INT32 | MAP_STRING_INT64 | MAP_STRING_FLOAT | MAP_STRING_DOUBLE | MAP_STRING_STRING | MAP_INT64_INT32 | MAP_INT64_INT64 | MAP_INT64_FLOAT | MAP_INT64_DOUBLE | MAP_INT64_STRING | MAP_INT32_INT32 | MAP_INT32_INT64 | MAP_INT32_FLOAT | MAP_INT32_DOUBLE | MAP_INT32_STRING
+
+### input_fields_str
+
+`input_fields_str`是`input_fields`的简化配置格式，格式为: `field_name1:field_type1;field_name2:field_type2;`
+
+示例:
+
+```
+data_config {
+    input_fields_str: "user_id:BIGINT;item_id:BIGINT;label:FLOAT;features:ARRAY<FLOAT>;"
+}
+```
+
+支持的类型名:
+
+- 基本类型: INT, INT32, BIGINT, INT64, STRING, FLOAT, DOUBLE
+  - 类型别名: BIGINT=INT64, INT=INT32 (在基本类型、ARRAY、MAP中均可使用)
+- 数组类型: ARRAY<INT>, ARRAY<BIGINT>, ARRAY<STRING>, ARRAY<FLOAT>, ARRAY<DOUBLE>
+- 嵌套数组: ARRAY\<ARRAY\<INT>>, ARRAY\<ARRAY\<BIGINT>>, ARRAY\<ARRAY\<FLOAT>>, ARRAY\<ARRAY\<DOUBLE>>, ARRAY\<ARRAY\<STRING>>
+- Map类型: MAP\<STRING,INT>, MAP\<STRING,BIGINT>, MAP\<STRING,FLOAT>, MAP\<STRING,DOUBLE>, MAP\<STRING,STRING>, MAP\<INT,INT>, MAP\<INT,BIGINT>, MAP\<INT,FLOAT>, MAP\<INT,DOUBLE>, MAP\<INT,STRING>, MAP\<BIGINT,INT>, MAP\<BIGINT,BIGINT>, MAP\<BIGINT,FLOAT>, MAP\<BIGINT,DOUBLE>, MAP\<BIGINT,STRING>
+- 逗号周围允许空格: `MAP<STRING, BIGINT>` 是有效的
+
+注意: 如果同时设置了`input_fields_str`和`input_fields`，`input_fields_str`优先级更高。
+
+### 更多配置
+
+- [参考文档](../proto.html#tzrec.protos.DataConfig)

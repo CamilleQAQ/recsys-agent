@@ -1,0 +1,644 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import multiprocessing as mp
+import os
+import shutil
+import tempfile
+import unittest
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.dataset as ds
+from parameterized import parameterized
+from pyarrow import parquet
+from torch import distributed as dist
+from torch.utils.data import DataLoader
+
+from tzrec.constant import Mode
+from tzrec.datasets.dataset import create_dataloader
+from tzrec.datasets.parquet_dataset import ParquetDataset, ParquetReader, ParquetWriter
+from tzrec.features.feature import create_features
+from tzrec.protos import data_pb2, feature_pb2
+from tzrec.utils import misc_util
+from tzrec.utils.checkpoint_util import EPOCHS_COMPLETED, update_dataloder_state
+from tzrec.utils.test_util import make_test_dir, parameterized_name_func
+
+
+class ParquetDatasetTest(unittest.TestCase):
+    def _create_test_parquet_data(self, test_dir: str, num_rows: int = 1000) -> None:
+        """Create test parquet data files."""
+        t = pa.Table.from_arrays(
+            [
+                pa.array(["unused"] * num_rows),
+                pa.array(["1"] * num_rows),
+                pa.array(["2\x033"] * num_rows),
+                pa.array([4] * num_rows),
+                pa.array([[5.0, 6.0]] * num_rows, type=pa.list_(pa.float32())),
+                pa.array([0] * num_rows),
+            ],
+            names=["unused", "id_a", "tag_b", "raw_c", "raw_d", "label"],
+        )
+        ds.write_dataset(
+            t,
+            test_dir,
+            format="parquet",
+            max_rows_per_file=5000,
+            max_rows_per_group=5000,
+        )
+
+    def _create_feature_cfgs(self):
+        """Create feature configs for testing."""
+        return [
+            feature_pb2.FeatureConfig(
+                id_feature=feature_pb2.IdFeature(feature_name="id_a")
+            ),
+            feature_pb2.FeatureConfig(
+                id_feature=feature_pb2.IdFeature(feature_name="tag_b")
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(feature_name="raw_c")
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(feature_name="raw_d", value_dim=2)
+            ),
+        ]
+
+    @parameterized.expand([[5000], [10000]])
+    def test_parquet_dataset(self, num_rows):
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows)
+
+            dataset = ParquetDataset(
+                data_config=data_pb2.DataConfig(
+                    batch_size=4,
+                    dataset_type=data_pb2.DatasetType.ParquetDataset,
+                    fg_mode=data_pb2.FgMode.FG_NONE,
+                    label_fields=["label"],
+                ),
+                features=features,
+                input_path=f"{test_dir}/*.parquet",
+            )
+            self.assertEqual(len(dataset.input_fields), 5)
+            dataloader = DataLoader(
+                dataset=dataset,
+                batch_size=None,
+                num_workers=2,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            )
+            iterator = iter(dataloader)
+            for _ in range(10):
+                data = next(iterator)
+            self.assertEqual(
+                sorted(data.to_dict().keys()),
+                [
+                    "id_a.lengths",
+                    "id_a.values",
+                    "label",
+                    "raw_c.values",
+                    "raw_d.values",
+                    "tag_b.lengths",
+                    "tag_b.values",
+                ],
+            )
+
+    def test_parquet_dataset_checkpoint_metadata(self):
+        """Test that checkpoint_info is present and has correct format."""
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows=1000)
+            input_path = f"{test_dir}/*.parquet"
+
+            dataset = ParquetDataset(
+                data_config=data_pb2.DataConfig(
+                    batch_size=128,
+                    dataset_type=data_pb2.DatasetType.ParquetDataset,
+                    fg_mode=data_pb2.FgMode.FG_NONE,
+                    label_fields=["label"],
+                ),
+                features=features,
+                input_path=input_path,
+            )
+            dataloader = DataLoader(
+                dataset=dataset,
+                batch_size=None,
+                num_workers=2,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            )
+            iterator = iter(dataloader)
+            batch = next(iterator)
+
+            # Verify checkpoint_info is present and has correct format
+            self.assertIsNotNone(batch.checkpoint_info)
+            self.assertIsInstance(batch.checkpoint_info, dict)
+
+            # Checkpoint keys should be in format "{input_path}:{start}"
+            for key, value in batch.checkpoint_info.items():
+                self.assertIn(":", key)
+                parts = key.rsplit(":", 1)
+                self.assertEqual(len(parts), 2)
+                # start should be numeric
+                self.assertTrue(parts[1].isdigit())
+                # Value should be a non-negative integer
+                self.assertIsInstance(value, int)
+                self.assertGreaterEqual(value, 0)
+
+    def test_parquet_dataset_checkpoint_resume(self):
+        """Test checkpoint resume functionality."""
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows=1000)
+            input_path = f"{test_dir}/*.parquet"
+
+            # First, read some batches and capture checkpoint info
+            dataset1 = ParquetDataset(
+                data_config=data_pb2.DataConfig(
+                    batch_size=128,
+                    dataset_type=data_pb2.DatasetType.ParquetDataset,
+                    fg_mode=data_pb2.FgMode.FG_NONE,
+                    label_fields=["label"],
+                ),
+                features=features,
+                input_path=input_path,
+            )
+            dataloader1 = DataLoader(
+                dataset=dataset1,
+                batch_size=None,
+                num_workers=2,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            )
+            iterator1 = iter(dataloader1)
+
+            # Read first batch and capture checkpoint
+            checkpoint_state_acc = {}
+            batch1 = next(iterator1)
+            first_checkpoint_state = batch1.checkpoint_info.copy()
+            update_dataloder_state(checkpoint_state_acc, first_checkpoint_state)
+            self.assertIsNotNone(first_checkpoint_state)
+            self.assertGreater(len(first_checkpoint_state), 0)
+
+            # Read more batches
+            for _ in range(3):
+                batch1 = next(iterator1)
+                update_dataloder_state(
+                    checkpoint_state_acc, batch1.checkpoint_info.copy()
+                )
+            del iterator1
+            del dataloader1
+
+            # Now create a new dataset with checkpoint state set
+            dataset2 = ParquetDataset(
+                data_config=data_pb2.DataConfig(
+                    batch_size=128,
+                    dataset_type=data_pb2.DatasetType.ParquetDataset,
+                    fg_mode=data_pb2.FgMode.FG_NONE,
+                    label_fields=["label"],
+                ),
+                features=features,
+                input_path=input_path,
+            )
+            dataloader2 = DataLoader(
+                dataset=dataset2,
+                batch_size=None,
+                num_workers=2,
+                pin_memory=True,
+                collate_fn=lambda x: x,
+            )
+            # Set first batch checkpoint state to resume from saved offsets
+            dataloader2.dataset.load_state_dict(first_checkpoint_state)
+            iterator2 = iter(dataloader2)
+
+            # Read batch from resumed dataset
+            batch2 = next(iterator2)
+
+            # The resumed batch should have offsets greater than the checkpoint
+            for key, new_offset in batch2.checkpoint_info.items():
+                if key in first_checkpoint_state:
+                    # New offset should be greater than first checkpoint offset
+                    self.assertGreater(new_offset, first_checkpoint_state[key])
+                if key in checkpoint_state_acc:
+                    # New offset should be less than or equal to acc checkpoint offset
+                    self.assertLessEqual(new_offset, checkpoint_state_acc[key])
+
+    def test_create_dataloader_checkpoint_state_reaches_workers(self):
+        """checkpoint_state passed to create_dataloader must reach forked workers."""
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+
+        def _drain(iterator):
+            keys = set()
+            num_rows = 0
+            for batch in iterator:
+                keys |= set(batch.checkpoint_info)
+                num_rows += len(batch.labels["label"])
+            return keys, num_rows
+
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            # 20000 rows at max_rows_per_file=5000 -> 4 files: rebalanced
+            # multi-worker intervals plus a tail remaining after 4 batches.
+            self._create_test_parquet_data(test_dir, num_rows=20000)
+            input_path = f"{test_dir}/*.parquet"
+            data_config = data_pb2.DataConfig(
+                batch_size=128,
+                dataset_type=data_pb2.DatasetType.ParquetDataset,
+                fg_mode=data_pb2.FgMode.FG_NONE,
+                label_fields=["label"],
+                num_workers=2,
+            )
+            self.assertTrue(data_config.in_order)
+
+            dataloader1 = create_dataloader(data_config, features, input_path)
+            self.assertTrue(dataloader1.in_order)
+            self.assertEqual(dataloader1.prefetch_factor, 2)
+            iterator1 = iter(dataloader1)
+            checkpoint_state = {}
+            for _ in range(4):
+                batch1 = next(iterator1)
+                update_dataloder_state(checkpoint_state, batch1.checkpoint_info)
+            self.assertGreater(len(checkpoint_state), 0)
+            # baseline rows of a full pass: 4 consumed batches + the rest
+            _, num_remain_rows = _drain(iterator1)
+            num_total_rows = 4 * 128 + num_remain_rows
+            del iterator1, dataloader1
+
+            num_consumed_rows = sum(
+                consumed - int(key.rsplit(":", 1)[1]) + 1
+                for key, consumed in checkpoint_state.items()
+            )
+            dataloader2 = create_dataloader(
+                data_config, features, input_path, checkpoint_state=checkpoint_state
+            )
+            resumed_keys, num_resumed_rows = _drain(iter(dataloader2))
+            # resumed intervals start at consumed+1, never at a saved start;
+            # without the pre-fork state, workers would replay the saved keys
+            self.assertTrue(resumed_keys.isdisjoint(checkpoint_state))
+            for key, consumed in checkpoint_state.items():
+                path = key.rsplit(":", 1)[0]
+                self.assertIn(f"{path}:{consumed + 1}", resumed_keys)
+            self.assertEqual(num_resumed_rows, num_total_rows - num_consumed_rows)
+
+            # state is consumed by the completed pass: a second iter() on the
+            # same (persistent-worker) dataloader reads the full dataset again
+            _, num_second_pass_rows = _drain(iter(dataloader2))
+            self.assertEqual(num_second_pass_rows, num_total_rows)
+            del dataloader2
+
+            # epoch-boundary checkpoints carry only reserved meta keys
+            # (__epochs_completed__ etc.); readers must skip them and read
+            # the full dataset
+            dataloader3 = create_dataloader(
+                data_config,
+                features,
+                input_path,
+                checkpoint_state={EPOCHS_COMPLETED: 1},
+            )
+            _, num_meta_only_rows = _drain(iter(dataloader3))
+            self.assertEqual(num_meta_only_rows, num_total_rows)
+            del dataloader3
+
+    @parameterized.expand(
+        [
+            # 8200 rows over 8 workers: one 8-row tail instead of eight 1-row tails
+            [0, False, [1024] * 8 + [8]],
+            [2, False, [1024] * 8 + [8]],
+            # drop_remainder alone, and min_batch_size=batch_size, drop the tail only
+            [0, True, [1024] * 8],
+            [1024, False, [1024] * 8],
+        ],
+        name_func=parameterized_name_func,
+    )
+    def test_create_dataloader_tail_batches(
+        self, min_batch_size, drop_remainder, expected
+    ):
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows=8200)
+            data_config = data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.ParquetDataset,
+                fg_mode=data_pb2.FgMode.FG_NONE,
+                label_fields=["label"],
+                num_workers=8,
+                min_batch_size=min_batch_size,
+                drop_remainder=drop_remainder,
+            )
+            dataloader = create_dataloader(data_config, features, f"{test_dir}/*")
+            sizes = sorted(
+                (len(batch.labels["label"]) for batch in dataloader.get_iterator()),
+                reverse=True,
+            )
+            self.assertEqual(sizes, expected)
+
+    @parameterized.expand(
+        [[Mode.EVAL], [Mode.PREDICT]], name_func=parameterized_name_func
+    )
+    def test_create_dataloader_eval_predict_no_tail_drop(self, mode):
+        # single rank: the knobs are inert outside training; multi-rank eval may
+        # still skip rows for lockstep, see test_parquet_reader_equal_steps
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows=8201)
+            data_config = data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.ParquetDataset,
+                fg_mode=data_pb2.FgMode.FG_NONE,
+                label_fields=["label"],
+                num_workers=8,
+                drop_remainder=True,
+                min_batch_size=2,
+            )
+            dataloader = create_dataloader(
+                data_config,
+                features,
+                f"{test_dir}/*",
+                reserved_columns=["label"],
+                mode=mode,
+            )
+            num_rows = sum(
+                len(batch.reserves.get())
+                if mode == Mode.PREDICT
+                else len(batch.labels["label"])
+                for batch in dataloader.get_iterator()
+            )
+            self.assertEqual(num_rows, 8201)
+
+    def test_min_batch_size_exceeds_batch_size(self):
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows=10)
+            data_config = data_pb2.DataConfig(
+                batch_size=4,
+                dataset_type=data_pb2.DatasetType.ParquetDataset,
+                fg_mode=data_pb2.FgMode.FG_NONE,
+                label_fields=["label"],
+                min_batch_size=5,
+            )
+            with self.assertRaisesRegex(ValueError, "min_batch_size"):
+                ParquetDataset(data_config, features, f"{test_dir}/*", mode=Mode.TRAIN)
+
+    def test_create_dataloader_get_iterator_reuses_eager_iterator(self):
+        """get_iterator() yields the eagerly prefetched iterator first.
+
+        When a resumed tail fits inside the eager iter()'s prefetch window it
+        exhausts (and clears the state) before training starts; reusing that
+        same iterator -- rather than resetting with a fresh iter() -- keeps the
+        tail's batches instead of silently re-reading the full share.
+        """
+        feature_cfgs = self._create_feature_cfgs()
+        features = create_features(feature_cfgs)
+
+        def _drain(iterator):
+            num_rows = 0
+            for batch in iterator:
+                num_rows += len(batch.labels["label"])
+            return num_rows
+
+        with tempfile.TemporaryDirectory(prefix="tzrec_") as test_dir:
+            self._create_test_parquet_data(test_dir, num_rows=20000)
+            input_path = f"{test_dir}/*.parquet"
+            data_config = data_pb2.DataConfig(
+                batch_size=128,
+                dataset_type=data_pb2.DatasetType.ParquetDataset,
+                fg_mode=data_pb2.FgMode.FG_NONE,
+                label_fields=["label"],
+                num_workers=2,
+                in_order=False,
+                prefetch_factor=4,
+            )
+
+            # full pass to learn the per-worker interval keys + total rows
+            dataloader0 = create_dataloader(data_config, features, input_path)
+            self.assertFalse(dataloader0.in_order)
+            self.assertEqual(dataloader0.prefetch_factor, 4)
+            full_state = {}
+            num_total_rows = 0
+            for batch in dataloader0.get_iterator():  # pyre-ignore[16]
+                update_dataloder_state(full_state, batch.checkpoint_info)
+                num_total_rows += len(batch.labels["label"])
+            del dataloader0
+
+            # leave a tiny tail (a few rows per interval) that fits prefetch
+            tail = 3
+            tail_state = {key: consumed - tail for key, consumed in full_state.items()}
+            expected_tail_rows = sum(
+                consumed - int(key.rsplit(":", 1)[1]) + 1
+                for key, consumed in tail_state.items()
+            )
+            expected_tail_rows = num_total_rows - expected_tail_rows
+
+            dataloader = create_dataloader(
+                data_config, features, input_path, checkpoint_state=tail_state
+            )
+            self.assertFalse(dataloader.in_order)
+            # first get_iterator() == the eager iterator -> resumed tail only
+            num_tail_rows = _drain(dataloader.get_iterator())  # pyre-ignore[16]
+            self.assertEqual(num_tail_rows, expected_tail_rows)
+            self.assertLess(num_tail_rows, num_total_rows)
+            # state cleared on exhaustion -> next get_iterator() is a full pass
+            num_next_rows = _drain(dataloader.get_iterator())  # pyre-ignore[16]
+            self.assertEqual(num_next_rows, num_total_rows)
+            del dataloader
+
+
+class ParquetReaderTest(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = make_test_dir()
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+
+    @parameterized.expand([[True], [False]])
+    def test_parquet_reader(self, rebalance):
+        def _reader_worker(rank, port):
+            os.environ["RANK"] = str(rank)
+            os.environ["WORLD_SIZE"] = str(2)
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(port)
+            dist.init_process_group(backend="gloo")
+            reader = ParquetReader(
+                os.path.join(self.test_dir, "*.parquet"),
+                batch_size=8192,
+                rebalance=rebalance,
+            )
+            total_cnt = 0
+            for batch in reader.to_batches(rank, 2):
+                total_cnt += len(batch["id_a"])
+            if rank == 0:
+                assert total_cnt == 3000 if rebalance else 5000
+            else:
+                assert total_cnt == 3000 if rebalance else 1000
+
+        for i, num_rows in enumerate([5000, 1000]):
+            t = pa.Table.from_arrays(
+                [
+                    pa.array(["unused"] * num_rows),
+                    pa.array(["1"] * num_rows),
+                    pa.array(["2\x033"] * num_rows),
+                    pa.array([4] * num_rows),
+                    pa.array([[5.0, 6.0]] * num_rows, type=pa.list_(pa.float32())),
+                    pa.array([0] * num_rows),
+                ],
+                names=["unused", "id_a", "tag_b", "raw_c", "raw_d", "label"],
+            )
+            writer = parquet.ParquetWriter(
+                os.path.join(self.test_dir, f"part-{i}.parquet"), schema=t.schema
+            )
+            writer.write_table(t)
+            writer.close()
+
+        world_size = 2
+        port = misc_util.get_free_port()
+        procs = []
+        for rank in range(world_size):
+            p = mp.Process(
+                target=_reader_worker,
+                args=(rank, port),
+            )
+            p.start()
+            procs.append(p)
+        for i, p in enumerate(procs):
+            p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"reader worker-{i} failed.")
+
+    @parameterized.expand(
+        [
+            # one worker per rank; extra row would buy one rank a fifth step: dropped
+            [33, 4, 0, 1, [[4] * 4, [4] * 4]],
+            # residue-1 tails stay when min_batch_size is 0 (rank 0 holds the extra)
+            [35, 4, 0, 1, [[4] * 4 + [2], [4] * 4 + [1]]],
+            # ... and go together with the extra row when min_batch_size=2
+            [35, 4, 2, 1, [[4] * 4, [4] * 4]],
+            # 8200 rows over two ranks: 4100 each, 4-row tails
+            [8200, 1024, 2, 1, [[1024] * 4 + [4], [1024] * 4 + [4]]],
+            # two workers per rank: full batches dealt two per worker, tail last
+            [35, 4, 0, 2, [[4] * 4 + [2], [4] * 4 + [1]]],
+        ],
+        name_func=parameterized_name_func,
+    )
+    def test_parquet_reader_equal_steps(
+        self, num_rows, batch_size, min_batch_size, local_workers, sizes
+    ):
+        def _reader_worker(rank, port):
+            os.environ["RANK"] = str(rank)
+            os.environ["WORLD_SIZE"] = str(2)
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(port)
+            dist.init_process_group(backend="gloo")
+            reader = ParquetReader(
+                os.path.join(self.test_dir, "*.parquet"),
+                batch_size=batch_size,
+                min_batch_size=min_batch_size,
+                equalize_rank_steps=True,
+            )
+            rank_sizes = []
+            for w in range(local_workers):
+                rank_sizes += [
+                    len(b["id_a"])
+                    for b in reader.to_batches(
+                        rank * local_workers + w, 2 * local_workers, world_size=2
+                    )
+                ]
+            assert sorted(rank_sizes, reverse=True) == sizes[rank], rank_sizes
+            # a tool slicing on its own terms, e.g. faiss_util.build_faiss_index,
+            # still reads the whole table on every rank
+            assert sum(len(b["id_a"]) for b in reader.to_batches()) == num_rows
+
+        t = pa.Table.from_arrays(
+            [pa.array(["1"] * num_rows), pa.array([0] * num_rows)],
+            names=["id_a", "label"],
+        )
+        writer = parquet.ParquetWriter(
+            os.path.join(self.test_dir, "part-0.parquet"), schema=t.schema
+        )
+        writer.write_table(t)
+        writer.close()
+
+        port = misc_util.get_free_port()
+        procs = [
+            mp.Process(target=_reader_worker, args=(rank, port)) for rank in range(2)
+        ]
+        for p in procs:
+            p.start()
+        for i, p in enumerate(procs):
+            p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"reader worker-{i} failed.")
+
+
+class ParquetWriterTest(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = make_test_dir()
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+
+    def test_parquet_writer(self):
+        def _writer_worker(rank):
+            os.environ["RANK"] = str(rank)
+            writer = ParquetWriter(self.test_dir)
+            for _ in range(5):
+                writer.write(
+                    {
+                        "int_a": pa.array(np.random.randint(0, 100, 128)),
+                        "float_b": pa.array(np.random.random(128)),
+                    }
+                )
+            writer.close()
+
+        world_size = 2
+        procs = []
+        for rank in range(world_size):
+            p = mp.Process(
+                target=_writer_worker,
+                args=(rank,),
+            )
+            p.start()
+            procs.append(p)
+        for i, p in enumerate(procs):
+            p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"writer worker-{i} failed.")
+        self.assertTrue(os.path.exists(os.path.join(self.test_dir, "part-0.parquet")))
+        self.assertTrue(os.path.exists(os.path.join(self.test_dir, "part-1.parquet")))
+
+    def test_parquet_writer_chunked_array(self):
+        os.environ["RANK"] = "0"
+        writer = ParquetWriter(self.test_dir)
+        writer.write(
+            {
+                "int_a": pa.chunked_array([pa.array([1, 2, 3]), pa.array([4, 5])]),
+                "float_b": pa.array([0.1, 0.2, 0.3, 0.4, 0.5]),
+            }
+        )
+        writer.close()
+        table = parquet.read_table(os.path.join(self.test_dir, "part-0.parquet"))
+        self.assertEqual(table.num_rows, 5)
+        self.assertEqual(table.column("int_a").to_pylist(), [1, 2, 3, 4, 5])
+
+
+if __name__ == "__main__":
+    unittest.main()

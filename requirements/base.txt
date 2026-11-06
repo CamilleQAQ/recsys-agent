@@ -1,0 +1,8 @@
+# 主环境（Python 3.11+）：本项目自研代码 + DeepCTR-Torch + LightGBM + FAISS 共用
+# 安装：pip install -r requirements/base.txt
+# 说明：版本用下界而非精确锁定，避免和已安装的 torch/CUDA 版本打架；
+#       需要完全复现的实验再单独冻结（pip freeze > requirements/lock-<date>.txt）。
+
+torch>=2.0
+numpy>=1.24
+certifi>=2023.7.22

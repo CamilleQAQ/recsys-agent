@@ -1,0 +1,881 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import os
+import random
+import threading
+import time
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
+import pyarrow as pa
+import urllib3
+from alibabacloud_credentials.client import Client as CredClient
+from odps import ODPS
+from odps.accounts import (
+    BaseAccount,
+    CloudAccount,
+    CredentialProviderAccount,
+)
+from odps.apis.storage_api import (
+    ArrowReader,
+    Compression,
+    ReadRowsRequest,
+    SessionRequest,
+    SessionStatus,
+    SplitOptions,
+    Status,
+    StorageApiArrowClient,
+    TableBatchScanRequest,
+    TableBatchWriteRequest,
+    WriteRowsRequest,
+)
+from odps.errors import ODPSError
+from torch import distributed as dist
+
+from tzrec.constant import Mode
+from tzrec.datasets.dataset import BaseDataset, BaseReader, BaseWriter
+from tzrec.datasets.utils import (
+    calc_slice_intervals,
+    inject_checkpoint_metadata,
+    remove_nullable,
+)
+from tzrec.features.feature import BaseFeature
+from tzrec.protos import data_pb2
+from tzrec.utils import dist_util
+from tzrec.utils.logging_util import logger
+
+ODPS_READ_SESSION_REFRESH_INTERVAL = 600
+
+TYPE_TABLE_TO_PA = {
+    "BIGINT": pa.int64(),
+    "DOUBLE": pa.float64(),
+    "FLOAT": pa.float32(),
+    "STRING": pa.string(),
+    "INT": pa.int32(),
+    "ARRAY<BIGINT>": pa.list_(pa.int64()),
+    "ARRAY<DOUBLE>": pa.list_(pa.float64()),
+    "ARRAY<FLOAT>": pa.list_(pa.float32()),
+    "ARRAY<STRING>": pa.list_(pa.string()),
+    "ARRAY<INT>": pa.list_(pa.int32()),
+    "ARRAY<ARRAY<BIGINT>>": pa.list_(pa.list_(pa.int64())),
+    "ARRAY<ARRAY<DOUBLE>>": pa.list_(pa.list_(pa.float64())),
+    "ARRAY<ARRAY<FLOAT>>": pa.list_(pa.list_(pa.float32())),
+    "ARRAY<ARRAY<STRING>>": pa.list_(pa.list_(pa.string())),
+    "ARRAY<ARRAY<INT>>": pa.list_(pa.list_(pa.int32())),
+    "MAP<STRING,BIGINT>": pa.map_(pa.string(), pa.int64()),
+    "MAP<STRING,DOUBLE>": pa.map_(pa.string(), pa.float64()),
+    "MAP<STRING,FLOAT>": pa.map_(pa.string(), pa.float32()),
+    "MAP<STRING,STRING>": pa.map_(pa.string(), pa.string()),
+    "MAP<STRING,INT>": pa.map_(pa.string(), pa.int32()),
+    "MAP<BIGINT,BIGINT>": pa.map_(pa.int64(), pa.int64()),
+    "MAP<BIGINT,DOUBLE>": pa.map_(pa.int64(), pa.float64()),
+    "MAP<BIGINT,FLOAT>": pa.map_(pa.int64(), pa.float32()),
+    "MAP<BIGINT,STRING>": pa.map_(pa.int64(), pa.string()),
+    "MAP<BIGINT,INT>": pa.map_(pa.int64(), pa.int32()),
+    "MAP<INT,BIGINT>": pa.map_(pa.int32(), pa.int64()),
+    "MAP<INT,DOUBLE>": pa.map_(pa.int32(), pa.float64()),
+    "MAP<INT,FLOAT>": pa.map_(pa.int32(), pa.float32()),
+    "MAP<INT,STRING>": pa.map_(pa.int32(), pa.string()),
+    "MAP<INT,INT>": pa.map_(pa.int32(), pa.int32()),
+}
+
+
+def _get_compression_type(compression_name: str) -> Compression:
+    type_names = [x.name for x in Compression]
+    if compression_name in type_names:
+        return Compression[compression_name]
+    else:
+        raise ValueError(
+            f"Unknown compression type: {compression_name}, available {type_names}"
+        )
+
+
+def _type_pa_to_table(pa_type: pa.DataType) -> str:
+    """PyArrow type to MaxCompute Table type."""
+    mc_type = None
+    pa_type = remove_nullable(pa_type)
+    for k, v in TYPE_TABLE_TO_PA.items():
+        # list<element: int64> and list<item: int64> is equal
+        if v == pa_type:
+            mc_type = k
+            break
+    if mc_type:
+        return mc_type
+    else:
+        raise RuntimeError(f"{pa_type} is not supported now.")
+
+
+def _parse_odps_config_file(odps_config_path: str) -> Tuple[str, str, str]:
+    """Parse odps config file."""
+    if os.path.exists(odps_config_path):
+        odps_config = {}
+        with open(odps_config_path, "r") as f:
+            for line in f.readlines():
+                values = line.split("=", 1)
+                if len(values) == 2:
+                    odps_config[values[0]] = values[1].strip()
+    else:
+        raise ValueError("No such file: %s" % odps_config_path)
+
+    try:
+        access_id = odps_config["access_id"]
+        access_key = odps_config["access_key"]
+        end_point = odps_config["end_point"]
+    except KeyError as err:
+        raise IOError(
+            "%s key does not exist in the %s file." % (str(err), odps_config_path)
+        ) from err
+
+    return access_id, access_key, end_point
+
+
+def _create_odps_account() -> Tuple[BaseAccount, str]:
+    account = None
+    sts_token = None
+    if "ODPS_CONFIG_FILE_PATH" in os.environ:
+        account_id, account_key, odps_endpoint = _parse_odps_config_file(
+            os.environ["ODPS_CONFIG_FILE_PATH"]
+        )
+        account = CloudAccount(account_id, account_key)
+    elif (
+        "ALIBABA_CLOUD_CREDENTIALS_URI" in os.environ
+        or "ALIBABA_CLOUD_SECURITY_TOKEN" in os.environ
+        or "ALIBABA_CLOUD_CREDENTIALS_FILE" in os.environ
+        or "ALIBABA_CLOUD_ECS_METADATA" in os.environ
+    ):
+        credentials_client = CredClient()
+        # prevent too much request to credential server after forked
+        credential = credentials_client.get_credential()
+        account_id = credential.access_key_id
+        account_key = credential.access_key_secret
+        sts_token = credential.security_token
+        account = CredentialProviderAccount(credentials_client)
+        try:
+            odps_endpoint = os.environ["ODPS_ENDPOINT"]
+        except KeyError as err:
+            raise RuntimeError(
+                "ODPS_ENDPOINT does not exist in environment variables."
+            ) from err
+    else:
+        account_id, account_key, odps_endpoint = _parse_odps_config_file(
+            os.path.join(os.getenv("HOME", "/home/admin"), ".odps_config.ini")
+        )
+        account = CloudAccount(account_id, account_key)
+
+    # prevent graph-learn parse odps config hang
+    os.environ["ACCESS_ID"] = account_id
+    os.environ["ACCESS_KEY"] = account_key
+    os.environ["END_POINT"] = odps_endpoint
+    if sts_token:
+        os.environ["STS_TOKEN"] = sts_token
+
+    return account, odps_endpoint
+
+
+def _parse_table_path(
+    odps_table_path: str,
+) -> Tuple[str, str, Optional[List[str]], Optional[str]]:
+    """Method that parse odps table path."""
+    str_list = odps_table_path.split("/")
+    if len(str_list) < 5 or str_list[3] != "tables":
+        raise ValueError(
+            f"'{odps_table_path}' is invalid, please refer:"
+            "'odps://${your_projectname}/tables/${table_name}/${pt_1}/${pt_2}&${pt_1}/${pt_2}'"
+        )
+
+    table_partition = "/".join(str_list[5:])
+    if not table_partition:
+        table_partitions = None
+    else:
+        table_partitions = table_partition.split("&")
+
+    table_name = str_list[4]
+    schema = None
+    if "." in table_name:
+        table_name, schema = table_name.split(".")[1], table_name.split(".")[0]
+    return str_list[2], table_name, table_partitions, schema
+
+
+def _storage_debug_info(client: StorageApiArrowClient, **req_fields: Any) -> str:
+    """Format MaxCompute storage-api context for error logging."""
+    parts = {
+        "table": client.table.full_table_name,
+        "quota": getattr(client, "_quota_name", None),
+        "endpoint": getattr(client, "_rest_endpoint", None),
+        **req_fields,
+    }
+    return ", ".join(f"{k}={v}" for k, v in parts.items())
+
+
+def _read_rows_arrow_with_retry(
+    client: StorageApiArrowClient,
+    read_req: ReadRowsRequest,
+) -> ArrowReader:
+    def debug_info() -> str:
+        return _storage_debug_info(
+            client,
+            session_id=read_req.session_id,
+            row_index=read_req.row_index,
+            row_count=read_req.row_count,
+            max_batch_rows=read_req.max_batch_rows,
+        )
+
+    max_retry_count = 3
+    retry_cnt = 0
+    while True:
+        try:
+            reader = client.read_rows_arrow(read_req)
+        except ODPSError as e:
+            if retry_cnt >= max_retry_count:
+                logger.error(
+                    f"read_rows_arrow failed after {retry_cnt} retries "
+                    f"({debug_info()}): {e!r}"
+                )
+                raise e
+            retry_cnt += 1
+            logger.warning(
+                f"read_rows_arrow retry {retry_cnt}/{max_retry_count} "
+                f"({debug_info()}): {e!r}"
+            )
+            time.sleep(random.choice([5, 9, 12]))
+            continue
+        except Exception as e:
+            logger.error(f"read_rows_arrow failed ({debug_info()}): {e!r}")
+            raise
+        break
+    return reader
+
+
+def _get_session_record_count(
+    client: StorageApiArrowClient,
+    sess_req: SessionRequest,
+) -> int:
+    """Get record count from a session, waiting until ready."""
+    while True:
+        try:
+            scan_resp = client.get_read_session(sess_req)
+        except Exception as e:
+            debug_info = _storage_debug_info(client, session_id=sess_req.session_id)
+            logger.error(f"get_read_session failed ({debug_info}): {e!r}")
+            raise
+        if scan_resp.session_status == SessionStatus.INIT:
+            time.sleep(1)
+            continue
+        break
+    # pyre-ignore [7]
+    return scan_resp.record_count
+
+
+def _create_read_session(
+    client: StorageApiArrowClient,
+    columns: List[str],
+    partitions: Optional[List[str]],
+) -> Tuple[str, int]:
+    """Create a batch scan session, return its id and record count."""
+    scan_req = TableBatchScanRequest(
+        split_options=SplitOptions(split_mode="RowOffset"),
+        required_data_columns=columns,
+        required_partitions=partitions,
+    )
+    try:
+        session_id = client.create_read_session(scan_req).session_id
+    except Exception as e:
+        debug_info = _storage_debug_info(client, partitions=partitions)
+        logger.error(f"create_read_session failed ({debug_info}): {e!r}")
+        raise
+    sess_req = SessionRequest(session_id=session_id)
+    return session_id, _get_session_record_count(client, sess_req)
+
+
+def _reader_iter(
+    client: StorageApiArrowClient,
+    sess_req: SessionRequest,
+    batch_size: int,
+    compression: Compression,
+    start: int,
+    end: int,
+    source_id: Optional[str] = None,
+) -> Iterator[pa.RecordBatch]:
+    """Read data from a single ODPS session.
+
+    Args:
+        client: StorageAPI Arrow client.
+        sess_req: Session request for the session to read.
+        batch_size: Batch size for reading.
+        compression: Compression type.
+        start: Start row index.
+        end: End row index.
+        source_id: Source ID for checkpoint tracking.
+
+    Yields:
+        RecordBatch for each batch.
+    """
+    if start >= end:
+        return
+
+    global_row_idx = start  # Track absolute row index
+    offset = 0
+    retry_cnt = 0
+    read_req = ReadRowsRequest(
+        session_id=sess_req.session_id,
+        row_index=start,
+        row_count=end - start,
+        max_batch_rows=min(batch_size, 20000),
+        compression=compression,
+    )
+    reader = _read_rows_arrow_with_retry(client, read_req)
+    max_retry_count = 5
+    while True:
+        try:
+            read_data = reader.read()
+            retry_cnt = 0
+        # pyre-ignore [66]
+        except (urllib3.exceptions.HTTPError, pa.lib.ArrowInvalid) as e:
+            if retry_cnt >= max_retry_count:
+                raise e
+            retry_cnt += 1
+            read_req = ReadRowsRequest(
+                session_id=sess_req.session_id,
+                row_index=start + offset,
+                row_count=end - start - offset,
+                max_batch_rows=min(batch_size, 20000),
+                compression=compression,
+            )
+            reader = _read_rows_arrow_with_retry(client, read_req)
+            continue
+        if read_data is None:
+            break
+        else:
+            retry_cnt = 0
+            batch_len = len(read_data)
+            offset += batch_len
+
+            # Inject checkpoint metadata if source_id is provided
+            if source_id is not None:
+                read_data, global_row_idx = inject_checkpoint_metadata(
+                    read_data, source_id, global_row_idx
+                )
+
+        yield read_data
+
+
+def _refresh_sessions_daemon(sess_id_to_cli: Dict[str, StorageApiArrowClient]) -> None:
+    start_time = time.time()
+    while True:
+        if time.time() - start_time > ODPS_READ_SESSION_REFRESH_INTERVAL:
+            for session_id, client in sess_id_to_cli.items():
+                try:
+                    client.get_read_session(SessionRequest(session_id, refresh=True))
+                    logger.info(f"refresh session: {session_id}")
+                except ODPSError as e:
+                    # we ignore the refresh error because the session should have been
+                    # refreshed within the last 12 hours.
+                    logger.debug(f"refresh session failed: {session_id} error: {e}")
+                    continue
+            start_time = time.time()
+        time.sleep(5)
+
+
+class OdpsDataset(BaseDataset):
+    """Dataset for reading data in Odps(Maxcompute).
+
+    Args:
+        data_config (DataConfig): an instance of DataConfig.
+        features (list): list of features.
+        input_path (str): data input path.
+    """
+
+    def __init__(
+        self,
+        data_config: data_pb2.DataConfig,
+        features: List[BaseFeature],
+        input_path: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(data_config, features, input_path, **kwargs)
+        # pyre-ignore [29]
+        self._reader = OdpsReader(
+            input_path,
+            self._batch_size,
+            list(self._selected_input_names) if self._selected_input_names else None,
+            self._drop_remainder,
+            shuffle=self._data_config.shuffle and self._mode == Mode.TRAIN,
+            shuffle_buffer_size=self._data_config.shuffle_buffer_size,
+            is_orderby_partition=self._data_config.is_orderby_partition,
+            quota_name=self._data_config.odps_data_quota_name,
+            compression=self._data_config.odps_data_compression,
+            sample_cost_field=self._data_config.sample_cost_field,
+            batch_cost_size=self._data_config.batch_cost_size,
+            min_batch_size=self._min_batch_size,
+            equalize_rank_steps=self._mode != Mode.PREDICT,
+            init_session_threads=max(self._data_config.num_workers, 1),
+        )
+
+
+class OdpsReader(BaseReader):
+    """Odps(Maxcompute) reader class.
+
+    Args:
+        input_path (str): data input path.
+        batch_size (int): batch size.
+        selected_cols (list): selection column names.
+        drop_remainder (bool): drop last batch, same as min_batch_size=batch_size.
+        shuffle (bool): shuffle data or not.
+        shuffle_buffer_size (int): buffer size for shuffle.
+        is_orderby_partition (bool): read data order by table partitions or not.
+        quota_name (str): storage api quota name.
+        compression (str):  storage api data compression name.
+        sample_cost_field (str): sample cost field name.
+        batch_cost_size (int): batch cost limit size.
+        init_session_threads (int): threads per rank to create read sessions and
+            fetch their record counts.
+        min_batch_size (int): drop a final batch with fewer rows, 0 disables.
+        equalize_rank_steps (bool): make every rank yield the same number of batches.
+    """
+
+    def __init__(
+        self,
+        input_path: str,
+        batch_size: int,
+        selected_cols: Optional[List[str]] = None,
+        drop_remainder: bool = False,
+        shuffle: bool = False,
+        shuffle_buffer_size: int = 32,
+        is_orderby_partition: bool = False,
+        quota_name: str = "pay-as-you-go",
+        compression: str = "LZ4_FRAME",
+        sample_cost_field: Optional[str] = None,
+        batch_cost_size: Optional[int] = None,
+        init_session_threads: int = 1,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            input_path,
+            batch_size,
+            selected_cols,
+            drop_remainder,
+            shuffle,
+            shuffle_buffer_size,
+            sample_cost_field=sample_cost_field,
+            batch_cost_size=batch_cost_size,
+            **kwargs,
+        )
+        self._pg = dist_util.get_dist_object_pg()
+        self._is_orderby_partition = is_orderby_partition
+        self._init_session_threads = init_session_threads
+        self._quota_name = quota_name
+        self._compression = _get_compression_type(compression)
+        os.environ["STORAGE_API_QUOTA_NAME"] = quota_name
+
+        self._account, self._odps_endpoint = _create_odps_account()
+        self._proj_to_o = {}
+        self._table_to_cli = {}
+        self._input_to_sess = {}
+        self._sess_row_counts: Dict[str, int] = {}
+        self._init_client()
+
+        fields = []
+        self._ordered_cols = []
+        _, table_name, _, _ = _parse_table_path(self._input_path.split(",")[0])
+        table = self._table_to_cli[table_name].table
+        for column in table.schema.simple_columns:
+            if not self._selected_cols or column.name in self._selected_cols:
+                column_type = str(column.type).upper()
+                if column_type not in TYPE_TABLE_TO_PA:
+                    raise ValueError(
+                        f"column [{column.name}] with dtype {column.type} "
+                        "is not supported now."
+                    )
+                fields.append(
+                    pa.field(column.name, TYPE_TABLE_TO_PA[str(column.type).upper()])
+                )
+                self._ordered_cols.append(column.name)
+        self._schema = pa.schema(fields)
+        self._init_session()
+
+    @property
+    def schema(self) -> pa.Schema:
+        """Table schema."""
+        return self._schema
+
+    def _init_client(self) -> None:
+        """Init storage api client."""
+        for input_path in self._input_path.split(","):
+            project, table_name, _, schema = _parse_table_path(input_path)
+            if project not in self._proj_to_o:
+                self._proj_to_o[project] = ODPS(
+                    account=self._account,
+                    project=project,
+                    endpoint=self._odps_endpoint,
+                    schema=schema,
+                )
+            if table_name not in self._table_to_cli:
+                o = self._proj_to_o[project]
+                self._table_to_cli[table_name] = StorageApiArrowClient(
+                    odps=o, table=o.get_table(table_name), quota_name=self._quota_name
+                )
+
+    def _init_session(self) -> None:
+        """Init table scan session."""
+        rank = int(os.environ.get("RANK", 0))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        sess_id_to_cli = {}
+        for input_path in self._input_path.split(","):
+            _, table_name, partitions, _ = _parse_table_path(input_path)
+            client = self._table_to_cli[table_name]
+            if self._is_orderby_partition and partitions is not None:
+                splited_partitions = [[x] for x in partitions]
+            else:
+                splited_partitions = [partitions]
+            # every rank creates a strided slice of the sessions, then all gather
+            rank_partitions = splited_partitions[rank::world_size]
+            with ThreadPoolExecutor(max_workers=self._init_session_threads) as executor:
+                sessions = list(
+                    executor.map(
+                        _create_read_session,
+                        [client] * len(rank_partitions),
+                        [self._ordered_cols] * len(rank_partitions),
+                        rank_partitions,
+                    )
+                )
+            if self._pg is not None:
+                sessions_list: List[Any] = [None] * world_size
+                dist.all_gather_object(sessions_list, sessions, group=self._pg)
+                sessions = [
+                    sessions_list[i % world_size][i // world_size]
+                    for i in range(len(splited_partitions))
+                ]
+            self._input_to_sess[input_path] = [
+                SessionRequest(session_id=x) for x, _ in sessions
+            ]
+            self._sess_row_counts.update(sessions)
+            if rank == 0:
+                sess_id_to_cli.update((x, client) for x, _ in sessions)
+        # refresh session
+        if rank == 0:
+            t = threading.Thread(
+                target=_refresh_sessions_daemon,
+                args=(sess_id_to_cli,),
+                daemon=True,
+            )
+            t.start()
+
+    def _restore_sessions(self, checkpoint_state: Dict[str, int]) -> None:
+        """Restore ODPS sessions from checkpoint state.
+
+        Parses session ids and their positions from checkpoint keys, validates the
+        sessions are still active and puts each one back at its own position, so
+        partitions that never produced a key (e.g. empty ones) keep the freshly
+        created session at their own index. Keys of unknown input paths are skipped
+        with a warning. Raises RuntimeError if a key of a current input path has no
+        session index (written by an older version), if an index exceeds the current
+        number of partition sessions, or if any session is expired/invalid.
+
+        Checkpoint key format: "{input_path}#{sess_idx}#{session_id}:{start}"
+
+        Args:
+            checkpoint_state: Checkpoint state dict mapping source_key to row index.
+        """
+        sess_by_input: Dict[str, Dict[int, str]] = {}  # {input_path: {idx: sess_id}}
+        for key in checkpoint_state.keys():
+            prefix, sep, _ = key.rpartition(":")
+            if not sep:
+                continue
+            input_and_idx, sep, session_id = prefix.rpartition("#")
+            if not sep:
+                continue
+            input_path, sep, sess_idx = input_and_idx.rpartition("#")
+            if not sep or not sess_idx.isdigit():
+                # "{input_path}#{session_id}" key of an older version
+                input_path, sess_idx = input_and_idx, "-1"
+            sess_by_input.setdefault(input_path, {})[int(sess_idx)] = session_id
+
+        for input_path, idx_to_sess in sess_by_input.items():
+            if input_path not in self._input_to_sess:
+                logger.warning(
+                    f"Checkpoint contains unknown input_path: {input_path}. "
+                    "Input paths may have changed since checkpoint was saved."
+                )
+                continue
+            _, table_name, _, _ = _parse_table_path(input_path)
+            client = self._table_to_cli[table_name]
+            sess_reqs = list(self._input_to_sess[input_path])
+
+            for sess_idx, session_id in idx_to_sess.items():
+                if sess_idx < 0:
+                    raise RuntimeError(
+                        f"Cannot resume from checkpoint: ODPS session {session_id} "
+                        f"for {input_path} has no session index, the checkpoint was "
+                        "written by an older TorchEasyRec version. "
+                        "Please restart training from scratch."
+                    )
+                if sess_idx >= len(sess_reqs):
+                    raise RuntimeError(
+                        f"Cannot resume from checkpoint: ODPS session {session_id} "
+                        f"for {input_path} has index {sess_idx} but only "
+                        f"{len(sess_reqs)} partition sessions exist now. "
+                        "Please restart training from scratch."
+                    )
+                sess_req = SessionRequest(session_id=session_id)
+                try:
+                    resp = client.get_read_session(sess_req)
+                    if resp.session_status == SessionStatus.EXPIRED:
+                        raise RuntimeError(
+                            f"Cannot resume from checkpoint: ODPS session {session_id} "
+                            f"for {input_path} has expired. Row order may have changed."
+                            " Please restart training from scratch."
+                        )
+                    sess_reqs[sess_idx] = sess_req
+                    self._sess_row_counts[session_id] = resp.record_count
+                except ODPSError as e:
+                    raise RuntimeError(
+                        f"Cannot resume from checkpoint: ODPS session {session_id} "
+                        f"for {input_path} is invalid. Error: {e}. "
+                        "Please restart training from scratch."
+                    ) from e
+            self._input_to_sess[input_path] = sess_reqs
+
+    def load_state_dict(self, state: Optional[Dict[str, int]]) -> None:
+        """Set checkpoint state and restore sessions.
+
+        Args:
+            state: dict mapping source_key to max consumed row index.
+        """
+        super().load_state_dict(state)
+        if state:
+            self._restore_sessions(state)
+
+    def to_batches(
+        self, worker_id: int = 0, num_workers: int = 1, world_size: Optional[int] = None
+    ) -> Iterator[Dict[str, pa.Array]]:
+        """Get batch iterator."""
+        # (source_id_prefix, record_count, client, session, name) in read order
+        sources = []
+        for input_path in self._input_path.split(","):
+            _, table_name, partitions, _ = _parse_table_path(input_path)
+            client = self._table_to_cli[table_name]
+            for sess_idx, sess_req in enumerate(self._input_to_sess[input_path]):
+                name = table_name
+                if self._is_orderby_partition and partitions is not None:
+                    name = f"{table_name}/{partitions[sess_idx]}"
+                sources.append(
+                    (
+                        f"{input_path}#{sess_idx}#{sess_req.session_id}",
+                        self._sess_row_counts[sess_req.session_id],
+                        client,
+                        sess_req,
+                        name,
+                    )
+                )
+        plan = calc_slice_intervals(
+            [(prefix, record_count) for prefix, record_count, _, _, _ in sources],
+            worker_id,
+            num_workers,
+            self._batch_size,
+            self._equalize_rank_steps,
+            self._min_batch_size,
+            checkpoint_state=self._checkpoint_state,
+            world_size=world_size,
+        )
+
+        def _combined_reader() -> Iterator[pa.RecordBatch]:
+            for i, ((prefix, _, client, sess_req, name), intervals) in enumerate(
+                zip(sources, plan)
+            ):
+                if worker_id == 0 and any(start < end for start, end in intervals):
+                    logger.info(f"Reading {name} ({i + 1}/{len(sources)})")
+                for start, end in intervals:
+                    if start >= end:
+                        continue
+                    yield from _reader_iter(
+                        client,
+                        sess_req,
+                        self._batch_size,
+                        self._compression,
+                        start,
+                        end,
+                        f"{prefix}:{start}",
+                    )
+
+        yield from self._arrow_reader_iter(_combined_reader())
+
+
+class OdpsWriter(BaseWriter):
+    """Odps(Maxcompute) writer class.
+
+    Args:
+        output_path (str): data output path.
+        quota_name (str): storage api quota name.
+        world_size (int, optional): number of ranks, each rank has a writer.
+    """
+
+    def __init__(
+        self,
+        output_path: str,
+        quota_name: str = "pay-as-you-go",
+        world_size: Optional[int] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(output_path)
+        self._pg = dist_util.get_dist_object_pg(world_size)
+        self._account, self._odps_endpoint = _create_odps_account()
+        self._quota_name = quota_name
+        os.environ["STORAGE_API_QUOTA_NAME"] = quota_name
+
+        self._project, self._table_name, partitions, schema = _parse_table_path(
+            output_path
+        )
+        if partitions is None:
+            self._partition_spec = None
+        else:
+            self._partition_spec = partitions[0]
+        self._o = ODPS(
+            account=self._account,
+            project=self._project,
+            endpoint=self._odps_endpoint,
+            schema=schema,
+        )
+        self._client = None
+        self._sess_req = None
+        self._writer = None
+
+    def _create_table(
+        self, output_dict: OrderedDict[str, Union[pa.Array, pa.ChunkedArray]]
+    ) -> None:
+        """Create output table."""
+        if not self._o.exist_table(self._table_name):
+            schemas = []
+            for k, v in output_dict.items():
+                schemas.append(f"{k} {_type_pa_to_table(v.type)}")
+            schema = ",".join(schemas)
+            if self._partition_spec:
+                pt_schemas = []
+                for pt_spec in self._partition_spec.split("/"):
+                    pt_name = pt_spec.split("=")[0]
+                    pt_schemas.append(f"{pt_name} STRING")
+                schema = (schema, ",".join(pt_schemas))
+            table_kwargs = {}
+            if "ODPS_TABLE_LIFECYCLE" in os.environ:
+                table_kwargs["lifecycle"] = int(os.environ["ODPS_TABLE_LIFECYCLE"])
+            self._o.create_table(
+                self._table_name,
+                schema,
+                hints={"odps.sql.type.system.odps2": "true"},
+                **table_kwargs,
+            )
+
+    def _create_partition(self) -> None:
+        """Create output partition."""
+        if self._partition_spec:
+            t = self._o.get_table(self._table_name)
+            partition_spec = self._partition_spec.replace("/", ",")
+            if not t.exist_partition(partition_spec):
+                t.create_partition(partition_spec, if_not_exists=True)
+
+    def _init_writer(self) -> None:
+        """Initialize table writer."""
+        self._client = StorageApiArrowClient(
+            odps=self._o,
+            table=self._o.get_table(self._table_name),
+            quota_name=self._quota_name,
+        )
+        session_id = None
+        if int(os.environ.get("RANK", 0)) == 0:
+            write_req = TableBatchWriteRequest(
+                partition_spec=self._partition_spec, overwrite=True
+            )
+            write_resp = self._client.create_write_session(write_req)
+            session_id = write_resp.session_id
+            object_list = [session_id]
+        else:
+            object_list = [None]
+        if self._pg is not None:
+            dist.broadcast_object_list(object_list, group=self._pg)
+        session_id = object_list[0]
+        self._sess_req = SessionRequest(session_id=session_id)
+        while True:
+            sess_resp = self._client.get_write_session(self._sess_req)
+            if sess_resp.session_status == SessionStatus.INIT:
+                time.sleep(1)
+                continue
+            break
+        row_req = WriteRowsRequest(
+            session_id=sess_resp.session_id, block_number=int(os.environ.get("RANK", 0))
+        )
+        self._writer = self._client.write_rows_arrow(row_req)
+
+    def _wait_init_table(self) -> None:
+        """Wait table and partition ready."""
+        while True:
+            if not self._o.exist_table(self._table_name):
+                time.sleep(1)
+                continue
+            t = self._o.get_table(self._table_name)
+            if self._partition_spec:
+                partition_spec = self._partition_spec.replace("/", ",")
+                if not t.exist_partition(partition_spec):
+                    time.sleep(1)
+                    continue
+            break
+
+    def write(
+        self, output_dict: OrderedDict[str, Union[pa.Array, pa.ChunkedArray]]
+    ) -> None:
+        """Write a batch of data."""
+        if not self._lazy_inited:
+            if int(os.environ.get("RANK", 0)) == 0:
+                self._create_table(output_dict)
+                self._create_partition()
+            else:
+                self._wait_init_table()
+            self._init_writer()
+            self._lazy_inited = True
+        output_arrays = self._flatten_chunked_arrays(output_dict)
+        record_batch = pa.RecordBatch.from_arrays(
+            output_arrays,
+            list(output_dict.keys()),
+        )
+        self._writer.write(record_batch)
+
+    def close(self) -> None:
+        """Close and commit data."""
+        if self._writer is not None:
+            commit_msg, _ = self._writer.finish()
+            if self._pg is not None:
+                if int(os.environ.get("RANK", 0)) == 0:
+                    commit_msgs = [None for _ in range(self._pg.size())]
+                else:
+                    commit_msgs = None
+                dist.gather_object(commit_msg, commit_msgs, group=self._pg)
+            else:
+                commit_msgs = [commit_msg]
+            if int(os.environ.get("RANK", 0)) == 0:
+                resp = self._client.commit_write_session(self._sess_req, commit_msgs)
+                while resp.status == Status.WAIT:
+                    time.sleep(1)
+                    resp = self._client.get_write_session(self._sess_req)
+                while resp.session_status == SessionStatus.COMMITTING:
+                    time.sleep(1)
+                    resp = self._client.get_write_session(self._sess_req)
+                if resp.session_status != SessionStatus.COMMITTED:
+                    raise RuntimeError(
+                        f"Fail to commit write session: {self._sess_req.session_id}, "
+                        f"status: {resp.status}, session_status: {resp.session_status}."
+                    )
+        elif self._pg is not None:
+            raise RuntimeError(
+                f"Writer on Rank[{os.environ.get('RANK', 0)}] has no "
+                "data, please check your input data."
+            )
+        super().close()

@@ -1,0 +1,5 @@
+# 向量检索（recsys.retrieval.faiss_index / recsys.evaluation.faiss_evaluator）
+# faiss-cpu 与 numpy 2.x 的兼容以实际 wheel 为准；装不上时先降 numpy 再重装 faiss-cpu。
+
+-r base.txt
+faiss-cpu>=1.7.4

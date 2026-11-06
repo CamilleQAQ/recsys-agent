@@ -1,0 +1,523 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import gc
+import importlib.util
+import os
+import tempfile
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
+
+import numpy as np
+import pandas as pd
+import torch
+from hypothesis import settings as _settings
+from hypothesis.utils.conventions import not_set as _not_set
+from torch import nn
+from torch.fx import GraphModule
+
+from tzrec.acc.aot_utils import export_model_aot, load_model_aot
+from tzrec.models.model import BaseModel, ScriptWrapper
+from tzrec.prompt.types import CompiledPrompt
+from tzrec.protos import feature_pb2
+from tzrec.protos.models.genrec_model_pb2 import GenRecModelConfig
+from tzrec.protos.prompt_pb2 import PromptSlot
+from tzrec.utils.export_util import split_model
+
+if TYPE_CHECKING:
+    from tzrec.features.feature import BaseFeature
+from tzrec.utils.fx_util import symbolic_trace
+
+nv_gpu_unavailable: Tuple[bool, str] = (
+    not torch.cuda.is_available() or torch.cuda.device_count() == 0,
+    "CUDA is not available or no GPUs detected",
+)
+amd_gpu_unavailable: Tuple[bool, str] = (
+    not torch.version.hip,
+    "AMD HIP not available or no GPUs detected",
+)
+gpu_unavailable: Tuple[bool, str] = (
+    nv_gpu_unavailable[0] and amd_gpu_unavailable[0],
+    "CUDA/HIP is not available or no GPUs detected",
+)
+
+# Optional-wheel probes via find_spec so importing test_util does NOT
+# eagerly load the wheel (or its CUDA/inductor/dynamo side effects) into
+# every test process.
+cutlass_hstu_unavailable: Tuple[bool, str] = (
+    importlib.util.find_spec("hstu") is None,
+    "fbgemm_gpu_hstu wheel is not installed",
+)
+torch_fx_tool_unavailable: Tuple[bool, str] = (
+    importlib.util.find_spec("torch_fx_tool") is None,
+    "torch_fx_tool wheel is not installed (required for RTP export)",
+)
+faiss_unavailable: Tuple[bool, str] = (
+    importlib.util.find_spec("faiss") is None,
+    "faiss is not installed (required for SID residual K-Means)",
+)
+flash_attn_unavailable: Tuple[bool, str] = (
+    importlib.util.find_spec("flash_attn") is None,
+    "flash_attn wheel is not installed (required for GenRec packed attention)",
+)
+
+
+def get_compare_tolerance(
+    dtype: torch.dtype,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Return (atol, rtol) for Triton-vs-PyTorch comparisons; widen fp32 on PPU."""
+    from tzrec.ops import is_ppu_arch
+
+    if is_ppu_arch() and dtype == torch.float32:
+        return (3e-5, 2e-5)
+    return (None, None)
+
+
+_settings.register_profile(
+    "default", _settings(_settings.get_profile("default"), print_blob=True)
+)
+
+
+class TestGraphType(Enum):
+    """Graph Type for Tests."""
+
+    NORMAL = 1
+    FX_TRACE = 2
+    JIT_SCRIPT = 3
+    AOT_INDUCTOR = 4
+
+
+def create_test_module(
+    module: nn.Module, graph_type: TestGraphType
+) -> Union[nn.Module, GraphModule, torch.jit.ScriptModule]:
+    """Create module with graph type for tests."""
+    if graph_type == TestGraphType.FX_TRACE:
+        module = symbolic_trace(module)
+    elif graph_type == TestGraphType.JIT_SCRIPT:
+        module = symbolic_trace(module)
+        module = torch.jit.script(module)
+    elif graph_type == TestGraphType.AOT_INDUCTOR:
+        module = symbolic_trace(module)
+
+    return module
+
+
+def create_test_model(
+    model: nn.Module,
+    graph_type: TestGraphType,
+    data: Optional[Dict[str, torch.Tensor]] = None,
+    test_dir: str = "",
+) -> Union[nn.Module, GraphModule, torch.jit.ScriptModule]:
+    """Create model with graph type for tests."""
+    if graph_type == TestGraphType.AOT_INDUCTOR:
+        model = ScriptWrapper(model)
+        assert data is not None
+        assert test_dir, "test_dir must be specified for AOT_INDUCTOR"
+        sparse, dense, meta_info = split_model(data, model, test_dir)
+        export_model_aot(sparse, dense, data, meta_info, test_dir)
+        model = load_model_aot(test_dir, torch.device("cuda:0"))
+        return model
+    else:
+        if graph_type == TestGraphType.JIT_SCRIPT:
+            model = ScriptWrapper(model)
+        return create_test_module(model, graph_type)
+
+
+def create_tiny_causal_lm(
+    vocab_size: int,
+    seed: int = 0,
+    tie_word_embeddings: bool = False,
+    model_type: str = "qwen2",
+    attn_implementation: str = "sdpa",
+    torch_dtype: torch.dtype = torch.float32,
+) -> nn.Module:
+    """A 2-layer causal LM cheap enough to build inside a unit test.
+
+    Seeded so two builds agree, and in ``eval()`` so dropout cannot make a decode
+    non-deterministic.
+
+    Args:
+        vocab_size (int): rows in the embedding table.
+        seed (int): torch seed the random init draws from.
+        tie_word_embeddings (bool): tie ``lm_head`` to the input embedding.
+        model_type (str): hugging-face ``model_type`` of the architecture.
+        attn_implementation (str): attention kernel to build it with.
+        torch_dtype (torch.dtype): dtype of the parameters.
+
+    Returns:
+        an eval-mode causal LM of ``model_type``.
+    """
+    from transformers import AutoConfig, AutoModelForCausalLM
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        config = AutoConfig.for_model(
+            model_type,
+            vocab_size=vocab_size,
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            # qwen3 defaults head_dim to 128 rather than hidden_size // heads
+            head_dim=8,
+            max_position_embeddings=64,
+            tie_word_embeddings=tie_word_embeddings,
+        )
+        return AutoModelForCausalLM.from_config(
+            config, attn_implementation=attn_implementation, torch_dtype=torch_dtype
+        ).eval()
+
+
+# pyre-ignore [2]
+def parameterized_name_func(func, num, p) -> str:
+    """Name func for parameterized."""
+    base_name = func.__name__
+    name_suffix = "_%s" % (num,)
+    return base_name + name_suffix
+
+
+def is_ci_nightly() -> bool:
+    """Whether this is the nightly full run (``CI_NIGHTLY=true``)."""
+    return os.environ.get("CI_NIGHTLY", "false").lower() == "true"
+
+
+def cleanup_cuda_memory() -> None:
+    """Release large CUDA cache reservations left by a test example."""
+    gc.collect()
+    if torch.cuda.is_available() and torch.cuda.memory_reserved() > 2**30:
+        torch.cuda.empty_cache()
+        torch.cuda.memory_summary()
+
+
+def make_test_dir(prefix: str = "tzrec_") -> str:
+    """Create a fresh, world-readable ``./tmp/<prefix>*`` dir; return its path."""
+    os.makedirs("./tmp", exist_ok=True)
+    test_dir = tempfile.mkdtemp(prefix=prefix, dir="./tmp")
+    os.chmod(test_dir, 0o755)
+    return test_dir
+
+
+class hypothesis_settings(_settings):
+    """Hypothesis settings for TorchEasyRec."""
+
+    def __init__(
+        self,
+        parent: Optional[_settings] = None,
+        *,
+        # pyre-ignore[9]
+        max_examples: int = _not_set,
+        # pyre-ignore[9]
+        derandomize: bool = _not_set,
+        **kwargs: Any,
+    ) -> None:
+        if is_ci_nightly():
+            if derandomize == _not_set:
+                derandomize = False
+        else:
+            if max_examples != _not_set:
+                max_examples = max(1, max_examples // 5)
+            if derandomize == _not_set:
+                derandomize = True
+        super().__init__(
+            parent, max_examples=max_examples, derandomize=derandomize, **kwargs
+        )
+
+
+def mark_ci_scope(*scopes: str) -> Any:
+    """Tag a unittest method or class as in-scope for the given CI lane(s).
+
+    Use at the class or method level only -- module-level fallback is
+    intentionally not supported so each new test class must declare its
+    own scope.
+
+    Examples:
+        @mark_ci_scope("h20")
+        class FooTest(unittest.TestCase): ...
+
+        @mark_ci_scope("h20", "l20")
+        def test_bar(self): ...
+    """
+
+    def decorator(obj: Any) -> Any:
+        existing = set(getattr(obj, "_ci_scopes", ()) or ())
+        obj._ci_scopes = existing | set(scopes)
+        return obj
+
+    return decorator
+
+
+def dicts_are_equal(
+    dict1: Dict[str, torch.Tensor], dict2: Dict[str, torch.Tensor]
+) -> bool:
+    """Compare dict[str,torch.Tensor]."""
+    if dict1.keys() != dict2.keys():
+        return False
+
+    for key in dict1:
+        if not torch.equal(dict1[key], dict2[key]):
+            return False
+
+    return True
+
+
+def lists_are_equal(list1: List[torch.Tensor], list2: List[torch.Tensor]) -> bool:
+    """Compare List[torch.Tensor]."""
+    if len(list1) != len(list2):
+        return False
+
+    for i in range(len(list1)):
+        if not torch.equal(list1[i], list2[i]):
+            return False
+    return True
+
+
+def dfs_are_close(df1: pd.DataFrame, df2: pd.DataFrame, abs_tol: float) -> bool:
+    """Compare DataFrame."""
+    if df1.shape != df2.shape:
+        return False
+    abs_diff = np.abs(df1.values - df2.values)
+    result = np.all(abs_diff <= abs_tol)
+    # pyre-ignore [7]
+    return result
+
+
+def generate_sparse_seq_len(
+    size: int,
+    max_seq_len: int,
+    sparsity: float,
+    device: torch.device,
+) -> torch.Tensor:
+    """Generate sequence lengths with sparsity."""
+    if sparsity == 0.0:
+        return torch.zeros(size=(size,), device=device, dtype=torch.int)
+    elif sparsity == 1.0:
+        return torch.ones(size=(size,), device=device, dtype=torch.int) * max_seq_len
+    elif sparsity >= 0.5:
+        min_seq_len: int = int((2 * sparsity - 1.0) * max_seq_len)
+        return torch.randint(
+            low=min_seq_len,
+            high=max_seq_len,
+            size=(size,),
+            device=device,
+            dtype=torch.int,
+        )
+    else:
+        min_seq_len: int = 0
+        max_seq_len: int = int(2 * sparsity * max_seq_len)
+        return torch.randint(
+            low=min_seq_len,
+            high=max_seq_len,
+            size=(size,),
+            device=device,
+            dtype=torch.int,
+        )
+
+
+def get_test_dtypes(dtypes: List[torch.dtype]) -> List[torch.dtype]:
+    """Get valid test dtypes."""
+    results = []
+    for dtype in dtypes:
+        if dtype == torch.bfloat16:
+            if torch.cuda.is_available():
+                if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 8:
+                    results.append(dtype)
+        else:
+            results.append(dtype)
+    return results
+
+
+def get_test_enable_tma() -> List[bool]:
+    """Get valid enable_tma options."""
+    results = [False]
+    if torch.cuda.is_available():
+        if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 9:
+            import triton
+            from packaging import version
+
+            if version.parse(triton.__version__) >= version.parse("3.5.0"):
+                results.append(True)
+    return results
+
+
+def reference_stu_truncation(
+    x: torch.Tensor,
+    x_offsets: torch.Tensor,
+    num_targets: Optional[List[int]],
+    truncate_tail_len: int,
+    contextual_seq_len: int = 0,
+) -> Tuple[torch.Tensor, List[int]]:
+    """Plain-Python UIH-only truncation: ``[ctx | last min(U, tail) UIH | targets]``."""
+    chunks: List[torch.Tensor] = []
+    new_lens: List[int] = []
+    for b in range(x_offsets.numel() - 1):
+        s, e = int(x_offsets[b].item()), int(x_offsets[b + 1].item())
+        L = e - s
+        T = int(num_targets[b]) if num_targets is not None else 0
+        U = L - contextual_seq_len - T
+        new_uih = max(0, min(U, truncate_tail_len))
+        prefix = x[s : s + contextual_seq_len]
+        uih_kept = x[
+            s + contextual_seq_len + (U - new_uih) : s + contextual_seq_len + U
+        ]
+        targets = x[e - T : e]
+        chunks.append(torch.cat([prefix, uih_kept, targets], dim=0))
+        new_lens.append(contextual_seq_len + new_uih + T)
+    return torch.cat(chunks, dim=0), new_lens
+
+
+def create_genrec_test_tokenizer(
+    path: str,
+    words: Sequence[str] = ("History", "Predict", ":", ".", "<unk>", "<|im_end|>"),
+) -> str:
+    """Write a word-level tokenizer for the genrec tests.
+
+    Args:
+        path (str): destination JSON path.
+        words (Sequence[str]): vocabulary entries in token-id order.
+
+    Returns:
+        str: the destination path.
+    """
+    from tokenizers import Tokenizer, models, pre_tokenizers
+
+    tokenizer = Tokenizer(
+        models.WordLevel(
+            vocab={word: i for i, word in enumerate(words)}, unk_token="<unk>"
+        )
+    )
+    # pyrefly: ignore[read-only]
+    tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+    tokenizer.save(path)
+    return path
+
+
+# offset SID codes for the (4, 4, 4) codebook create_genrec_test_prompt fixes:
+# level_offsets[l] + code, with offsets (0, 4, 8)
+GENREC_HIST_CODES = [0, 5, 10]
+GENREC_LONG_HIST_CODES = [0, 5, 10, 3, 4, 9]
+GENREC_ANSWER_CODES = [1, 6, 11]
+
+
+def create_genrec_test_prompt(
+    test_dir: str,
+    feature_configs: Optional[List[feature_pb2.FeatureConfig]] = None,
+    prompt: str = "History : {{hist}} . Predict :",
+    response: str = "{{answer}}",
+    slots: Sequence[PromptSlot] = (),
+) -> Tuple[CompiledPrompt, List["BaseFeature"]]:
+    """Compile a prompt over a tiny tokenizer, without building a backbone.
+
+    The default features are one ``hist`` raw sequence and the codebook is
+    ``(4, 4, 4)``, so an offset SID code is ``level_offsets[l] + code`` with
+    offsets ``(0, 4, 8)``.
+
+    Args:
+        test_dir (str): scratch directory the tokenizer is written under.
+        feature_configs (list, optional): feature configs; the ``hist`` raw
+            sequence when None.
+        prompt (str): the prompt template.
+        response (str): the response template.
+        slots (Sequence[PromptSlot]): explicit slot declarations.
+
+    Returns:
+        Tuple[CompiledPrompt, List["BaseFeature"]]: the compiled prompt and the
+        features it was compiled against.
+    """
+    from tzrec.features.feature import FgMode, create_features
+    from tzrec.prompt.compile import compile_prompt
+    from tzrec.protos.prompt_pb2 import PromptConfig
+
+    if feature_configs is None:
+        feature_configs = [
+            feature_pb2.FeatureConfig(
+                sequence_raw_feature=feature_pb2.RawFeature(
+                    feature_name="hist", expression="user:hist"
+                )
+            )
+        ]
+    features = create_features(feature_configs, fg_mode=FgMode.FG_NONE)
+    prompt_config = PromptConfig(
+        tokenizer_path=create_genrec_test_tokenizer(os.path.join(test_dir, "tok.json")),
+        prompt=prompt,
+        response=response,
+    )
+    prompt_config.sid_space.codebook.extend([4, 4, 4])
+    prompt_config.slots.extend(slots)
+    return compile_prompt(prompt_config, features, ["answer"]), features
+
+
+def create_genrec_test_model(
+    test_dir: str,
+    feature_configs: Optional[List[feature_pb2.FeatureConfig]] = None,
+    prompt: str = "History : {{hist}} . Predict :",
+    response: str = "{{answer}}",
+    slots: Sequence[PromptSlot] = (),
+    beam_widths: Sequence[int] = (2, 2, 2),
+    num_return_sequences: int = 2,
+    lm_parameter_dtype: Optional["GenRecModelConfig.ParamDtype"] = None,
+    attn_kernel: Optional[str] = None,
+    model_type: str = "qwen2",
+    init_seed: Optional[int] = None,
+) -> Tuple[BaseModel, CompiledPrompt]:
+    """Build a GenRecCausalLMModel over a tiny backbone and a compiled prompt.
+
+    The backbone and the tokenizer are written under ``test_dir``. The default
+    features are one ``hist`` raw sequence and the codebook is ``(4, 4, 4)``, so
+    an offset SID code is ``level_offsets[l] + code`` with offsets ``(0, 4, 8)``.
+
+    Args:
+        test_dir (str): scratch directory.
+        feature_configs (list, optional): feature configs; the ``hist`` raw
+            sequence when None.
+        prompt (str): the prompt template.
+        response (str): the response template.
+        slots (Sequence[PromptSlot]): explicit slot declarations.
+        beam_widths (Sequence[int]): per-level beam widths.
+        num_return_sequences (int): sequences returned per sample.
+        lm_parameter_dtype (optional): ``GenRecModelConfig.ParamDtype`` value.
+        attn_kernel (optional): transformers attn_implementation name.
+        model_type (str): hugging-face ``model_type`` of the backbone.
+        init_seed (int, optional): seed the random init draws from, when the
+            caller needs two builds to agree.
+
+    Returns:
+        Tuple[BaseModel, CompiledPrompt]: the model and the prompt it was built on.
+    """
+    from tzrec.main import _create_model
+    from tzrec.protos.model_pb2 import ModelConfig
+
+    backbone = os.path.join(test_dir, "backbone")
+    create_tiny_causal_lm(64, model_type=model_type).save_pretrained(backbone)
+    compiled_prompt, features = create_genrec_test_prompt(
+        test_dir, feature_configs, prompt, response, slots
+    )
+
+    model_config = ModelConfig()
+    lm_config = model_config.genrec_causal_lm_model
+    lm_config.hf_model_name_or_path = backbone
+    lm_config.common.beam_widths.extend(beam_widths)
+    lm_config.common.num_return_sequences = num_return_sequences
+    if lm_parameter_dtype is not None:
+        lm_config.common.lm_parameter_dtype = lm_parameter_dtype
+    if attn_kernel is not None:
+        lm_config.common.attn_kernel = attn_kernel
+    if init_seed is None:
+        model = _create_model(
+            model_config, features, ["answer"], compiled_prompt=compiled_prompt
+        )
+    else:
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(init_seed)
+            model = _create_model(
+                model_config, features, ["answer"], compiled_prompt=compiled_prompt
+            )
+    return model, compiled_prompt

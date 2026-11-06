@@ -1,0 +1,586 @@
+# Model Zoo 单一事实来源（single source of truth）
+#
+# 本文件是全部纳入本项目的推荐模型的机读索引。docs/model-zoo.md 与
+# models/<category>/README.md 都由 scripts/zoo.py 从本文件渲染；手改生成文档会被覆盖，
+# 请改这里再运行：
+#     python scripts/zoo.py render
+#     python scripts/zoo.py check
+#
+# 字段约定：
+#   id                 snake_case 唯一标识，适配层与后续统一接口用它做键
+#   category           retrieval（召回）| ranking（排序/精排）| infrastructure（检索/向量基础设施）
+#   family             first_party（本项目自研代码）| vendor（third_party 下的第三方原始代码）
+#   repo               vendor 模型对应的 third_party/<repo>；first_party 留空
+#   code               关键源码路径（相对项目根），check 会校验存在性
+#   license            许可证标识；vendor 以仓库根 LICENSE 为准
+#   upstream_url       原始地址；first_party 用本项目标记
+#   upstream_commit    克隆时的 commit（浅克隆 HEAD）
+#   principle          核心原理
+#   use_cases          适用场景
+#   deps               运行所需依赖（不含版本）
+#   python             上游声明或实测的 Python 版本要求
+#   train_entry        训练入口（命令或 API）
+#   infer_entry        推理/打分入口
+#   data_format        输入数据格式要求
+#   checkpoint         模型保存/加载方式
+#   completeness       ready | upstream_ready | blocked（含义见 models/README.md）
+#   completeness_note  完整度的具体依据
+#   adapter            统一适配层中的类名；留空表示尚未接入
+#   notes              其他注意事项（可选）
+
+version = 1
+updated = "2026-11-04"
+
+# 分类页的标题与说明（渲染 models/<category>/README.md 用）
+[categories.retrieval]
+title = "召回模型"
+summary = "从全量物品里挑出候选集。先用自研基线把数据线跑通，再换更重的模型。"
+hint = "可直接跑：popularity / matrix_factorization / two_tower。LightGCN 需要先生成 RecBole atomic 文件；MIND / HSTU / 语义 ID / OneRec 需要 Linux GPU 环境与外部权重。"
+
+[categories.ranking]
+title = "排序模型"
+summary = "对候选集做精排或序列下一物品预测。当前只有 SASRec 完成了端到端接入。"
+hint = "DeepCTR 系列（DIN / DIEN / DCNv2 / DeepFM / MMoE）缺的是特征通道，不是模型代码；LightGBM 是最省事的精排 baseline。"
+
+[categories.infrastructure]
+title = "基础设施"
+summary = "让召回跑起来的检索与向量能力，本身不是推荐模型。"
+hint = "FAISS 已接入并做过与暴力检索的一致性校验；TFRS 的 factorized_top_k 只作跨框架对照。"
+
+
+# ---------------------------------------------------------------- retrieval
+[[models]]
+id = "popularity"
+name = "Popularity"
+category = "retrieval"
+family = "first_party"
+repo = ""
+code = ["src/recsys/models/popularity.py"]
+license = "项目自有"
+upstream_url = "本项目（自研基线）"
+upstream_commit = ""
+principle = "按训练集交互次数对物品排序，推荐全局最热且用户未看过的 Top-K。"
+use_cases = "基线对照；任何数据集的冷启动兜底。"
+deps = []
+python = ">=3.11"
+train_entry = "无需训练；统计来自 PreparedData.train_interactions"
+infer_entry = "python -m recsys.experiments.compare（或适配层 PopularityAdapter）"
+data_format = "PreparedData（连续整数 user_idx/item_idx/timestamp）"
+checkpoint = "无参数，不需要保存；每次由训练集现算"
+completeness = "ready"
+completeness_note = "已实现，并被 compare/finalize 脚本作为对照基线使用"
+adapter = "PopularityAdapter"
+limitations = "只用训练集热度，无法个性化；冷门物品几乎不会被推荐，Coverage 明显偏低。"
+
+[[models]]
+id = "matrix_factorization"
+name = "BPR-MF（矩阵分解）"
+category = "retrieval"
+family = "first_party"
+repo = ""
+code = ["src/recsys/models/matrix_factorization.py", "src/recsys/training/train_mf.py"]
+license = "项目自有"
+upstream_url = "本项目（自研基线）"
+upstream_commit = ""
+principle = "用户/物品各学一个隐向量，点积即偏好分数，用 BPR 负采样训练。"
+use_cases = "隐式反馈基线；召回通道的最小可用模型。"
+deps = ["torch"]
+python = ">=3.11"
+train_entry = "python -m recsys.training.train_mf --dataset kuairec"
+infer_entry = "python -m recsys.evaluation.evaluator --checkpoint artifacts/<dataset>/matrix_factorization.pt"
+data_format = "PreparedData；评测用 seen-mask 过滤已曝光物品"
+checkpoint = "artifacts/<dataset>/matrix_factorization.pt（model_config + model_state_dict + train_config）"
+completeness = "ready"
+completeness_note = "训练、checkpoint、评测入口齐全"
+adapter = "MatrixFactorizationAdapter"
+limitations = "只学 ID 隐向量，用不上特征与序列；负样本随机采样、未做热度校正，长尾物品学到的东西很少。"
+
+[[models]]
+id = "two_tower"
+name = "Two-Tower（ID 双塔）"
+category = "retrieval"
+family = "first_party"
+repo = ""
+code = ["src/recsys/models/two_tower.py", "src/recsys/training/trainer.py"]
+license = "项目自有"
+upstream_url = "本项目（自研）"
+upstream_commit = ""
+principle = "用户塔/物品塔各自编码并 L2 归一化，用 batch 内负样本的交叉熵训练，内积即余弦相似度。"
+use_cases = "召回主干；可对接 FAISS 做全量 Top-K。"
+deps = ["torch", "faiss-cpu（可选）"]
+python = ">=3.11"
+train_entry = "python -m recsys.training.trainer --dataset kuairec"
+infer_entry = "python -m recsys.evaluation.evaluator --checkpoint artifacts/<dataset>/two_tower.pt"
+data_format = "PreparedData；物品词表必须与 checkpoint 一致"
+checkpoint = "artifacts/<dataset>/two_tower.pt（自带 model_config 与 split_strategy 校验）"
+completeness = "ready"
+completeness_note = "训练/暴力评测/FAISS 评测均已实现"
+adapter = "TwoTowerAdapter"
+limitations = "只吃 ID 特征，KuaiSAR 的行为/上下文特征尚未接入；batch 内负样本会带来假负例（mask_false_negatives 可缓解但无法消除）。"
+
+[[models]]
+id = "lightgcn"
+name = "LightGCN"
+category = "retrieval"
+family = "vendor"
+repo = "RecBole"
+code = ["third_party/RecBole/recbole/model/general_recommender/lightgcn.py", "third_party/MMRec/src/models/lightgcn.py"]
+license = "MIT（RecBole）/ GPL-3.0（MMRec）"
+upstream_url = "https://github.com/RUCAIBox/RecBole"
+upstream_commit = "7b02be5ec80a88310f2d04a27a82adfcbb5dc211"
+principle = "在用户-物品二部图上做多层无特征线性传播并加权求和，去掉非线性与自连接。"
+use_cases = "协同过滤召回；交互图稠密、无侧信息的场景。"
+deps = ["torch", "recbole"]
+python = ">=3.10"
+train_entry = "cd third_party/RecBole && python run_recbole.py --model=LightGCN --dataset=<atomic数据集>"
+infer_entry = "RecBole Trainer.evaluate / 模型 full_sort_predict"
+data_format = "RecBole atomic 文件（.inter/.user/.item，带类型表头）"
+checkpoint = "RecBole saved/<model>/ 下的 .pth 与训练配置"
+completeness = "upstream_ready"
+completeness_note = "上游实现完整；尚未接入 PreparedData 适配层，需要先做 atomic 文件或内存数据桥接"
+adapter = ""
+
+[[models]]
+id = "dssm"
+name = "DSSM（双塔）"
+category = "retrieval"
+family = "vendor"
+repo = "TorchEasyRec"
+code = ["third_party/TorchEasyRec/tzrec/models/dssm.py", "third_party/TorchEasyRec/tzrec/models/dssm_v2.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/alibaba/TorchEasyRec"
+upstream_commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+principle = "用户侧/物品侧特征分别过 MLP 成向量，batch 内负采样 + 采样 softmax 训练。"
+use_cases = "工业级双塔召回参考实现（含特征工程与在线 serving 格式）。"
+deps = ["torch", "tzrec"]
+python = ">=3.10（上游 wheel 面向 3.10-3.12 Linux）"
+train_entry = "cd third_party/TorchEasyRec && python -m tzrec.train_eval --pipeline_config_path <config>"
+infer_entry = "python -m tzrec.predict --pipeline_config_path <config>"
+data_format = "CSV/Parquet/ODPS + pipeline protobuf 声明特征、标签与模型"
+checkpoint = "训练输出目录下的 model/（TorchScript 导出 + 配置快照）"
+completeness = "blocked"
+completeness_note = "依赖阿里 OSS 上的 Linux-only wheel（graphlearn/pyfg/common_io），Windows 无法直接安装，需要独立 Linux 环境"
+adapter = ""
+
+[[models]]
+id = "mind"
+name = "MIND（多兴趣召回）"
+category = "retrieval"
+family = "vendor"
+repo = "TorchEasyRec"
+code = ["third_party/TorchEasyRec/tzrec/models/mind.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/alibaba/TorchEasyRec"
+upstream_commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+principle = "在双塔结构上对用户行为序列做动态路由聚类，得到多个兴趣向量分别召回后合并。"
+use_cases = "用户兴趣多峰的短视频/电商场景，与 KuaiSAR 的短期兴趣建模契合。"
+deps = ["torch", "tzrec"]
+python = ">=3.10（Linux）"
+train_entry = "python -m tzrec.train_eval --pipeline_config_path examples/mind_taobao.config"
+infer_entry = "python -m tzrec.predict --pipeline_config_path <config>"
+data_format = "用户 item 序列特征 + 候选特征，pipeline protobuf 声明"
+checkpoint = "同 TorchEasyRec（model/ 目录）"
+completeness = "blocked"
+completeness_note = "同 DSSM，受 TorchEasyRec 平台依赖限制，需 Linux 环境验证"
+adapter = ""
+
+[[models]]
+id = "sid_rqvae"
+name = "语义 ID 召回（RQ-VAE，TorchEasyRec 路线）"
+category = "retrieval"
+family = "vendor"
+repo = "TorchEasyRec"
+code = ["third_party/TorchEasyRec/tzrec/models/sid_rqvae.py", "third_party/TorchEasyRec/tzrec/models/sid_rqkmeans.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/alibaba/TorchEasyRec"
+upstream_commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+principle = "用残差量化把物品内容/协同向量压成层级语义 ID，再以生成式或前缀检索方式召回候选。"
+use_cases = "生成式召回的工业落地路径；冷启动与跨域迁移。"
+deps = ["torch", "tzrec", "transformers"]
+python = ">=3.10（Linux）"
+train_entry = "python -m tzrec.train_eval --pipeline_config_path <sid config>"
+infer_entry = "python -m tzrec.predict --pipeline_config_path <config>"
+data_format = "物品侧 embedding/多模态特征 → 语义 ID；生成式侧需序列化 token"
+checkpoint = "同 TorchEasyRec；语义 ID 码本必须与模型一起版本化"
+completeness = "blocked"
+completeness_note = "受 TorchEasyRec 平台依赖限制；TIGER 的正式实现在 genrec（见 tiger 条目），此处只保留工业语义 ID 路线"
+adapter = ""
+
+[[models]]
+id = "tiger"
+name = "TIGER（生成式检索）"
+category = "retrieval"
+family = "vendor"
+repo = "genrec"
+code = ["third_party/genrec/genrec/models/tiger.py", "third_party/genrec/genrec/models/rqvae.py", "third_party/genrec/config/tiger/amazon/tiger.gin"]
+license = "MIT"
+upstream_url = "https://github.com/phonism/genrec"
+upstream_commit = "2676b5b08e2efc0b873ab4c3d66882611a62ca2e"
+principle = "先用 RQ-VAE 把物品压成层级语义 ID，再用 Transformer 以序列到序列方式生成候选 ID，并用 trie 约束解码。"
+use_cases = "生成式召回研究；与向量召回做对照；物品语义表示实验。"
+deps = ["torch==2.6", "transformers", "gin_config", "wandb", "sentence_transformers"]
+python = ">=3.9（genrec 声明）"
+train_entry = "cd third_party/genrec && python -m genrec.trainers.rqvae_trainer config/tiger/amazon/rqvae.gin && python -m genrec.trainers.tiger_trainer config/tiger/amazon/tiger.gin"
+infer_entry = "genrec.trainers.tiger_trainer 的 evaluate/生成路径（trie 约束解码）"
+data_format = "交互序列 CSV + 物品 embedding（用于训练 RQ-VAE）→ 语义 ID 序列"
+checkpoint = "genrec 输出目录：RQ-VAE 码本 + TIGER 权重；两者必须成套使用"
+completeness = "blocked"
+completeness_note = "genrec 固定 torch==2.6 并发依赖，需独立环境；本项目还没有物品 embedding 与语义 ID 构建流程（见 docs/kuasar-roadmap.md 第 5 节）"
+adapter = ""
+
+[[models]]
+id = "hstu"
+name = "HSTU（生成式序列推荐）"
+category = "retrieval"
+family = "vendor"
+repo = "TorchEasyRec"
+code = ["third_party/TorchEasyRec/tzrec/models/hstu.py", "third_party/TorchEasyRec/tzrec/models/ultra_hstu.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/alibaba/TorchEasyRec"
+upstream_commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+principle = "层次化序列转导单元：带时间偏置的注意力直接建模长行为序列。"
+use_cases = "长序列召回/排序统一建模；短视频场景。"
+deps = ["torch", "tzrec"]
+python = ">=3.10（Linux）"
+train_entry = "python -m tzrec.train_eval --pipeline_config_path <hstu config>"
+infer_entry = "python -m tzrec.predict --pipeline_config_path <config>"
+data_format = "行为序列 + 时间戳 + 候选特征"
+checkpoint = "同 TorchEasyRec"
+completeness = "blocked"
+completeness_note = "需要 TorchEasyRec 运行栈；Meta 官方研究实现（generative-recommenders）可作算法对照，但 checkpoint 不通用"
+adapter = ""
+
+[[models]]
+id = "onerec"
+name = "OneRec（Qwen3 生成式推荐）"
+category = "retrieval"
+family = "vendor"
+repo = "OpenOneRec"
+code = ["third_party/OpenOneRec/pretrain/onerec_llm/models/qwen3/modeling_qwen3.py", "third_party/OpenOneRec/tokenizer/res_kmeans.py"]
+license = "Apache-2.0（README 声明；仓库根 LICENSE 缺失）"
+upstream_url = "https://github.com/Kuaishou-OneRec/OpenOneRec"
+upstream_commit = "a969edcadd579a06c1966ae1db5984e02f48beff"
+principle = "把推荐当成序列到序列生成：残差 K-Means 构造语义 ID，Qwen3 主干做 SFT/蒸馏/GRPO 生成候选。"
+use_cases = "生成式召回/重排研究；与快手系数据（KuaiSAR/KuaiRand）同源生态。"
+deps = ["torch", "transformers", "verl", "vllm", "ray"]
+python = ">=3.10（多卡 Linux）"
+train_entry = "third_party/OpenOneRec/pretrain/recipes/train_qwen3.py；verl_rl/recipe/onerec/run_grpo.sh"
+infer_entry = "tokenizer/infer_res_kmeans.py；benchmarks/scripts/ray-vllm/evaluate.py"
+data_format = "Parquet chat/segments + itemic token；tokenizer 侧需物品 embedding 与 pid"
+checkpoint = "HuggingFace 格式权重目录（外部 Qwen3/OneRec 权重，不随仓库提供）"
+completeness = "blocked"
+completeness_note = "需外部权重与 RecIF 数据、多卡环境；根许可证缺失，再分发前须确认"
+adapter = ""
+
+[[models]]
+id = "tfrs_two_tower"
+name = "TFRS Two-Tower（TensorFlow）"
+category = "retrieval"
+family = "vendor"
+repo = "recommenders"
+code = ["third_party/recommenders/tensorflow_recommenders/tasks/retrieval.py", "third_party/recommenders/tensorflow_recommenders/layers/factorized_top_k.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/tensorflow/recommenders"
+upstream_commit = "a8a90aee3f0b470cda96d47e26de99eedb7fc730"
+principle = "Keras 定义查询塔/候选塔，Retrieval task 以采样 softmax 训练，factorized_top_k 提供 BruteForce/Streaming/ScaNN 检索。"
+use_cases = "TF 技术栈的召回实现；跨框架对照。"
+deps = ["tensorflow", "tf-keras"]
+python = ">=3.9"
+train_entry = "Keras Model.fit（docs/examples/*.ipynb，无统一训练 CLI）"
+infer_entry = "tensorflow_recommenders/tasks/retrieval.py + layers/factorized_top_k.py"
+data_format = "tf.data.Dataset 特征字典（query/candidate 分开）"
+checkpoint = "tf.saved_model / Keras .keras"
+completeness = "blocked"
+completeness_note = "需要独立 TF2 环境，与 PyTorch 主栈版本冲突，不做同环境共存"
+adapter = ""
+
+[[models]]
+id = "mmrec_multimodal"
+name = "MMRec 多模态推荐框架"
+category = "retrieval"
+family = "vendor"
+repo = "MMRec"
+code = ["third_party/MMRec/src/models/lattice.py", "third_party/MMRec/src/models/vbpr.py", "third_party/MMRec/src/main.py"]
+license = "GPL-3.0"
+upstream_url = "https://github.com/enoche/MMRec"
+upstream_commit = "c68ee7c9b0de1ca7c5150258322edb4994be29d9"
+principle = "用视觉/文本预提取特征增强用户-物品图模型（VBPR、LATTICE、DualGNN 等 22 个实现）。"
+use_cases = "有多模态物品特征的场景；KuaiSAR 的视频/封面特征可复用同一范式。"
+deps = ["torch", "torch_geometric", "torch_scatter", "torchvision"]
+python = "3.7 时代实现，现代 Python 需移植"
+train_entry = "cd third_party/MMRec/src && python main.py --model=LATTICE --dataset=<name>"
+infer_entry = "src/common/trainer.py + 各模型 full_sort_predict"
+data_format = "交互表 + 与物品 ID 对齐的视觉/文本特征文件"
+checkpoint = "saved/<model>/<dataset>/ 下的 .pth"
+completeness = "blocked"
+completeness_note = "requirements 固定 numpy1.21/pandas1.3.5/torch1.11；GPL-3.0 传染性需评估；特征数据需另行下载"
+adapter = ""
+
+# ------------------------------------------------------------------ ranking
+[[models]]
+id = "sasrec"
+name = "SASRec（本项目实现）"
+category = "ranking"
+family = "first_party"
+repo = ""
+code = ["src/recsys/models/sasrec.py", "src/recsys/training/train_sasrec.py", "third_party/SASRec.pytorch/python/model.py"]
+license = "项目自有（对照实现 Apache-2.0）"
+upstream_url = "本项目（自研）；对照 https://github.com/pmixer/SASRec.pytorch"
+upstream_commit = "26a8fa880f312c3700f8dcca5512d5854b257f4e"
+principle = "单向（因果）自注意力编码用户历史，按「下一个物品」目标训练，对全量物品打分排序。"
+use_cases = "序列推荐主力模型；召回或排序均可，本项目按下一物品预测评测。"
+deps = ["torch"]
+python = ">=3.11"
+train_entry = "python -m recsys.training.train_sasrec --dataset kuairec"
+infer_entry = "python -m recsys.evaluation.sasrec_evaluator --checkpoint artifacts/<dataset>/sasrec.pt"
+data_format = "PreparedData → 右对齐/右补齐的 item 序列（token 0 为 padding）"
+checkpoint = "artifacts/<dataset>/sasrec.pt（含 max_seq_len 等结构配置）"
+completeness = "ready"
+completeness_note = "训练/早停/评测（含 train-history-only 对照）已实现"
+adapter = "SASRecAdapter"
+limitations = "只保留最近 max_seq_len 个物品，超长历史被截断；无侧信息；按用户构造样本，用户量级大时单 epoch 成本高。"
+
+[[models]]
+id = "bert4rec"
+name = "BERT4Rec"
+category = "ranking"
+family = "vendor"
+repo = "BERT4Rec"
+code = ["third_party/BERT4Rec/modeling.py", "third_party/BERT4Rec/run.py", "third_party/BERT4Rec/gen_data_fin.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/FeiSun/BERT4Rec"
+upstream_commit = "615eaf2004abecda487a38d5b0c72f3dcfcae5b3"
+principle = "双向 Transformer + 掩码物品预测（Cloze），从两侧上下文推断被遮住的物品。"
+use_cases = "序列推荐；对双向上下文敏感的场景。"
+deps = ["tensorflow==1.12", "numpy", "six"]
+python = "2.7/3.6（TF1.12）"
+train_entry = "python gen_data_fin.py && python run.py --train_input=<tfrecord> ..."
+infer_entry = "run.py 的 Estimator.predict 路径（无现代 predict API）"
+data_format = "用户物品序列 → masked TFRecord + vocab/history pickle"
+checkpoint = "TF Estimator checkpoint 目录"
+completeness = "blocked"
+completeness_note = "依赖 tf.contrib 等 TF1 API，无法与现代 TF2/PyTorch 环境共存，只能作算法参考"
+adapter = ""
+
+[[models]]
+id = "din"
+name = "DIN（深度兴趣网络）"
+category = "ranking"
+family = "vendor"
+repo = "FuxiCTR"
+code = ["third_party/FuxiCTR/model_zoo/DIN/src/DIN.py", "third_party/DeepCTR-Torch/deepctr_torch/models/din.py", "third_party/RecBole/recbole/model/sequential_recommender/din.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/reczoo/FuxiCTR"
+upstream_commit = "183da1c944ba8930fcdcd54114837c081959d748"
+principle = "用注意力对用户历史行为按候选物品加权池化，刻画局部激活兴趣。"
+use_cases = "CTR 精排；行为序列 + 候选物品的注意力建模。"
+deps = ["torch", "fuxictr", "pandas", "pyarrow", "ray[data]"]
+python = ">=3.10（FuxiCTR）"
+train_entry = "cd third_party/FuxiCTR/model_zoo/DIN && python run_expid.py --config ./config --expid DIN_test --gpu 0"
+infer_entry = "fuxictr BaseModel.predict + 保存的 checkpoint"
+data_format = "特征表（CSV/Parquet）+ dataset_config.yaml 声明特征与标签"
+checkpoint = "FuxiCTR 输出目录下的 model.ckpt + 配置快照"
+completeness = "upstream_ready"
+completeness_note = "FuxiCTR（主档案指定来源）与 DeepCTR-Torch 都有完整实现；本项目尚未实现 KuaiSAR 特征表 → 两套输入的转换"
+adapter = ""
+
+[[models]]
+id = "dien"
+name = "DIEN（深度兴趣演化）"
+category = "ranking"
+family = "vendor"
+repo = "DeepCTR-Torch"
+code = ["third_party/DeepCTR-Torch/deepctr_torch/models/dien.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/shenweichen/DeepCTR-Torch"
+upstream_commit = "9eccef78e5810c61d6a04ddc7d96279e3db9c970"
+principle = "兴趣抽取层 + AUGRU 兴趣演化层，让兴趣向量随行为序列演进。"
+use_cases = "长序列 CTR；兴趣漂移明显的场景。"
+deps = ["torch", "scikit-learn", "tqdm"]
+python = ">=3.8"
+train_entry = "python examples/run_dien.py"
+infer_entry = "basemodel.predict"
+data_format = "行为序列 + 序列长度字段（VarLenSparseFeat + seq_len）"
+checkpoint = "save_model/load_model"
+completeness = "upstream_ready"
+completeness_note = "同上，缺数据转换层"
+adapter = ""
+
+[[models]]
+id = "dcnv2"
+name = "DCNv2（Deep & Cross v2）"
+category = "ranking"
+family = "vendor"
+repo = "FuxiCTR"
+code = ["third_party/FuxiCTR/model_zoo/DCNv2/src/DCNv2.py", "third_party/DeepCTR-Torch/deepctr_torch/models/dcnmix.py", "third_party/TorchEasyRec/tzrec/models/dcn_v2.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/reczoo/FuxiCTR"
+upstream_commit = "183da1c944ba8930fcdcd54114837c081959d748"
+principle = "显式高阶特征交叉（矩阵式 cross layer + 低秩分解）与 DNN 并行，缓解 DCNv1 的标量权重限制。"
+use_cases = "CTR 精排主力结构；稠密特征交叉。"
+deps = ["torch", "fuxictr", "pandas", "pyarrow", "ray[data]"]
+python = ">=3.10（FuxiCTR）"
+train_entry = "cd third_party/FuxiCTR/model_zoo/DCNv2 && python run_expid.py --config ./config --expid DCNv2_test --gpu 0"
+infer_entry = "fuxictr BaseModel.predict + 保存的 checkpoint"
+data_format = "特征表（CSV/Parquet）+ dataset_config.yaml 声明特征与标签"
+checkpoint = "FuxiCTR 输出目录下的 model.ckpt + 配置快照（三个实现的 checkpoint 互不通用）"
+completeness = "upstream_ready"
+completeness_note = "FuxiCTR 为主来源；DeepCTR-Torch / TorchEasyRec 有等价实现，但互不通用，实验只选一条线"
+adapter = ""
+
+[[models]]
+id = "deepfm"
+name = "DeepFM"
+category = "ranking"
+family = "vendor"
+repo = "DeepCTR-Torch"
+code = ["third_party/DeepCTR-Torch/deepctr_torch/models/deepfm.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/shenweichen/DeepCTR-Torch"
+upstream_commit = "9eccef78e5810c61d6a04ddc7d96279e3db9c970"
+principle = "FM 二阶交叉与 DNN 共享同一份 embedding，端到端联合训练。"
+use_cases = "CTR 基线；低阶+高阶交叉的通用起点。"
+deps = ["torch", "scikit-learn", "tqdm"]
+python = ">=3.8"
+train_entry = "python examples/run_classification_criteo.py"
+infer_entry = "basemodel.predict"
+data_format = "特征字典 + 标签"
+checkpoint = "save_model/load_model"
+completeness = "upstream_ready"
+completeness_note = "上游样例自带 criteo/movielens 小样本"
+adapter = ""
+
+[[models]]
+id = "mmoe"
+name = "MMoE / PLE（多任务）"
+category = "ranking"
+family = "vendor"
+repo = "DeepCTR-Torch"
+code = ["third_party/DeepCTR-Torch/deepctr_torch/models/multitask/mmoe.py", "third_party/DeepCTR-Torch/deepctr_torch/models/multitask/ple.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/shenweichen/DeepCTR-Torch"
+upstream_commit = "9eccef78e5810c61d6a04ddc7d96279e3db9c970"
+principle = "多专家 + 门控为每个任务组合专家输出；PLE 进一步做任务间分层隔离。"
+use_cases = "同时优化点击/时长/完播等多目标；KuaiSAR 的多行为标签可直接映射。"
+deps = ["torch", "scikit-learn", "tqdm"]
+python = ">=3.8"
+train_entry = "python examples/run_multitask_learning.py"
+infer_entry = "basemodel.predict（多输出）"
+data_format = "特征字典 + 多列标签"
+checkpoint = "save_model/load_model"
+completeness = "upstream_ready"
+completeness_note = "多目标标签体系需按 KuaiSAR 行为重新定义"
+adapter = ""
+
+[[models]]
+id = "lightgbm_ranker"
+name = "LightGBM LambdaRank"
+category = "ranking"
+family = "vendor"
+repo = "LightGBM"
+code = ["third_party/LightGBM/python-package/lightgbm/sklearn.py", "third_party/LightGBM/src/objective/rank_objective.hpp"]
+license = "MIT"
+upstream_url = "https://github.com/lightgbm-org/LightGBM"
+upstream_commit = "3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9"
+principle = "GBDT 直接优化排序目标（LambdaRank / rank_xendcg），按 query 分组计算 NDCG 梯度。"
+use_cases = "精排基线；特征工程友好、训练成本低的强 baseline。"
+deps = ["lightgbm", "numpy", "scipy", "scikit-learn"]
+python = ">=3.11（python-package/pyproject.toml）"
+train_entry = "lightgbm.LGBMRanker.fit(X, y, group=...)（或 CLI：lightgbm config=train.conf）"
+infer_entry = "Booster.predict / LGBMRanker.predict"
+data_format = "稠密/稀疏特征矩阵 + label + 连续 query group（一个用户的候选为一个 group）"
+checkpoint = "booster.save_model('model.txt') / Booster(model_file=...)"
+completeness = "upstream_ready"
+completeness_note = "pip install lightgbm 即可用；本仓库源码仅在需要自定义编译时才需要"
+adapter = ""
+
+[[models]]
+id = "ultra_hstu"
+name = "Ultra-HSTU（TorchEasyRec 排序版）"
+category = "ranking"
+family = "vendor"
+repo = "TorchEasyRec"
+code = ["third_party/TorchEasyRec/tzrec/models/ultra_hstu.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/alibaba/TorchEasyRec"
+upstream_commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+principle = "在 HSTU 转导堆叠上接排序头，直接对候选做 CTR/时长预估。"
+use_cases = "长序列 + 生成式主干的精排。"
+deps = ["torch", "tzrec"]
+python = ">=3.10（Linux）"
+train_entry = "python -m tzrec.train_eval --pipeline_config_path <ultra_hstu config>"
+infer_entry = "python -m tzrec.predict --pipeline_config_path <config>"
+data_format = "行为序列 + 候选特征 + 标签"
+checkpoint = "同 TorchEasyRec"
+completeness = "blocked"
+completeness_note = "平台依赖限制同 DSSM/MIND"
+adapter = ""
+
+# ----------------------------------------------------------- infrastructure
+[[models]]
+id = "faiss"
+name = "FAISS（向量检索）"
+category = "infrastructure"
+family = "vendor"
+repo = "faiss"
+code = ["third_party/faiss/faiss/IndexFlat.cpp", "third_party/faiss/faiss/IndexIVF.cpp", "third_party/faiss/faiss/IndexHNSW.cpp", "third_party/faiss/faiss/IndexPQ.cpp"]
+license = "MIT"
+upstream_url = "https://github.com/facebookresearch/faiss"
+upstream_commit = "9acf8b0c16a51aafa12b9d9bcf13998b9138a8c5"
+principle = "提供 Flat/IVF/PQ/HNSW/LSH 等近邻索引与聚类实现，对上游 embedding 做 Top-K 检索。"
+use_cases = "召回阶段的候选生成；大规模向量打分。本身不是推荐模型。"
+deps = ["faiss-cpu"]
+python = ">=3.10"
+train_entry = "Index.train(xb) / add(xb)（建索引即可，无需拟合）"
+infer_entry = "Index.search(xq, k)"
+data_format = "float32 N×d 向量；索引必须与建库时的 embedding 模型配套"
+checkpoint = "index.write('x.faiss') / faiss.read_index('x.faiss')"
+completeness = "ready"
+completeness_note = "本项目通过 recsys.retrieval.faiss_index 调用已安装的 faiss-cpu，仓库源码仅作参考，无需本地编译"
+adapter = ""
+limitations = "仓库源码需 C++ 编译，本项目实际用 pip 的 faiss-cpu；索引与 embedding 必须同版本，换模型要重建索引。"
+
+[[models]]
+id = "faiss_item_index"
+name = "FAISS 物品索引封装（本项目）"
+category = "infrastructure"
+family = "first_party"
+repo = ""
+code = ["src/recsys/retrieval/faiss_index.py", "src/recsys/evaluation/faiss_evaluator.py"]
+license = "项目自有"
+upstream_url = "本项目（自研）"
+upstream_commit = ""
+principle = "把双塔用户/物品向量写入 FAISS IndexFlatIP，校验 L2 归一化，并与暴力检索做一致性对比。"
+use_cases = "全量召回评测、检索性能基准、后续在线 serving 的检索底座。"
+deps = ["faiss-cpu", "numpy", "torch"]
+python = ">=3.11"
+train_entry = "无（构建索引即 build_faiss_index）"
+infer_entry = "python -m recsys.evaluation.faiss_evaluator --checkpoint artifacts/<dataset>/two_tower.pt"
+data_format = "L2 归一化的 float32 向量（用户/物品同维度）"
+checkpoint = "FaissItemIndex 可落盘（index.write / read_index）"
+completeness = "ready"
+completeness_note = "已实现暴力检索一致性校验（top_k_agreement）与性能基准"
+adapter = "FaissItemIndex"
+limitations = "只封装 IndexFlatIP（精确检索）；数据量大时要换 IVF/HNSW 并重新校准召回率；索引不含物品 ID 元数据，只能靠向量行号对应。"
+
+[[models]]
+id = "tfrs_factorized_top_k"
+name = "TFRS factorized_top_k"
+category = "infrastructure"
+family = "vendor"
+repo = "recommenders"
+code = ["third_party/recommenders/tensorflow_recommenders/layers/factorized_top_k.py"]
+license = "Apache-2.0"
+upstream_url = "https://github.com/tensorflow/recommenders"
+upstream_commit = "a8a90aee3f0b470cda96d47e26de99eedb7fc730"
+principle = "以 Keras 层封装 BruteForce/Streaming/ScaNN 三种候选检索策略，可在 tf.data 流水线内做 Top-K。"
+use_cases = "TF 技术栈检索；作为 FAISS 的对照实现。"
+deps = ["tensorflow", "tf-keras", "scann（可选）"]
+python = ">=3.9"
+train_entry = "无需训练（TopK 层直接调用）"
+infer_entry = "layer(query_embeddings) → (scores, identifiers)"
+data_format = "tf.Tensor 查询/候选向量"
+checkpoint = "随 Keras 模型一起保存（layer 本身无权重）"
+completeness = "blocked"
+completeness_note = "依赖 TF2，与主栈 PyTorch 环境隔离"
+adapter = ""

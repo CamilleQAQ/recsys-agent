@@ -1,0 +1,133 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import csv
+import os
+import shutil
+import tempfile
+import unittest
+
+import pyarrow.dataset as ds
+from parameterized import parameterized
+
+from tzrec.tools.tdm.gen_tree.tree_cluster import TreeCluster
+from tzrec.tools.tdm.gen_tree.tree_search_util import TreeSearch
+from tzrec.utils.test_util import make_test_dir
+
+
+class TreeSearchtest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.test_dir = make_test_dir()
+        self.tmp_file = tempfile.NamedTemporaryFile(
+            dir=self.test_dir, mode="w", delete=False, newline="", suffix=".csv"
+        )
+        writer = csv.writer(self.tmp_file)
+        writer.writerow(["item_id", "int_a", "float_b", "str_c", "item_emb"])
+        for i in range(6):
+            writer.writerow([i, i, 0.1 * i, f"我们{i}", [i] * 4])
+        self.tmp_file.close()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.test_dir)
+        os.environ.pop("USE_HASH_NODE_ID", None)
+
+    @parameterized.expand([[False, ","], [True, ","], [True, ":"]])
+    def test_tree_search(self, use_hash_id: bool, attr_delimiter: str = ",") -> None:
+        if use_hash_id:
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        cluster = TreeCluster(
+            item_input_path=self.tmp_file.name,
+            item_id_field="item_id",
+            attr_fields="int_a,str_c",
+            raw_attr_fields="float_b",
+            output_dir=None,
+            embedding_field="item_emb",
+            parallel=1,
+            n_cluster=2,
+        )
+
+        root = cluster.train(save_tree=False)
+        search = TreeSearch(output_file=self.test_dir, root=root, child_num=2)
+        search.save(attr_delimiter=attr_delimiter)
+        search.save_predict_edge()
+        search.save_node_feature("item_id", "int_a,str_c", "float_b")
+        search.save_serving_tree(self.test_dir)
+
+        node_table = []
+        edge_table = []
+        predict_edge_table = []
+        serving_tree = []
+        with open(os.path.join(self.test_dir, "node_table.txt")) as f:
+            for i, line in enumerate(f):
+                if i > 0:
+                    self.assertEqual(len(line.split("\t")[-1].split(attr_delimiter)), 5)
+                node_table.append(line)
+        with open(os.path.join(self.test_dir, "edge_table.txt")) as f:
+            for line in f:
+                edge_table.append(line)
+        with open(os.path.join(self.test_dir, "predict_edge_table.txt")) as f:
+            for line in f:
+                predict_edge_table.append(line)
+        with open(os.path.join(self.test_dir, "serving_tree")) as f:
+            for line in f:
+                serving_tree.append(line)
+        node_feat_table = ds.dataset(
+            os.path.join(self.test_dir, "node_feature")
+        ).to_table()
+
+        self.assertEqual(len(node_table), 15)
+        self.assertEqual(len(edge_table), 13)
+        self.assertEqual(len(predict_edge_table), 14)
+        self.assertEqual(len(serving_tree), 14)
+        self.assertEqual(len(node_feat_table), 13)
+
+    def test_tree_search_null_raw_attr(self) -> None:
+        """A null raw attr is written as "0" instead of breaking the join."""
+        null_file = tempfile.NamedTemporaryFile(
+            dir=self.test_dir, mode="w", delete=False, newline="", suffix=".csv"
+        )
+        writer = csv.writer(null_file)
+        writer.writerow(["item_id", "int_a", "float_b", "str_c", "item_emb"])
+        for i in range(6):
+            # the third item has no float_b, so its raw attr arrives as null
+            writer.writerow([i, i, "" if i == 2 else 0.1 * i, f"我们{i}", [i] * 4])
+        null_file.close()
+
+        cluster = TreeCluster(
+            item_input_path=null_file.name,
+            item_id_field="item_id",
+            attr_fields="int_a,str_c",
+            raw_attr_fields="float_b",
+            output_dir=None,
+            embedding_field="item_emb",
+            parallel=1,
+            n_cluster=2,
+        )
+        output_dir = os.path.join(self.test_dir, "null_raw_attr")
+        search = TreeSearch(output_file=output_dir, root=cluster.train(save_tree=False))
+        search.save(attr_delimiter=",")
+
+        # feature is level,item_id,int_a,str_c,float_b
+        raw_attr_by_id = {}
+        with open(os.path.join(output_dir, "node_table.txt")) as f:
+            next(f)
+            for line in f:
+                node_id, _, feature = line.rstrip("\n").split("\t")
+                fields = feature.split(",")
+                if len(fields) == 5:
+                    raw_attr_by_id[node_id] = fields[4]
+        # the null attr falls back to "0", while a real 0.0 stays distinguishable
+        self.assertEqual(raw_attr_by_id["2"], "0")
+        self.assertEqual(raw_attr_by_id["0"], "0.0")
+
+
+if __name__ == "__main__":
+    unittest.main()

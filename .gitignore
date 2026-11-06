@@ -1,0 +1,43 @@
+# 生成物、缓存与本地数据
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 运行时数据与实验产物（目录结构保留在 data/README.md、artifacts/README.md）
+data/raw/
+data/processed/
+data/kuairec/
+data/movielens/
+artifacts/*
+!artifacts/README.md
+!artifacts/.gitkeep
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 模型权重：只记录来源，不入库
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+*.faiss
+
+# 第三方仓库的本地改动记录（如需保留补丁，放到 patches/ 而不是直接改 third_party/）
+patches/*.rej

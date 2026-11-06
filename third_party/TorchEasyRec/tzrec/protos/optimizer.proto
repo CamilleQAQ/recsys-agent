@@ -1,0 +1,305 @@
+syntax = "proto2";
+package tzrec.protos;
+
+message SparseOptimizer {
+    oneof optimizer {
+        FusedSGDOptimizer sgd_optimizer = 1;
+        FusedAdagradOptimizer adagrad_optimizer = 2;
+        FusedAdamOptimizer adam_optimizer = 3;
+        FusedLarsSGDOptimizer lars_sgd_optimizer = 4;
+        FusedLAMBOptimizer lamb_optimizer = 5;
+        FusedPartialRowWiseLAMBOptimizer partial_rowwise_lamb_optimizer = 6;
+        FusedPartialRowWiseAdamOptimizer partial_rowwise_adam_optimizer = 7;
+        FusedRowWiseAdagradOptimizer rowwise_adagrad_optimizer = 8;
+        FusedAdadeltaOptimizer adadelta_optimizer = 9;
+        FusedRMSpropOptimizer rmsprop_optimizer = 10;
+        FusedFTRLOptimizer ftrl_optimizer = 11;
+    }
+    oneof learning_rate {
+        ConstantLR constant_learning_rate = 101;
+        ExponentialDecayLR exponential_decay_learning_rate = 102;
+        ManualStepLR manual_step_learning_rate = 103;
+        CosineAnnealingLR cosine_annealing_learning_rate = 104;
+        CosineAnnealingWarmRestartsLR cosine_annealing_warm_restarts_learning_rate = 105;
+        LinearDecayLR linear_decay_learning_rate = 106;
+    }
+}
+
+message EMAConfig {
+    // Exponential moving average decay in [0, 1].
+    optional float decay = 1 [default = 0.999];
+}
+
+message DenseOptimizer {
+    oneof optimizer {
+        SGDOptimizer sgd_optimizer = 1;
+        AdagradOptimizer adagrad_optimizer = 2;
+        AdamOptimizer adam_optimizer = 3;
+        AdamWOptimizer adamw_optimizer = 4;
+        AdadeltaOptimizer adadelta_optimizer = 5;
+        RMSpropOptimizer rmsprop_optimizer = 6;
+    }
+    oneof learning_rate {
+        ConstantLR constant_learning_rate = 101;
+        ExponentialDecayLR exponential_decay_learning_rate = 102;
+        ManualStepLR manual_step_learning_rate = 103;
+        CosineAnnealingLR cosine_annealing_learning_rate = 104;
+        CosineAnnealingWarmRestartsLR cosine_annealing_warm_restarts_learning_rate = 105;
+        LinearDecayLR linear_decay_learning_rate = 106;
+    }
+    repeated PartOptimizer part_optimizers = 201;
+    optional EMAConfig ema = 202;
+}
+
+message PartOptimizer {
+    oneof optimizer {
+        SGDOptimizer sgd_optimizer = 1;
+        AdagradOptimizer adagrad_optimizer = 2;
+        AdamOptimizer adam_optimizer = 3;
+        AdamWOptimizer adamw_optimizer = 4;
+        AdadeltaOptimizer adadelta_optimizer = 6;
+        RMSpropOptimizer rmsprop_optimizer = 7;
+    }
+    required string regex_pattern = 5;
+    oneof learning_rate {
+        ConstantLR constant_learning_rate = 101;
+        ExponentialDecayLR exponential_decay_learning_rate = 102;
+        ManualStepLR manual_step_learning_rate = 103;
+        CosineAnnealingLR cosine_annealing_learning_rate = 104;
+        CosineAnnealingWarmRestartsLR cosine_annealing_warm_restarts_learning_rate = 105;
+        LinearDecayLR linear_decay_learning_rate = 106;
+    }
+}
+
+enum WeightDecayMode {
+    NONE = 0;
+    L2 = 1;
+    DECOUPLE = 2;
+}
+
+message FusedSGDOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional bool gradient_clipping = 2 [default = false];
+    optional float max_gradient = 3 [default = 1.0];
+}
+
+message FusedAdagradOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional bool gradient_clipping = 2 [default = false];
+    optional float max_gradient = 3 [default = 1.0];
+    optional float initial_accumulator_value = 4 [default = 0.0];
+}
+
+message FusedAdamOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float beta1 = 2 [default = 0.9];
+    optional float beta2 = 3 [default = 0.999];
+    optional float weight_decay = 4 [default = 0.0];
+    optional bool gradient_clipping = 5 [default = false];
+    optional float max_gradient = 6 [default = 1.0];
+}
+
+message FusedLarsSGDOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float momentum = 2 [default = 0.9];
+    optional float weight_decay = 3 [default = 0.0];
+    optional bool gradient_clipping = 4 [default = false];
+    optional float max_gradient = 5 [default = 1.0];
+}
+
+message FusedLAMBOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float beta1 = 2 [default = 0.9];
+    optional float beta2 = 3 [default = 0.999];
+    optional float weight_decay = 4 [default = 0.0];
+    optional bool gradient_clipping = 5 [default = false];
+    optional float max_gradient = 6 [default = 1.0];
+}
+
+message FusedPartialRowWiseLAMBOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float beta1 = 2 [default = 0.9];
+    optional float beta2 = 3 [default = 0.999];
+    optional float weight_decay = 4 [default = 0.0];
+    optional bool gradient_clipping = 5 [default = false];
+    optional float max_gradient = 6 [default = 1.0];
+}
+
+message FusedPartialRowWiseAdamOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float beta1 = 2 [default = 0.9];
+    optional float beta2 = 3 [default = 0.999];
+    optional float weight_decay = 4 [default = 0.0];
+    optional bool gradient_clipping = 5 [default = false];
+    optional float max_gradient = 6 [default = 1.0];
+}
+
+message FusedRowWiseAdagradOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float weight_decay = 2 [default = 0.0];
+    optional WeightDecayMode weight_decay_mode = 3 [default = NONE];
+    optional bool gradient_clipping = 4 [default = false];
+    optional float max_gradient = 5 [default = 1.0];
+    optional float initial_accumulator_value = 6 [default = 0.0];
+}
+
+message FusedAdadeltaOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float rho = 2 [default = 0.95];
+    optional float eps = 3 [default = 1e-6];
+    optional float weight_decay = 4 [default = 0.0];
+    optional bool gradient_clipping = 5 [default = false];
+    optional float max_gradient = 6 [default = 1.0];
+}
+
+message FusedRMSpropOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float alpha = 2 [default = 0.99];
+    optional float eps = 3 [default = 1e-8];
+    optional float weight_decay = 4 [default = 0.0];
+    optional bool gradient_clipping = 5 [default = false];
+    optional float max_gradient = 6 [default = 1.0];
+}
+
+// FTRL-Proximal, Algorithm 1 of McMahan et al. 2013, with the paper's fixed
+// square root generalized to an arbitrary exponent. Regular embedding tables need
+// the TorchEasyRec fbgemm-gpu / torchrec builds; dynamicemb tables always work.
+message FusedFTRLOptimizer {
+    // alpha in the paper, must be > 0 because the update divides by it.
+    required float lr = 1 [default = 0.002];
+    // exponent on the accumulator in the learning rate, must be <= 0.
+    // -0.5 recovers the paper's alpha / (beta + sqrt(n)).
+    optional float learning_rate_power = 2 [default = -0.5];
+    // beta in the paper, bounds the learning rate while the accumulator is small.
+    optional float ftrl_beta = 3 [default = 0.0];
+    // lambda1 in the paper, L1 regularization.
+    optional float l1_reg = 4 [default = 0.0];
+    // lambda2 in the paper, L2 regularization.
+    optional float l2_reg = 5 [default = 0.0];
+    optional bool gradient_clipping = 6 [default = false];
+    optional float max_gradient = 7 [default = 1.0];
+    // initial value of the squared-gradient accumulator.
+    optional float initial_accumulator_value = 8 [default = 0.0];
+}
+
+message SGDOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float momentum = 2 [default = 0.9];
+    optional float weight_decay = 3 [default = 0.0];
+    optional float dampening = 4 [default = 0.0];
+    optional bool nesterov = 5 [default = false];
+    optional bool fused = 6 [default = false];
+}
+
+message AdagradOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float weight_decay = 2 [default = 0.0];
+    optional float initial_accumulator_value = 3 [default = 0.0];
+    optional float eps = 4 [default = 1e-10];
+    optional bool fused = 5 [default = false];
+}
+
+message AdamOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float beta1 = 2 [default = 0.9];
+    optional float beta2 = 3 [default = 0.999];
+    optional float weight_decay = 4 [default = 0.0];
+    optional float eps = 5 [default = 1e-8];
+    optional bool amsgrad = 6 [default = false];
+    optional bool fused = 7 [default = false];
+}
+
+message AdamWOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float beta1 = 2 [default = 0.9];
+    optional float beta2 = 3 [default = 0.999];
+    optional float weight_decay = 4 [default = 0.0];
+    optional float eps = 5 [default = 1e-8];
+    optional bool amsgrad = 6 [default = false];
+    optional bool fused = 7 [default = false];
+}
+
+message AdadeltaOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float rho = 2 [default = 0.95];
+    optional float eps = 3 [default = 1e-6];
+    optional float weight_decay = 4 [default = 0.0];
+}
+
+message RMSpropOptimizer {
+    required float lr = 1 [default = 0.002];
+    optional float alpha = 2 [default = 0.99];
+    optional float eps = 3 [default = 1e-8];
+    optional float weight_decay = 4 [default = 0.0];
+}
+
+message ConstantLR {
+}
+
+message ExponentialDecayLR {
+    // decay steps or epochs
+    optional uint32 decay_size = 1;
+    // decay rate
+    optional float decay_factor = 2 [default = 0.95];
+    // if true, decay the learning rate at discrete intervals
+    optional bool staircase = 3 [default = true];
+    // warmup start learning rate
+    optional float warmup_learning_rate = 4 [default = 0.0];
+    // warmup steps or epochs
+    optional uint32 warmup_size = 5 [default = 0];
+    // minimum learning rate
+    optional float min_learning_rate = 6 [default = 0.0];
+    // schedule by epoch or by step.
+    optional bool by_epoch = 7 [default = false];
+}
+
+message ManualStepLR {
+    // a list of global steps or epochs at which to switch learning
+    repeated uint32 schedule_sizes = 1;
+    // a list of learning rates corresponding to intervals
+    repeated float learning_rates = 2;
+    // Whether to linearly interpolate learning rates for steps in
+    // [0, schedule_steps[0]].
+    optional bool warmup = 3 [default = false];
+    // schedule by epoch or by step.
+    optional bool by_epoch = 4 [default = false];
+}
+
+message LinearDecayLR {
+    // length of the whole run, measured from step 0 and INCLUDING warmup_size
+    // -- HF Trainer's `num_training_steps`, not the post-warmup horizon that
+    // decay_size/T_max above measure. Must be > 0 when this scheduler is selected.
+    optional uint32 num_training_steps = 1;
+    optional float min_learning_rate = 2 [default = 0.0];
+    optional float warmup_learning_rate = 3 [default = 0.0];
+    optional uint32 warmup_size = 4 [default = 0];
+    optional bool by_epoch = 5 [default = false];
+}
+
+message CosineAnnealingLR {
+    // total number of steps or epochs for cosine annealing
+    optional uint32 T_max = 1;
+    // minimum learning rate
+    optional float min_learning_rate = 2 [default = 0.0];
+    // warmup start learning rate
+    optional float warmup_learning_rate = 3 [default = 0.0];
+    // warmup steps or epochs
+    optional uint32 warmup_size = 4 [default = 0];
+    // schedule by epoch or by step.
+    optional bool by_epoch = 5 [default = false];
+}
+
+message CosineAnnealingWarmRestartsLR {
+    // number of steps or epochs for the first cosine annealing period
+    optional uint32 T_0 = 1;
+    // factor to grow period length after each restart (1 = fixed period)
+    optional uint32 T_mult = 2 [default = 1];
+    // minimum learning rate
+    optional float min_learning_rate = 3 [default = 0.0];
+    // warmup start learning rate
+    optional float warmup_learning_rate = 4 [default = 0.0];
+    // warmup steps or epochs
+    optional uint32 warmup_size = 5 [default = 0];
+    // schedule by epoch or by step.
+    optional bool by_epoch = 6 [default = false];
+}

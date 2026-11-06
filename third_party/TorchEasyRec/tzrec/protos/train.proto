@@ -1,0 +1,220 @@
+syntax = "proto2";
+package tzrec.protos;
+
+import "tzrec/protos/optimizer.proto";
+import "tzrec/protos/feature.proto";
+
+message GradScaler {
+    // Initial scale factor
+    optional float init_scale = 1 [default = 65536];
+    // Factor by which the scale is multiplied during update
+    // if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
+    optional float growth_factor = 2 [default = 2];
+    // Factor by which the scale is multiplied during update
+    // if inf/NaN gradients occur in an iteration.
+    optional float backoff_factor = 3 [default = 0.5];
+    // Number of consecutive iterations without inf/NaN gradients
+    // that must occur for the scale to be multiplied by ``growth_factor``.
+    optional uint32 growth_interval = 4 [default = 2000];
+}
+
+message GradClipping {
+    // Clipping type: "norm", "value", or "none"
+    optional string clipping_type = 1 [default = "none"];
+    // Max gradient value/norm threshold
+    optional float max_gradient = 2 [default = 1.0];
+    // Norm type for gradient norm clipping (2.0 for L2, inf for max)
+    optional float norm_type = 3 [default = 2.0];
+    // Enable global gradient clipping for distributed training
+    optional bool enable_global_grad_clip = 4 [default = false];
+}
+
+message ProfilerConfig {
+    // number of steps skipped before the first profiling cycle
+    optional uint32 skip_first_steps = 1 [default = 0];
+    // number of idle steps at the start of each cycle
+    optional uint32 wait_steps = 2 [default = 1];
+    // number of warmup steps (traced but discarded) in each cycle
+    optional uint32 warmup_steps = 3 [default = 1];
+    // number of recorded steps in each cycle
+    optional uint32 active_steps = 4 [default = 10];
+    // number of cycles, 0 means repeat until training ends
+    optional uint32 repeat = 5 [default = 1];
+    // record input shapes of operators
+    optional bool record_shapes = 6 [default = true];
+    // record tensor memory allocation, adds notable overhead
+    optional bool profile_memory = 7 [default = true];
+    // record python call stacks, adds notable overhead
+    optional bool with_stack = 8 [default = true];
+    // global ranks to profile, empty means all ranks
+    repeated uint32 ranks = 9;
+}
+
+message FeatureStoreConfig {
+    // Cloud credentials (AK/SK/STS) are resolved at runtime through the
+    // Alibaba Cloud default credential provider chain (alibabacloud_credentials).
+    // FeatureDB credentials are read from FEATUREDB_USERNAME/FEATUREDB_PASSWORD.
+    // FeatureStore control-plane region. An explicitly empty value falls back
+    // to ALIBABA_CLOUD_REGION at runtime.
+    required string region = 1;
+    // Existing FeatureStore project name and target DynamicEmbedding FeatureView
+    // name. The view is validated at startup and created when it does not exist,
+    // together with a default FeatureStore entity that is auto-created on demand.
+    required string project_name = 2;
+    required string feature_view_name = 3;
+    // FeatureDB version for this incremental training run.
+    required string version = 5;
+
+
+    // Optional FeatureStore control-plane endpoint override, passed directly to
+    // the FeatureStore SDK, which owns endpoint handling and connection errors.
+    optional string endpoint = 6;
+    // Maximum records submitted before each SDK write_flush() completion gate.
+    optional uint32 upload_batch_size = 7 [default = 1000];
+    // Total attempts per rank for one step. All retries reuse the version;
+    // each attempt reserves a newer monotonic ts range and fully replays the
+    // rank's delta so incremental readers cannot miss a partial earlier attempt.
+    optional uint32 max_retries = 8 [default = 3];
+    optional uint32 retry_backoff_secs = 9 [default = 5];
+    // Maximum time normal training shutdown waits for the uploader to drain.
+    optional uint32 shutdown_timeout_secs = 10 [default = 600];
+    // Apply back-pressure when too many completed dumps await upload; bounds
+    // the per-rank memory retained by pending in-memory deltas.
+    optional uint32 max_pending_steps = 11 [default = 32];
+    optional uint32 poll_interval_secs = 12 [default = 1];
+    // Creation settings used only when feature_view_name does not yet exist.
+    optional uint32 feature_view_ttl_secs = 13 [default = 1296000];
+    optional uint32 feature_view_shard_count = 14 [default = 20];
+    optional uint32 feature_view_replication_count = 15 [default = 1];
+    reserved 4, 16, 17;
+    reserved "feature_entity_name", "allow_custom_endpoint", "retain_local_dump";
+    // Wire format for embedding upload. "ARROW" (default) streams a columnar Arrow
+    // IPC batch through write_features_arrow(), avoiding the JSON path's per-row
+    // dict construction and embedding deep-copy; "JSON" keeps the legacy
+    // write_features() per-row payload. Delta uploads use MERGE; full checkpoint
+    // exports use OVERWRITE within an explicit unpublished version.
+    optional string upload_format = 18 [default = "ARROW"];
+    // Local/dev testing outside the VPC: the FeatureStore SDK prefers the
+    // FeatureDB public endpoint for the data plane, which stays reachable
+    // when the default VPC endpoint is not.
+    optional bool test_mode = 19 [default = false];
+    // Maximum concurrent SDK upload workers per rank.
+    optional uint32 max_workers = 20 [default = 4];
+}
+
+enum DeltaEmbeddingQuantType {
+    DELTA_EMBEDDING_QUANT_NONE = 0;
+    DELTA_EMBEDDING_QUANT_INT8 = 1;
+}
+
+message DeltaEmbeddingDumpConfig {
+    // ZCH features publish raw feature ids: every id touched, admitted or
+    // evicted, each with the row the model now serves for it -- its trained row
+    // while the table holds it, the shared fallback row once it does not
+    // (FeatureStore has no delete, so a stale vector must be overwritten).
+    // Paired cadence in training steps: dump touched ids and their latest
+    // embedding every N steps, plus a same-step dense export when online dense
+    // export is enabled. Configure exactly one of paired_dump_interval_steps /
+    // paired_dump_interval_minutes.
+    // Larger intervals retain a longer id window in memory; auto compaction
+    // reduces per-batch tensor buildup but unique ids still scale with the
+    // interval.
+    optional uint32 paired_dump_interval_steps = 1;
+    // output directory. default is ${model_dir}/delta_embedding_dump
+    optional string output_dir = 2;
+    // parquet file prefix
+    optional string file_prefix = 3 [default = "delta_embedding"];
+    // Presence enables best-effort per-rank background upload to FeatureStore.
+    optional FeatureStoreConfig feature_store_config = 4;
+    // Paired cadence in elapsed minutes. The timer starts when training starts.
+    // Do not set this together with paired_dump_interval_steps.
+    optional uint32 paired_dump_interval_minutes = 5;
+    // Quantization format for dumped embeddings. INT8 applies rowwise uint8
+    // quantization (QUint8RowwiseF16: uint8 values + fp16 scale/offset, 4 extra
+    // bytes per row) using the same format as distributed sparse export. Requires
+    // even embedding_dim.
+    optional DeltaEmbeddingQuantType quant_type = 6
+        [default = DELTA_EMBEDDING_QUANT_NONE];
+    // Publish all-zero tombstone rows for dynamicemb keys evicted since the
+    // last dump; the polling processor detects them and deletes the key from
+    // NvEmbeddings, reclaiming its memory (FeatureStore has no delete). While
+    // enabled, delta dump mode also arms dynamicemb's evicted-key recording
+    // (evicted_item_mode=RETAIN_KEY) automatically; the retained keys live in
+    // per-rank GPU memory and grow with eviction volume until each dump
+    // drains them, so keep the dump interval short on high-churn tables.
+    // Requires a dynamicemb build with EvictedItemMode; older builds degrade
+    // to a warning.
+    optional bool dump_evicted_tombstones = 7 [default = true];
+    // Also write the local per-rank delta parquet files while uploading to
+    // FeatureStore (e.g. for the offline readback checker); by default the
+    // delta is handed to the uploader in memory and never touches disk.
+    optional bool retain_local_dump = 8 [default = false];
+    // Fine cadence in training steps: delta dump and FeatureStore upload only,
+    // no dense export. Requires paired_dump_interval_steps and must be strictly
+    // smaller than it; unset keeps dumps locked to the paired cadence.
+    optional uint32 sparse_dump_interval_steps = 9;
+    // Fine cadence in elapsed minutes; requires paired_dump_interval_minutes
+    // and must be strictly smaller than it. Do not mix with the steps fields.
+    optional uint32 sparse_dump_interval_minutes = 10;
+}
+
+message TrainConfig {
+    // embedding part optimizer
+    required SparseOptimizer sparse_optimizer = 1;
+    // dense part optimizer
+    required DenseOptimizer dense_optimizer = 2;
+    // number of steps to train models
+    optional uint32 num_steps = 3;
+    // number of epochs to train models
+    optional uint32 num_epochs = 4;
+    // step interval for saving checkpoint
+    optional uint32 save_checkpoints_steps = 5 [default = 1000];
+    // checkpoint to restore parameters from
+    optional string fine_tune_checkpoint = 6;
+    // checkpoint to restore parameters mapping, each line is {param name in current model}\\t{param name in old ckpt}
+    optional string fine_tune_ckpt_param_map = 7;
+    // the frequency the loss and lr will be logged during training
+    optional uint32 log_step_count_steps = 8 [default = 100];
+    // profiling or not
+    optional bool is_profiling = 9 [default = false];
+    // use tensorboard or not.
+    optional bool use_tensorboard = 10 [default = true];
+    // epoch interval for saving checkpoint
+    optional uint32 save_checkpoints_epochs = 11;
+    // the summaries to be saved in tensorboard, activated only when use_tensorboard=true,
+    // possible values are: "loss", "learning_rate", "parameter", "global_gradient_norm", "gradient_norm", "gradient"
+    // default values are ["loss", "learning_rate"]
+    repeated string tensorboard_summaries = 12;
+    // where to use torch.backends.cudnn.allow_tf32
+    optional bool cudnn_allow_tf32 = 13 [default = true];
+    // where to use torch.backends.cuda.matmul.allow_tf32
+    optional bool cuda_matmul_allow_tf32 = 14 [default = false];
+    // global embedding param constraints
+    optional ParameterConstraints global_embedding_constraints = 15;
+    // mixed precision dtype.
+    optional string mixed_precision = 16;
+    // grad_scaler dynamically estimates the scale factor each iteration.
+    optional GradScaler grad_scaler = 17;
+    // gradient accumulation steps
+    optional uint32 gradient_accumulation_steps = 18;
+    // dense gradient clipping config
+    optional GradClipping grad_clipping = 19;
+    // maximum number of recent checkpoints to keep; 0 keeps all.
+    optional uint32 keep_checkpoint_max = 20 [default = 0];
+    // save every N seconds of consumed event-time (e.g. kafka message timestamp),
+    // aligned to the Unix epoch (not training epochs). 0 disables.
+    optional uint32 save_checkpoints_timestamp_interval = 21 [default = 0];
+    // absolute event-time targets (Unix-epoch seconds); save once when consumed
+    // data crosses each. empty disables.
+    repeated uint64 save_checkpoints_timestamps = 22;
+    // fraction of workers (0,1] that must pass a boundary/target before a
+    // timestamp checkpoint fires; default 0.5 (1.0 = all). outlier-robust.
+    optional float save_checkpoints_timestamp_quorum = 23 [default = 0.5];
+    // Configuring this field dumps changed sparse embedding rows during CUDA
+    // training. Multi-GPU training writes one parquet shard per rank;
+    // column-wise embedding sharding is not supported.
+    optional DeltaEmbeddingDumpConfig delta_embedding_dump_config = 24;
+    // profiler schedule and collection options, used when is_profiling=true
+    optional ProfilerConfig profiler_config = 25;
+    // TBD: qcomm config
+}

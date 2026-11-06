@@ -1,0 +1,25 @@
+name: Code Style CI
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+
+jobs:
+  ci-test:
+    runs-on: tzrec-codestyle-runner
+    container:
+      image: mybigpai-public-registry.cn-beijing.cr.aliyuncs.com/easyrec/tzrec-devel:1.5
+    steps:
+      - name: FetchCommit ${{ github.event.pull_request.head.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: run_${{ github.run_id }}
+      - name: RunCodeStyleCI
+        id: run_codestyle_ci
+        run: |
+          cd run_${{ github.run_id }}
+          pip install -r requirements.txt
+          git config --global --add safe.directory $(pwd)
+          pre-commit run -a

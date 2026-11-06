@@ -1,0 +1,637 @@
+# Copyright (c) 2026, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Compiles a ``PromptConfig`` into the artifacts the rest of the stack reads.
+
+Runs on every rank and writes nothing unless an exporter asks for the extended
+tokenizer. It resolves no physical dimension: the model does that at
+``__init__`` from ``group_total_dim``.
+"""
+
+import hashlib
+import json
+import os
+import re
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from tokenizers import Tokenizer
+
+from tzrec.features.feature import BaseFeature
+from tzrec.prompt.types import (
+    CompiledPrompt,
+    FillMode,
+    ProjectionPlan,
+    PromptPlan,
+    ResolvedSidSpace,
+    Segment,
+    SlotSeg,
+    Static,
+    Width,
+    WidthKind,
+)
+from tzrec.protos import feature_pb2
+from tzrec.protos.model_pb2 import FeatureGroupConfig, FeatureGroupType
+from tzrec.protos.prompt_pb2 import (
+    PromptConfig,
+    PromptProjection,
+    PromptSlot,
+    SidSpace,
+)
+from tzrec.utils.logging_util import logger
+
+_PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+
+
+def _split_template(template: str) -> Tuple[List[str], List[str]]:
+    """Split on ``{{name}}`` into static runs and the names between them.
+
+    ``re.split`` with one capture group alternates literal, capture, literal,
+    so a template with n placeholders yields n + 1 static runs. Both lists are
+    returned; run i precedes name i.
+    """
+    parts = _PLACEHOLDER.split(template)
+    return parts[0::2], parts[1::2]
+
+
+def _ceil_to(value: int, multiple: int) -> int:
+    """Round ``value`` up to a multiple, or return it unchanged when 0."""
+    if multiple <= 1:
+        return value
+    return -(-value // multiple) * multiple
+
+
+def _resolve_slot(
+    name: str, declared_slots_by_name: Dict[str, PromptSlot]
+) -> PromptSlot:
+    """Return the declared slot, or an implicit single-feature slot."""
+    if name in declared_slots_by_name:
+        return declared_slots_by_name[name]
+    implicit = PromptSlot(name=name)
+    implicit.feature_names.append(name)
+    return implicit
+
+
+def _slot_width(
+    members: Sequence[BaseFeature],
+    group_type: "FeatureGroupType.ValueType",
+    fill_mode: FillMode,
+) -> Width:
+    """Derive a slot's position count from its members.
+
+    A DEEP slot pools to exactly one position. A PROJECTED sequence slot holds
+    one per item, bounded by its members' sequence_length. An INLINE slot emits
+    every value of every item, so its bound is that cap times the values an
+    item carries; unbounded when no member declares a cap, or when an item may
+    carry any number of values.
+    """
+    if group_type == FeatureGroupType.DEEP:
+        return Width(WidthKind.STATIC, 1)
+    # BaseFeature.sequence_length, not config: a member of a SequenceFeature
+    # group inherits the group's cap and never sets its own field.
+    caps = [f.sequence_length for f in members if f.sequence_length]
+    per_item = members[0].value_dim if fill_mode is FillMode.INLINE else 1
+    if not caps or per_item == 0:
+        return Width(WidthKind.UNBOUNDED)
+    return Width(WidthKind.BOUNDED, max(caps) * per_item)
+
+
+def _fills_inline(member: BaseFeature) -> bool:
+    """Whether one sequence member carries LM-ready ids rather than an embedding.
+
+    An id or tokenize feature says so by omitting ``embedding_dim``; a raw
+    sequence feature by having no dense embedding.
+    """
+    if isinstance(member.config, (feature_pb2.IdFeature, feature_pb2.TokenizeFeature)):
+        return not member.config.HasField("embedding_dim")
+    return not member.has_embedding
+
+
+def _derive_slot_layout(
+    name: str, members: Sequence[BaseFeature]
+) -> Tuple["FeatureGroupType.ValueType", FillMode]:
+    """Derive how a prompt slot is grouped and emitted."""
+    sequence_flags = {member.is_sequence for member in members}
+    if len(sequence_flags) != 1:
+        raise ValueError(
+            f"prompt slot [{name}] mixes sequence and scalar features "
+            f"{[member.name for member in members]}; a slot must be all one kind, "
+            "or its group would carry a '.query' output the prompt cannot place."
+        )
+    is_sequence = sequence_flags.pop()
+    group_type = (
+        FeatureGroupType.JAGGED_SEQUENCE if is_sequence else FeatureGroupType.DEEP
+    )
+    fill_mode = (
+        FillMode.INLINE
+        if is_sequence and len(members) == 1 and _fills_inline(members[0])
+        else FillMode.PROJECTED
+    )
+    return group_type, fill_mode
+
+
+def _id_shift(
+    members: Sequence[BaseFeature], fill_mode: FillMode, base_vocab_size: int
+) -> int:
+    """The shift an INLINE slot adds; tokenizer word ids are already LM ids."""
+    if fill_mode is FillMode.PROJECTED:
+        return 0
+    if members and isinstance(members[0].config, feature_pb2.TokenizeFeature):
+        return 0
+    return base_vocab_size
+
+
+def _file_md5(path: str) -> str:
+    """Content hash of one file."""
+    with open(path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+def _check_inline_member(
+    member: BaseFeature, cfg: PromptConfig, sid_space: ResolvedSidSpace
+) -> None:
+    """Reject an INLINE member whose values cannot be LM token ids."""
+    if isinstance(member.config, feature_pb2.TokenizeFeature):
+        vocab_file = member.vocab_file
+        try:
+            same = vocab_file == cfg.tokenizer_path or _file_md5(
+                vocab_file
+            ) == _file_md5(cfg.tokenizer_path)
+        except OSError as e:
+            raise ValueError(
+                f"prompt slot member [{member.name}] names vocab_file "
+                f"[{vocab_file}], which cannot be read: {e}"
+            ) from e
+        if not same:
+            raise ValueError(
+                f"prompt slot member [{member.name}] tokenizes with [{vocab_file}], "
+                f"which differs from prompt_config.tokenizer_path "
+                f"[{cfg.tokenizer_path}]; an inline text slot must emit ids of the "
+                "vocabulary the LM was extended from."
+            )
+    elif isinstance(member.config, feature_pb2.IdFeature):
+        if member.value_dim != sid_space.num_levels:
+            raise ValueError(
+                f"prompt slot member [{member.name}] declares value_dim "
+                f"{member.value_dim}; an inline SID history needs value_dim: "
+                f"{sid_space.num_levels}, one offset code per level for each item."
+            )
+        # FG will not run a sequence id feature without a bucketize config, and
+        # num_buckets over exactly the offset-code space maps every code to itself
+        num_codes = sum(sid_space.codebook)
+        id_space = [
+            name
+            for name in ("hash_bucket_size", "num_buckets", "zch", "dynamicemb")
+            if member.config.HasField(name)
+            and not (name == "num_buckets" and member.config.num_buckets == num_codes)
+        ] + [
+            name
+            for name in ("vocab_list", "vocab_dict", "vocab_file")
+            if len(getattr(member.config, name)) > 0
+        ]
+        if id_space:
+            raise ValueError(
+                f"prompt slot member [{member.name}] declares an id space "
+                f"({', '.join(id_space)}); an inline SID history carries offset "
+                f"codes and takes no id space but num_buckets: {num_codes}, which "
+                "FG needs and which leaves every code as it is. Drop it, or give "
+                "the feature an embedding_dim to project it instead."
+            )
+
+
+def _render_sid_tokens(sid_space: SidSpace) -> List[str]:
+    """Render the SID tokens, one per flat index."""
+    fmt = sid_space.token_format
+    if "{i}" not in fmt:
+        raise ValueError(
+            f"sid_space.token_format [{fmt}] has no '{{i}}' placeholder, so "
+            f"every SID token would render the same string and the tokenizer "
+            f"would gain one row where the bands assume "
+            f"{sum(sid_space.codebook)}."
+        )
+    return [fmt.replace("{i}", str(i)) for i in range(sum(sid_space.codebook))]
+
+
+def _read_manifest(path: str) -> Tuple[List[int], Optional[str]]:
+    """Read ``codebook`` and ``bundle_uuid`` from a SID manifest."""
+    if not os.path.exists(path):
+        raise ValueError(f"sid_space.manifest_path [{path}] does not exist.")
+    with open(path, "r") as f:
+        manifest = json.load(f)
+    return [int(c) for c in manifest["codebook"]], manifest.get("bundle_uuid")
+
+
+def _build_sid_space(
+    cfg: PromptConfig, tok: Tokenizer, base_vocab_size: int, has_projection: bool
+) -> ResolvedSidSpace:
+    """Extend the tokenizer with SID tokens and resolve the token space."""
+    if not cfg.HasField("sid_space"):
+        raise ValueError(
+            "prompt_config.sid_space is required: it declares the codebook the "
+            "SID vocabulary is built from, and every prompt-native model needs "
+            "one to extend its embedding table and to decode."
+        )
+    space = cfg.sid_space
+    codebook = [int(c) for c in space.codebook]
+    if not codebook:
+        raise ValueError("sid_space.codebook is required; one size per SID level.")
+    if any(c <= 0 for c in codebook):
+        raise ValueError(f"every codebook size must be positive, got {codebook}.")
+
+    bundle_uuid = None
+    if space.HasField("manifest_path"):
+        declared, bundle_uuid = _read_manifest(space.manifest_path)
+        if declared != codebook:
+            raise ValueError(
+                f"sid_space.codebook {codebook} does not match the manifest at "
+                f"[{space.manifest_path}] which describes {declared}. The data "
+                f"and the decode bands would disagree."
+            )
+        # the export records it for serving to tell this bundle from one whose
+        # SIDs mean other items; a manifest resolve_sid_collisions wrote has one
+        if not isinstance(bundle_uuid, str) or not bundle_uuid:
+            raise ValueError(
+                f"the manifest at [{space.manifest_path}] has no bundle_uuid; a "
+                f"SID bundle manifest carries one, and serving checks it."
+            )
+
+    sid_tokens = _render_sid_tokens(space)
+    existing_sid_tokens = [
+        token for token in sid_tokens if tok.token_to_id(token) is not None
+    ]
+    if existing_sid_tokens:
+        raise ValueError(
+            "SID tokens are already in the base tokenizer, e.g. "
+            f"{existing_sid_tokens[:3]}; change sid_space.token_format."
+        )
+    tok.add_special_tokens(sid_tokens)
+
+    sentinel_id = None
+    if has_projection:
+        if tok.token_to_id(cfg.sentinel_token) is not None:
+            raise ValueError(
+                f"sentinel_token [{cfg.sentinel_token}] is already in the base "
+                f"tokenizer; a projected position would be indistinguishable "
+                f"from real content."
+            )
+        tok.add_special_tokens([cfg.sentinel_token])
+        sentinel_id = tok.token_to_id(cfg.sentinel_token)
+
+    offsets: List[int] = []
+    running = 0
+    for size in codebook:
+        offsets.append(running)
+        running += size
+    lo = [base_vocab_size + o for o in offsets]
+    hi = [lo[i] + codebook[i] - 1 for i in range(len(codebook))]
+
+    return ResolvedSidSpace(
+        codebook=tuple(codebook),
+        num_levels=len(codebook),
+        base_vocab_size=base_vocab_size,
+        level_offsets=tuple(offsets),
+        band_lo=tuple(lo),
+        band_hi=tuple(hi),
+        target_vocab_size=_ceil_to(
+            tok.get_vocab_size(with_added_tokens=True),
+            space.vocab_pad_to_multiple_of,
+        ),
+        sentinel_token_id=sentinel_id,
+        eos_token_id=_special_id(tok, ("<|im_end|>", "<|endoftext|>")),
+        pad_token_id=_special_id(tok, ("<|endoftext|>", "<|im_end|>")),
+        token_format=space.token_format,
+        bundle_uuid=bundle_uuid,
+    )
+
+
+def save_tokenizer_dir(compiled: CompiledPrompt, tokenizer_dir: str) -> None:
+    """Write the extended tokenizer as a directory ``AutoTokenizer`` loads.
+
+    ``tokenizer.json`` carries the vocabulary and the added SID atoms; the
+    minimal ``tokenizer_config.json`` beside it names the tokenizer class and
+    the two special tokens the prompt resolved, which is all a serving runtime
+    needs to decode a generated SID atom through ``--tokenizer-path``.
+
+    Args:
+        compiled: the compiled prompt whose tokenizer is written.
+        tokenizer_dir: the directory to write into.
+    """
+    tok, sid_space = compiled.tokenizer, compiled.sid_space
+    os.makedirs(tokenizer_dir, exist_ok=True)
+    tok.save(os.path.join(tokenizer_dir, "tokenizer.json"))
+    config = {
+        "tokenizer_class": "PreTrainedTokenizerFast",
+        "eos_token": tok.id_to_token(sid_space.eos_token_id),
+        "pad_token": tok.id_to_token(sid_space.pad_token_id),
+    }
+    with open(os.path.join(tokenizer_dir, "tokenizer_config.json"), "w") as f:
+        json.dump(config, f, indent=2)
+
+
+def _special_id(tok: Tokenizer, candidates: Sequence[str]) -> int:
+    """First candidate the tokenizer knows, so a family swap does not break."""
+    for name in candidates:
+        token_id = tok.token_to_id(name)
+        if token_id is not None:
+            return int(token_id)
+    raise ValueError(
+        f"none of {list(candidates)} is in the tokenizer; the prompt cannot "
+        f"resolve its EOS/pad ids."
+    )
+
+
+def compile_prompt(
+    cfg: PromptConfig,
+    features: Sequence[BaseFeature],
+    label_fields: Sequence[str] = (),
+) -> CompiledPrompt:
+    """Compile a prompt config into its plan, module and vocabulary artifacts.
+
+    Writes nothing: the extended tokenizer rides on the result for export to
+    persist, and nothing reads a training-time copy.
+
+    Args:
+        cfg: the prompt config to compile.
+        features: every feature a body slot may reference, already created.
+        label_fields: data_config.label_fields; a response slot names these.
+
+    Returns:
+        The compiled prompt.
+    """
+    features_by_name = {feature.name: feature for feature in features}
+    declared_slots_by_name = {slot.name: slot for slot in cfg.slots}
+
+    body_runs, body_names = _split_template(cfg.prompt)
+    resp_runs, resp_names = _split_template(cfg.response or "")
+    resolved_slots_by_name = {
+        name: _resolve_slot(name, declared_slots_by_name)
+        for name in body_names + resp_names
+    }
+
+    unreferenced = set(declared_slots_by_name) - set(resolved_slots_by_name)
+    if unreferenced:
+        raise ValueError(
+            f"declared prompt slots {sorted(unreferenced)} are never referenced "
+            f"by a {{{{name}}}} placeholder."
+        )
+
+    response_slot_names = set(resp_names)
+    label_field_names = set(label_fields)
+
+    members: Dict[str, List[BaseFeature]] = {}
+    for name, slot in resolved_slots_by_name.items():
+        source = label_field_names if name in response_slot_names else features_by_name
+        missing = [
+            source_name
+            for source_name in slot.feature_names
+            if source_name not in source
+        ]
+        if missing:
+            declared_in = (
+                "data_config.label_fields"
+                if name in response_slot_names
+                else "feature_configs"
+            )
+            raise ValueError(
+                f"prompt slot [{name}] names {missing}, which are not in {declared_in}."
+            )
+        if name in response_slot_names and len(slot.feature_names) != 1:
+            raise ValueError(
+                f"response slot [{name}] names {list(slot.feature_names)}; a "
+                f"response is one label field, because it compiles to one SID "
+                f"item and the loss window is sized from that."
+            )
+        members[name] = (
+            []
+            if name in response_slot_names
+            else [features_by_name[source_name] for source_name in slot.feature_names]
+        )
+
+    group_types_by_slot_name: Dict[str, "FeatureGroupType.ValueType"] = {}
+    fill_modes_by_slot_name: Dict[str, FillMode] = {}
+    for name, slot_members in members.items():
+        if name in response_slot_names:
+            group_type, fill_mode = FeatureGroupType.JAGGED_SEQUENCE, FillMode.INLINE
+        else:
+            group_type, fill_mode = _derive_slot_layout(name, slot_members)
+        group_types_by_slot_name[name] = group_type
+        fill_modes_by_slot_name[name] = fill_mode
+    for name, slot in resolved_slots_by_name.items():
+        if fill_modes_by_slot_name[name] is FillMode.INLINE and slot.HasField(
+            "projection"
+        ):
+            raise ValueError(
+                f"prompt slot [{name}] is INLINE -- one sequence feature with no "
+                f"embedding -- so it has no group to project; drop its projection."
+            )
+
+    tok = Tokenizer.from_file(cfg.tokenizer_path)
+    base_vocab_size = tok.get_vocab_size(with_added_tokens=True)
+    has_projection = any(
+        fill_mode is FillMode.PROJECTED
+        for fill_mode in fill_modes_by_slot_name.values()
+    )
+    sid_space = _build_sid_space(cfg, tok, base_vocab_size, has_projection)
+
+    slot_ids = {name: i for i, name in enumerate(resolved_slots_by_name)}
+    segs: Dict[str, SlotSeg] = {}
+    for name, slot in resolved_slots_by_name.items():
+        group_type = group_types_by_slot_name[name]
+        fill_mode = fill_modes_by_slot_name[name]
+        if fill_mode is FillMode.INLINE and name not in response_slot_names:
+            _check_inline_member(members[name][0], cfg, sid_space)
+        segs[name] = SlotSeg(
+            slot_id=slot_ids[name],
+            name=name,
+            feature_names=tuple(slot.feature_names),
+            group_type=group_type,
+            output_key=(
+                ".sequence" if group_type == FeatureGroupType.JAGGED_SEQUENCE else ""
+            ),
+            fill=fill_mode,
+            width=(
+                Width(WidthKind.STATIC, sid_space.num_levels)
+                if name in response_slot_names
+                else _slot_width(members[name], group_type, fill_mode)
+            ),
+            id_shift=_id_shift(members[name], fill_mode, sid_space.base_vocab_size),
+        )
+
+    body = _build_template_segments(body_runs, body_names, segs, tok)
+    response = _build_template_segments(resp_runs, resp_names, segs, tok)
+
+    projected = tuple(
+        s
+        for s in body + response
+        if isinstance(s, SlotSeg) and s.fill is FillMode.PROJECTED
+    )
+    projection_plan = _build_projection_plan(projected, resolved_slots_by_name)
+
+    plan = PromptPlan(
+        segments=body,
+        response_segments=response,
+        max_length=int(cfg.max_length),
+        max_total_length=_max_total_length(body + response),
+        max_holes=_max_holes(projected),
+        logits_suffix_len=_suffix_keep(response),
+        static_prefix_len=_static_prefix_len(body),
+        projected_slots=projected,
+    )
+    _validate(plan)
+
+    return CompiledPrompt(
+        sid_space=sid_space,
+        prompt_plan=plan,
+        projection_plan=projection_plan,
+        tokenizer=tok,
+    )
+
+
+def _build_template_segments(
+    static_text_parts: Sequence[str],
+    slot_names: Sequence[str],
+    slot_segments_by_name: Dict[str, SlotSeg],
+    tokenizer: Tokenizer,
+) -> Tuple[Segment, ...]:
+    """Interleave tokenized static text parts with their slots."""
+    segments: List[Segment] = []
+    for index, static_text in enumerate(static_text_parts):
+        if static_text:
+            token_ids = tuple(
+                tokenizer.encode(static_text, add_special_tokens=False).ids
+            )
+            segments.append(Static(token_ids=token_ids))
+        if index < len(slot_names):
+            segments.append(slot_segments_by_name[slot_names[index]])
+    return tuple(segments)
+
+
+def _build_projection_plan(
+    projected: Sequence[SlotSeg], slots_by_name: Dict[str, PromptSlot]
+) -> ProjectionPlan:
+    """One module per distinct ``projection_name``, else one per slot."""
+    projections: Dict[str, PromptProjection] = {}
+    slot_to_module: Dict[int, str] = {}
+    for seg in projected:
+        slot = slots_by_name[seg.name]
+        module_id = slot.projection_name or seg.name
+        projection = (
+            slot.projection if slot.HasField("projection") else PromptProjection()
+        )
+        if module_id in projections:
+            if projections[module_id] != projection:
+                raise ValueError(
+                    f"prompt slots sharing projection_name [{module_id}] declare "
+                    f"different projection bodies; they cannot share weights."
+                )
+        else:
+            projections[module_id] = projection
+        slot_to_module[seg.slot_id] = module_id
+
+    groups = tuple(
+        FeatureGroupConfig(
+            group_name=seg.name,
+            feature_names=list(seg.feature_names),
+            group_type=seg.group_type,
+        )
+        for seg in projected
+    )
+    return ProjectionPlan(
+        projections=projections,
+        slot_to_module=slot_to_module,
+        feature_groups=groups,
+    )
+
+
+def _max_total_length(segments: Sequence[Segment]) -> Optional[int]:
+    """Provable position ceiling, or None when any slot is unbounded."""
+    total = 0
+    for seg in segments:
+        if isinstance(seg, Static):
+            total += len(seg.token_ids)
+        elif seg.width.kind is WidthKind.UNBOUNDED:
+            return None
+        else:
+            assert seg.width.num_positions is not None
+            total += seg.width.num_positions
+    return total
+
+
+def _max_holes(projected: Sequence[SlotSeg]) -> int:
+    """Per-row projected-position ceiling; unbounded slots cannot be counted."""
+    total = 0
+    for seg in projected:
+        if seg.width.kind is WidthKind.UNBOUNDED:
+            raise ValueError(
+                f"prompt slot [{seg.name}] is PROJECTED and unbounded, so its "
+                f"hole count is unknowable; give its members a sequence_length."
+            )
+        assert seg.width.num_positions is not None
+        total += seg.width.num_positions
+    return total
+
+
+def _suffix_keep(response: Sequence[Segment]) -> Optional[int]:
+    """Upper bound on the supervised window, or None when unbounded."""
+    total = _max_total_length(response)
+    # HF shifts logits by one, so the window opens one column before the first
+    # supervised label.
+    return None if total is None else total + 1
+
+
+def _static_prefix_len(segments: Sequence[Segment]) -> int:
+    """Leading positions that are request-invariant: static runs only."""
+    total = 0
+    for seg in segments:
+        if not isinstance(seg, Static):
+            break
+        total += len(seg.token_ids)
+    return total
+
+
+def _validate(plan: PromptPlan) -> None:
+    """Apply the checks that need the whole plan."""
+    if plan.max_length and plan.max_total_length is not None:
+        if plan.max_total_length > plan.max_length:
+            raise ValueError(
+                f"the prompt can reach {plan.max_total_length} positions but "
+                f"max_length is {plan.max_length}; a row could never be assembled."
+            )
+    if not plan.max_length and plan.max_total_length is None:
+        logger.warning(
+            "prompt has an unbounded slot and max_length is 0; graph-captured "
+            "serving cannot size its buckets."
+        )
+    variable_slot_seen = False
+    for seg in plan.segments:
+        if not isinstance(seg, SlotSeg):
+            continue
+        if seg.width.kind is WidthKind.STATIC:
+            if not variable_slot_seen:
+                continue
+            logger.warning(
+                "a variable-width prompt slot precedes a fixed-width one; "
+                f"static_prefix_len is {plan.static_prefix_len}, which bounds "
+                "what a serving prefix cache may reuse."
+            )
+            break
+        variable_slot_seen = True
+    if not plan.response_segments:
+        raise ValueError(
+            "prompt_config.response is required: it defines the supervised "
+            "span, and without it the loss window collapses to one ignored "
+            "position and the loss is nan. Inference drops the response by "
+            "mode, so a predict-only run keeps it declared."
+        )
+    if plan.static_prefix_len == 0:
+        logger.warning(
+            "static_prefix_len is 0: no leading run of the prompt is "
+            "request-invariant, so a serving prefix cache can share nothing."
+        )

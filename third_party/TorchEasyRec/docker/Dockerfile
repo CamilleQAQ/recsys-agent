@@ -1,0 +1,129 @@
+ARG BASE_IMAGE=ubuntu:22.04
+FROM ${BASE_IMAGE}
+
+RUN sed -i "s@http://archive.ubuntu.com@http://mirrors.aliyun.com@g" /etc/apt/sources.list && \
+    sed -i "s@http://security.ubuntu.com@http://mirrors.aliyun.com@g" /etc/apt/sources.list && \
+    sed -i "s@http://ports.ubuntu.com@http://mirrors.aliyun.com@g" /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        build-essential ca-certificates \
+        ccache cmake gcc git vim watchman wget curl sudo iproute2 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN wget https://tzrec.oss-accelerate.aliyuncs.com/third_party/libidn11_1.33-2.2ubuntu2_amd64.deb && \
+    apt-get install ./libidn11_1.33-2.2ubuntu2_amd64.deb && rm libidn11_1.33-2.2ubuntu2_amd64.deb
+
+ARG PYTHON_VERSION=3.11
+ARG PIP_MIRROR=mirrors.aliyun.com
+RUN mkdir -p /root/.config/pip && \
+    printf '[global]\nindex-url = http://%s/pypi/simple\ntrusted-host = %s\ntimeout = 120\n' "${PIP_MIRROR}" "${PIP_MIRROR}" > /root/.config/pip/pip.conf
+RUN curl -fsSL -v -o ~/miniconda.sh -O  "https://tzrec.oss-accelerate.aliyuncs.com/third_party/Miniforge3-Linux-x86_64.sh" && \
+    chmod +x ~/miniconda.sh && \
+    bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh && \
+    /opt/conda/bin/conda update -y -n base -c defaults conda && \
+    /opt/conda/bin/conda install -y python=${PYTHON_VERSION} && \
+    /opt/conda/bin/conda clean -ya
+ENV PATH /opt/conda/bin:$PATH
+
+ARG DEVICE
+RUN case ${DEVICE} in \
+        "cu126") wget https://tzrec.oss-accelerate.aliyuncs.com/third_party/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+                 dpkg -i cuda-keyring_1.1-1_all.deb && \
+                 apt-get update && \
+                 apt-get install -y cuda-toolkit-12-6 cuda-compat-12-6 && \
+                 rm -f /usr/local/cuda && \
+                 rm -rf /var/lib/apt/lists/* ;; \
+        "cu130") wget https://tzrec.oss-accelerate.aliyuncs.com/third_party/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+                 dpkg -i cuda-keyring_1.1-1_all.deb && \
+                 apt-get update && \
+                 apt-get install -y cuda-toolkit-13-0 cuda-compat-13-0 && \
+                 rm -f /usr/local/cuda && \
+                 rm -rf /var/lib/apt/lists/* ;; \
+    esac
+# Only torch is installed here: the first pass pins the device wheel, the second
+# pulls its nvidia-* deps; the base CUDA libs are then uninstalled and scrubbed
+# from torch's METADATA in favor of the system cuda-toolkit (cuDNN / NCCL and
+# friends stay). Everything else is pinned in requirements-${DEVICE}.txt.
+# torch_tensorrt comes from PyPI: the pytorch-wheels +cu130 build ships no C++
+# runtime, breaking torch.jit.trace on tensorrt::execute_engine.
+RUN case ${DEVICE} in \
+        "cu126") pip install torch==2.14.0 -f https://${PIP_MIRROR}/pytorch-wheels/${DEVICE}/ --no-deps && \
+                 pip install torch==2.14.0 && \
+                 pip uninstall -y nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cuda-cupti-cu12 nvidia-cuda-nvrtc-cu12 nvidia-cufft-cu12 nvidia-cufile-cu12 nvidia-curand-cu12 nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-nvjitlink-cu12 nvidia-nvtx-cu12 && \
+                 sed -i -E '/^Requires-Dist: (cuda-toolkit|nvidia-)/d' /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch-2.14.0+${DEVICE}.dist-info/METADATA && \
+                 pip cache purge ;; \
+        "cu130") pip install torch==2.14.0 -f https://${PIP_MIRROR}/pytorch-wheels/cu130/ --no-deps && \
+                 pip install torch==2.14.0 && \
+                 pip uninstall -y nvidia-cuda-runtime nvidia-cublas nvidia-cuda-cupti nvidia-cuda-nvrtc nvidia-cufft nvidia-cufile nvidia-curand nvidia-cusolver nvidia-cusparse nvidia-nvjitlink nvidia-nvtx && \
+                 sed -i -E '/^Requires-Dist: (cuda-toolkit|nvidia-)/d' /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch-2.14.0+cu130.dist-info/METADATA && \
+                 pip install torch_tensorrt==2.14.0 && \
+                 rm -f /opt/conda/lib/python${PYTHON_VERSION}/site-packages/tensorrt_libs/libnvinfer_builder_resource_win_*.so.* && \
+                 pip cache purge ;; \
+        * )      pip install torch==2.14.0 -f https://${PIP_MIRROR}/pytorch-wheels/cpu/ && \
+                 pip cache purge ;; \
+    esac && \
+    /opt/conda/bin/conda clean -ya
+
+ENV NVIDIA_VISIBLE_DEVICES all
+ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
+ARG LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH ${LD_LIBRARY_PATH}
+
+ADD requirements /root/requirements
+ADD requirements.txt /root/requirements.txt
+ADD requirements-${DEVICE}.txt /root/requirements-${DEVICE}.txt
+# pip re-downloads every `name @ URL` requirement (no metadata sidecar) to
+# validate it, so tzrec re-installs in DLC/CI jobs would re-fetch wheels the
+# image already carries. Re-fetch the URL-pinned set after the purge to keep
+# the pip HTTP cache warm (the pins live in requirements/${DEVICE}.txt --
+# requirements-${DEVICE}.txt is only the include file). The build may pass a
+# local PIP_MIRROR for speed; rewrite pip.conf to the canonical mirror so the
+# shipped image never points at it.
+RUN cd /root && \
+    pip install -r requirements-${DEVICE}.txt && \
+    pip cache purge && \
+    grep -h ' @ ' requirements/${DEVICE}.txt requirements/runtime.txt > /tmp/urlpins.txt && \
+    pip download --no-deps -r /tmp/urlpins.txt -d /tmp/wheels && \
+    rm -rf /tmp/wheels /tmp/urlpins.txt requirements requirements.txt requirements-*.txt && \
+    printf '[global]\nindex-url = http://mirrors.aliyun.com/pypi/simple\ntrusted-host = mirrors.aliyun.com\ntimeout = 120\n' > /root/.config/pip/pip.conf && \
+    /opt/conda/bin/conda clean -ya
+
+RUN mkdir -p /home/pai/bin && \
+    wget -O /home/pai/bin/prepare_dlc_environment https://tzrec.oss-accelerate.aliyuncs.com/third_party/pai/prepare_dlc_environment.sh && \
+    chmod +x /home/pai/bin/prepare_dlc_environment && \
+    apt-get update && apt-get install -y --no-install-recommends openssh-server && rm -rf /var/lib/apt/lists/* && service ssh start
+ENV PATH $PATH:/home/pai/bin
+
+ENV SHELL=/bin/bash
+RUN echo "dash dash/sh boolean false" | debconf-set-selections \
+    && DEBIAN_FRONTEND=noninteractive dpkg-reconfigure dash
+
+RUN case ${DEVICE} in \
+        "cu126"|"cu130") apt-get update && \
+                 apt-get install -y --allow-downgrades --allow-change-held-packages --no-install-recommends \
+                 libnl-3-dev libnl-route-3-dev libnl-3-200 libnl-route-3-200 udev dmidecode ethtool && \
+                 apt-get clean && \
+                 rm -rf /var/lib/apt/lists/* ;; \
+    esac
+# RDMA userspace: hpn = Mellanox rdma-core for Lingjun/HPN NICs, erdma = rdma-core with the
+# eRDMA provider. They cannot coexist since providers are tied to their libibverbs build.
+ARG RDMA
+RUN case ${RDMA} in \
+        "hpn") cd /tmp/ && \
+                 wget https://hpn-driver.oss-cn-hangzhou.aliyuncs.com/nic-drivers/shuyao/drivers/ubuntu22.04-rdma-core-23.10.tar && \
+                 tar xf ubuntu22.04-rdma-core-23.10.tar && \
+                 cd ubuntu22.04-rdma-core-23.10 && \
+                 apt-get update && \
+                 echo Y | /bin/bash install.sh && \
+                 apt-get clean && rm -rf /var/lib/apt/lists/* && \
+                 cd .. && \
+                 rm -rf ubuntu22.04-rdma-core-23.10 && \
+                 rm -f ubuntu22.04-rdma-core-23.10.tar ;; \
+        "erdma") wget -O /etc/apt/trusted.gpg.d/erdma.asc http://mirrors.aliyun.com/erdma/GPGKEY && \
+                 echo "deb [ ] http://mirrors.aliyun.com/erdma/apt/ubuntu jammy/erdma main" > /etc/apt/sources.list.d/erdma.list && \
+                 apt-get update && \
+                 apt-get install -y --no-install-recommends libibverbs1 ibverbs-providers ibverbs-utils librdmacm1 && \
+                 apt-get clean && rm -rf /var/lib/apt/lists/* ;; \
+esac

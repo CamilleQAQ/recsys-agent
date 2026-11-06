@@ -1,0 +1,74 @@
+Welcome to TorchEasyRec's documentation!
+========================================
+
+.. toctree::
+   :maxdepth: 2
+   :caption: QUICK START
+
+   intro
+   quick_start
+
+.. toctree::
+   :maxdepth: 2
+   :caption: DATA & FEATURE
+
+   feature/data
+   feature/feature
+   feature/zch
+   feature/dynamicemb
+   feature/autodis
+
+.. toctree::
+   :maxdepth: 2
+   :caption: MODEL
+
+   models/recall
+   models/rank
+   models/multi_target
+   models/generative
+   models/sid_model
+   models/user_define
+   models/feature_group
+   models/loss
+   models/optimizer
+   models/evaluation_metrics
+
+.. toctree::
+   :maxdepth: 2
+   :caption: USAGE
+
+   usage/train
+   usage/eval
+   usage/export
+   usage/predict
+   usage/sid_collision
+   usage/serving
+   usage/feature_selection
+   usage/convert_easyrec_config_to_tzrec_config
+
+.. toctree::
+   :maxdepth: 2
+   :caption: BEST PRACTICES
+
+   best_practices/online_learning
+
+.. toctree::
+   :maxdepth: 1
+   :caption: DEVELOP
+
+   develop
+
+.. toctree::
+   :maxdepth: 2
+   :caption: REFERENCE
+
+   reference
+   faq
+
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`

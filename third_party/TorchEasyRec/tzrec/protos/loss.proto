@@ -1,0 +1,93 @@
+syntax = "proto2";
+package tzrec.protos;
+
+message LossConfig {
+    oneof loss {
+        BinaryCrossEntropy binary_cross_entropy = 1;
+        SoftmaxCrossEntropy softmax_cross_entropy = 2;
+        L2Loss l2_loss = 3;
+        JRCLoss jrc_loss = 4;
+        BinaryFocalLoss binary_focal_loss = 5;
+        ListwiseRankLoss listwise_rank_loss = 9;
+    }
+    // Losses for semantic-ID (SID) generation models (SidRqvae). A SID model
+    // lists one LossConfig per term it trains on (a reconstruction loss, the
+    // commitment loss, and optionally the pair contrastive loss).
+    oneof sid_loss {
+        SidReconLoss recon_loss = 6;
+        SidCommitmentLoss commitment_loss = 7;
+        SidContrastiveLoss contrastive_loss = 8;
+    }
+    // Weight of this loss term in the model's total loss. Composes
+    // multiplicatively with the task-level `weight`, which scales every loss
+    // of a task alike and so cannot trade one loss of a task against another.
+    optional float weight = 10 [default = 1.0];
+}
+
+// RQ-VAE reconstruction loss (input vs. decoder output).
+message SidReconLoss {
+    // Distance for the reconstruction term: "l2" (mse), "l1" or "cos".
+    optional string recon_type = 1 [default = "l2"];
+}
+
+// RQ-VAE commitment loss between the encoder output and the per-layer
+// cumulative quantized vectors.
+message SidCommitmentLoss {
+    // Commitment loss weights [w1, w2] (encoder-toward-quant, quant-toward-
+    // encoder). Defaults to [1.0, 0.5] when unset.
+    repeated float latent_weight = 1;
+    // Distance used for the commitment term: "l2", "l1" or "cos".
+    optional string commitment_type = 2 [default = "l2"];
+}
+
+// Enables the pair contrastive (masked InfoNCE) objective for a SID model. The
+// paired-feature wiring lives on the model (SidRqvae.contrastive_config); this
+// just turns the objective on (any loss hyperparameters would go here).
+message SidContrastiveLoss {
+}
+
+message BinaryCrossEntropy {
+    optional float label_smoothing = 1 [default = 0.0];
+}
+
+// List-wise ranking loss: softmax cross-entropy over the samples of one
+// list, where the negatives of a sample are the other samples of the same
+// list.  The list is the per-request candidate sequence a model publishes
+// (the DlrmHSTU family) or the samples of a batch that share the
+// `session_name` feature value.
+message ListwiseRankLoss {
+    // Feature (e.g. request_id or user_id) whose value groups the samples of
+    // a batch into lists, for models that do not publish per-request
+    // candidate counts. The DlrmHSTU family uses each request as the list
+    // and rejects this field.
+    optional string session_name = 1;
+    // initial softmax temperature; the logits are multiplied by
+    // 1 / temperature.
+    optional float temperature_init = 2 [default = 0.07];
+    // learn the temperature (clamped, see the loss module).
+    optional bool learnable_temperature = 3 [default = true];
+}
+
+message SoftmaxCrossEntropy {
+    optional float label_smoothing=1 [default = 0.0];
+}
+
+message L2Loss {
+}
+
+// Joint ranking and calibration loss: cross-entropy plus a per-session
+// term in which each positive competes with the negatives of its session
+// and vice versa.  The session is defined like ListwiseRankLoss's list.
+message JRCLoss {
+    // Feature (e.g. user_id) whose value groups the samples of a batch into
+    // sessions. Required unless the model publishes per-request candidate
+    // counts (the DlrmHSTU family), where it overrides the per-request
+    // session.
+    optional string session_name = 1;
+    optional float alpha = 2 [default = 0.5];
+}
+
+message BinaryFocalLoss {
+    optional float gamma = 1 [default = 2.0];
+    optional float alpha = 2 [default = 0.5];
+}

@@ -1,0 +1,174 @@
+syntax = "proto2";
+package tzrec.protos;
+
+import "tzrec/protos/sampler.proto";
+
+enum DatasetType {
+    OdpsDataset = 1;
+    ParquetDataset = 2;
+    CsvDataset = 3;
+    OdpsDatasetV1 = 4;
+    KafkaDataset = 5;
+}
+
+enum FieldType {
+    INT32 = 0;
+    INT64 = 1;
+    STRING = 2;
+    FLOAT = 3;
+    DOUBLE = 4;
+    ARRAY_INT32 = 5;
+    ARRAY_INT64 = 6;
+    ARRAY_STRING = 7;
+    ARRAY_FLOAT = 8;
+    ARRAY_DOUBLE = 9;
+    ARRAY_ARRAY_INT32 = 10;
+    ARRAY_ARRAY_INT64 = 11;
+    ARRAY_ARRAY_STRING = 12;
+    ARRAY_ARRAY_FLOAT = 13;
+    ARRAY_ARRAY_DOUBLE = 14;
+    MAP_STRING_INT32 = 15;
+    MAP_STRING_INT64 = 16;
+    MAP_STRING_STRING = 17;
+    MAP_STRING_FLOAT = 18;
+    MAP_STRING_DOUBLE = 19;
+    MAP_INT64_INT32 = 20;
+    MAP_INT64_INT64 = 21;
+    MAP_INT64_STRING = 22;
+    MAP_INT64_FLOAT = 23;
+    MAP_INT64_DOUBLE = 24;
+    MAP_INT32_INT32 = 25;
+    MAP_INT32_INT64 = 26;
+    MAP_INT32_STRING = 27;
+    MAP_INT32_FLOAT = 28;
+    MAP_INT32_DOUBLE = 29;
+}
+
+enum FgMode {
+    // input data is feature generate encoded,
+    // we do not do fg
+    FG_NONE = 1;
+    // input data is raw feature,
+    // we use python to run feature generate
+    FG_NORMAL = 2;
+    // input data is raw feature,
+    // we use fg_handler to run feature generate
+    FG_DAG = 3;
+    // input data is after feature generate but before do bucketize,
+    // we do bucketize only
+    FG_BUCKETIZE = 4;
+}
+
+message Field {
+    required string input_name = 1;
+    // only need specify it when use CsvDataset and
+    // value dtype can not be inferred (all values in the column are null)
+    optional FieldType input_type = 2;
+}
+
+message DataConfig {
+    // mini batch size to use for training and evaluation.
+    optional uint32 batch_size = 1 [default = 1024];
+
+    // dataset type.
+    required DatasetType dataset_type = 2 [default = OdpsDataset];
+
+    // [deprecated] please use fg_mode.
+    // input data is feature generate encoded or not.
+    // if fg_encoded = true, you should do fg offline first,
+    //   and set fg_encoded_multival_sep for split multi-val feature
+    optional bool fg_encoded = 3 [default = true];
+
+    // separator for multi-val feature in fg encoded input data
+    optional string fg_encoded_multival_sep  = 4 [default = '\x03'];
+
+    // labels
+    repeated string label_fields = 5;
+
+    // number of workers for parallel processing raw data
+    optional uint32 num_workers = 6 [default = 8];
+
+    // pin memory for fast cudaMemCopy
+    optional bool pin_memory = 7 [default = true];
+
+    // the input fields must be the same number and in the
+    // same order as data in csv files
+    repeated Field input_fields = 8;
+
+    // delimiter of column features, only used for CsvDataset
+    optional string delimiter = 9 [default = ','];
+
+    // for csv files, with header or not.
+    optional bool with_header = 10 [default = false];
+
+    // mini batch size to use for and evaluation.
+    optional uint32 eval_batch_size = 11;
+
+    // drop last training batch less than batch_size
+    optional bool drop_remainder = 12 [default = false];
+
+    // fg threads for each worker,
+    //   if fg_threads = 0, will disable fg dag handler, use python run.
+    optional uint32 fg_threads = 13 [default = 1];
+
+    // when use OdpsDataset, read data orderby table partitions or not.
+    optional bool is_orderby_partition = 14 [default = false];
+
+    // maxcompute storage api & tunnel quota name
+    optional string odps_data_quota_name = 15 [default = "pay-as-you-go"];
+
+    // mask probability for samples in training progress
+    optional float sample_mask_prob = 16 [default = 0.0];
+
+    // mask probability for sampled negatives in training progress
+    optional float negative_sample_mask_prob = 17 [default = 0.0];
+
+    // force padding data into same data group with same batch_size
+    optional bool force_base_data_group = 18 [default = false];
+
+    // sample weights
+    repeated string sample_weight_fields = 19;
+
+    // fg run mode.
+    optional FgMode fg_mode = 20 [default = FG_NONE];
+
+    // whether to shuffle data
+    optional bool shuffle = 22 [default = false];
+
+    // shufffle buffer for better performance, even shuffle buffer is set,
+    // it is suggested to do full data shuffle before training
+    // especially when the performance of models is not good.
+    optional uint32 shuffle_buffer_size  = 23 [default = 32];
+
+    // maxcompute storage api data compression type, LZ4_FRAME | ZSTD | UNCOMPRESSED
+    optional string odps_data_compression = 24 [default = "LZ4_FRAME"];
+
+    // sample cost field name
+    optional string sample_cost_field = 25;
+
+    // batch cost limit size
+    optional uint64 batch_cost_size = 26;
+
+    // simplified input fields string format: input_name1:input_type1;input_name2:input_type2;
+    // type names follow ODPS conventions with aliases: BIGINT->INT64, INT->INT32
+    optional string input_fields_str = 27;
+
+    // whether dataloader batches are returned in first-in, first-out order
+    optional bool in_order = 28 [default = true];
+
+    // drop training tail batches with fewer rows than this, 0 disables.
+    // drop_remainder=true is equivalent to min_batch_size=batch_size.
+    optional uint32 min_batch_size = 29 [default = 0];
+
+    // number of batches each dataloader worker prepares in advance
+    optional uint32 prefetch_factor = 30 [default = 2];
+
+    // negative sampler
+    oneof sampler {
+        NegativeSampler negative_sampler = 101;
+        NegativeSamplerV2 negative_sampler_v2 = 102;
+        HardNegativeSampler hard_negative_sampler = 103;
+        HardNegativeSamplerV2 hard_negative_sampler_v2 = 104;
+        TDMSampler tdm_sampler = 105;
+    }
+}

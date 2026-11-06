@@ -1,0 +1,836 @@
+# Copyright (c) 2025, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# We use the STU from generative-recommenders a starting point.
+# https://github.com/facebookresearch/generative-recommenders
+# thanks to their public work.
+
+import abc
+from typing import List, Optional, Tuple, cast
+
+import torch
+from torch.autograd.profiler import record_function
+
+from tzrec.modules.utils import BaseModule
+from tzrec.ops import Kernel
+from tzrec.ops.hstu_attention import delta_hstu_mha
+from tzrec.ops.hstu_attention_utils import (
+    STUTruncationPlan,
+    apply_stu_truncation_plan,
+    build_sla_func_tensor,
+    compute_stu_truncation_plan,
+)
+from tzrec.ops.hstu_compute import (
+    hstu_compute_output,
+    hstu_compute_uqvk,
+    hstu_preprocess_and_attention,
+)
+from tzrec.ops.jagged_tensors import concat_2D_jagged, split_2D_jagged
+from tzrec.utils import env_util
+from tzrec.utils.fx_util import fx_unwrap_optional_tensor
+
+
+class STU(BaseModule, abc.ABC):
+    """STU abstract module."""
+
+    def cached_forward(
+        self,
+        delta_x: torch.Tensor,
+        num_targets: torch.Tensor,
+        max_kv_caching_len: int = 0,
+        kv_caching_lengths: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward with cached key-value tensors.
+
+        Args:
+            delta_x (torch.Tensor): delta input sequence embedding tensor.
+            num_targets (torch.Tensor): number of targets.
+            max_kv_caching_len (int): maximum key-value caching length.
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths.
+
+        Returns:
+            torch.Tensor: output sequence embedding tensor.
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def truncate_input(
+        self,
+        x: torch.Tensor,
+        x_offsets: torch.Tensor,
+        max_seq_len: int,
+        num_targets: Optional[torch.Tensor],
+        *,
+        truncate_tail_len: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, STUTruncationPlan]:
+        """Truncate the UIH tail of the jagged batch before this layer.
+
+        Subclasses that don't participate in mid-stack truncation should
+        override and ``raise NotImplementedError(...)`` from their
+        override -- the abstract decorator forces a deliberate choice
+        at subclass instantiation rather than at the truncating call site.
+
+        Args:
+            x: jagged values ``(total, D)``.
+            x_offsets: cumulative offsets ``(B + 1,)``.
+            max_seq_len: padded max length.
+            num_targets: per-sample target counts ``(B,)`` or ``None``.
+            truncate_tail_len: max UIH tokens kept per sample.
+
+        Returns:
+            ``(x, x_offsets, max_seq_len, plan)`` post-truncation.
+        """
+        ...
+
+    @abc.abstractmethod
+    def forward(
+        self,
+        x: torch.Tensor,
+        x_offsets: torch.Tensor,
+        max_seq_len: int,
+        num_targets: torch.Tensor,
+        max_kv_caching_len: int = 0,
+        kv_caching_lengths: Optional[torch.Tensor] = None,
+        prev_attn_func: Optional[torch.Tensor] = None,
+        prev_attn_func_sig: Optional[str] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Forward the layer.
+
+        Args:
+            x (torch.Tensor): input sequence embedding tensor.
+            x_offsets (torch.Tensor): input sequence offsets.
+            max_seq_len (int): maximum sequence length.
+            num_targets (torch.Tensor): number of targets.
+            max_kv_caching_len (int): maximum key-value caching length.
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths.
+            prev_attn_func (Optional[torch.Tensor]): SLA NFUNC mask tensor
+                produced by the previous layer in the stack, available for
+                reuse when the current layer's static SLA signature matches.
+            prev_attn_func_sig (Optional[str]): ``attn_func_static_sig``
+                string of the previous layer that produced
+                ``prev_attn_func``.  Pass ``None`` to force a rebuild
+                (e.g. across a mid-stack truncation boundary).
+
+        Returns:
+            Tuple of ``(output, attn_func)``.
+        """
+        pass
+
+
+def _update_kv_cache(
+    max_seq_len: int,
+    seq_offsets: torch.Tensor,
+    k: Optional[torch.Tensor],
+    v: Optional[torch.Tensor],
+    max_kv_caching_len: int,
+    kv_caching_lengths: Optional[torch.Tensor],
+    orig_k_cache: Optional[torch.Tensor],
+    orig_v_cache: Optional[torch.Tensor],
+    orig_max_kv_caching_len: int,
+    orig_kv_caching_offsets: Optional[torch.Tensor],
+) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], int, Optional[torch.Tensor]]:
+    if kv_caching_lengths is not None:
+        kv_caching_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(
+            kv_caching_lengths
+        )
+        delta_offsets = seq_offsets - kv_caching_offsets
+        k_cache, _ = split_2D_jagged(
+            max_seq_len=max_seq_len,
+            values=fx_unwrap_optional_tensor(k).flatten(1, 2),
+            max_len_left=None,
+            max_len_right=None,
+            offsets_left=kv_caching_offsets,
+            offsets_right=delta_offsets,
+        )
+        v_cache, _ = split_2D_jagged(
+            max_seq_len=max_seq_len,
+            values=fx_unwrap_optional_tensor(v).flatten(1, 2),
+            max_len_left=None,
+            max_len_right=None,
+            offsets_left=kv_caching_offsets,
+            offsets_right=delta_offsets,
+        )
+        if max_kv_caching_len == 0:
+            max_kv_caching_len = int(kv_caching_lengths.max().item())
+        return (
+            k_cache,
+            v_cache,
+            max_kv_caching_len,
+            kv_caching_offsets,
+        )
+    else:
+        return (
+            orig_k_cache,
+            orig_v_cache,
+            orig_max_kv_caching_len,
+            orig_kv_caching_offsets,
+        )
+
+
+@torch.fx.wrap
+def _construct_full_kv(
+    delta_k: torch.Tensor,
+    delta_v: torch.Tensor,
+    k_cache: torch.Tensor,
+    v_cache: torch.Tensor,
+    max_kv_caching_len: int,
+    kv_caching_offsets: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, int, torch.Tensor]:
+    L, _ = delta_k.shape
+    B = kv_caching_offsets.shape[0] - 1
+    delta_size = L // B
+    full_k = concat_2D_jagged(
+        values_left=k_cache,
+        values_right=delta_k,
+        max_len_left=max_kv_caching_len,
+        max_len_right=delta_size,
+        offsets_left=kv_caching_offsets,
+        offsets_right=None,
+    )
+    full_v = concat_2D_jagged(
+        values_left=v_cache,
+        values_right=delta_v,
+        max_len_left=max_kv_caching_len,
+        max_len_right=delta_size,
+        offsets_left=kv_caching_offsets,
+        offsets_right=None,
+    )
+    full_kv_caching_offsets = kv_caching_offsets + delta_size * torch.arange(
+        B + 1, device=delta_k.device
+    )
+    return (
+        full_k,
+        full_v,
+        max_kv_caching_len + delta_size,
+        full_kv_caching_offsets,
+    )
+
+
+class STULayer(STU):
+    """A jagged sequential transduction unit for variable-length sequences.
+
+    Args:
+        embedding_dim (int): dimension of input embeddings
+        num_heads (int): number of attention heads
+        hidden_dim (int): dimension of hidden linear layers
+        attention_dim (int): dimension of attention mechanism
+        output_dropout_ratio (float): dropout probability for linear layers
+        causal (bool): whether to use causal mask in attention
+        target_aware (bool): whether to target mask in attention
+        max_attn_len (int): maximum length of attention window
+        attn_alpha (float): alpha for mha attention
+        use_group_norm (bool): use group normalization or layer normalization.
+        recompute_normed_x (bool): whether to recompute normed_x in backward
+        recompute_uvqk (bool): whether to recompute uvqk in backward
+        recompute_y (bool): whether to recompute y in backward
+        sort_by_length (bool): whether to sort by length when forwarding
+        contextual_seq_len (int): sequence length of contextual feature
+        sla_k1 (int): Semi-Local Attention local-causal window size.
+            Setting either ``sla_k1`` or ``sla_k2`` to a value > 0
+            activates the SLA path on this layer (the other may stay 0
+            to disable that side).  The active layer attends to
+            ``[max(0, pos - sla_k1 + 1), pos]`` plus the global prefix
+            of length ``max(sla_k2, contextual_seq_len)``.  Requires
+            ``Kernel.CUTLASS`` or ``Kernel.PYTORCH`` (Triton has no
+            NFUNC mask path).
+        sla_k2 (int): Semi-Local Attention global-prefix length.
+            ``effective_k2 = max(sla_k2, contextual_seq_len)`` so a
+            contextual prefix can subsume it.  See ``sla_k1`` for
+            activation rules.
+        scaling_seqlen (int): sequence length used as the divisor in the
+            attention output scaling. ``-1`` means fall back to the runtime
+            ``max_seq_len`` (legacy behavior). When set to a fixed value
+            (typically the model's config ``max_seq_len``), attention output
+            is invariant to batch-level seq-length.
+        is_inference (bool): whether to run in inference mode.
+    """
+
+    max_kv_caching_len: int
+    k_cache: Optional[torch.Tensor]
+    v_cache: Optional[torch.Tensor]
+    kv_caching_offsets: Optional[torch.Tensor]
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        num_heads: int,
+        hidden_dim: int,
+        attention_dim: int,
+        output_dropout_ratio: float = 0.3,
+        causal: bool = True,
+        target_aware: bool = True,
+        max_attn_len: Optional[int] = None,
+        attn_alpha: Optional[float] = None,
+        use_group_norm: bool = False,
+        recompute_normed_x: bool = True,
+        recompute_uvqk: bool = True,
+        recompute_y: bool = True,
+        sort_by_length: bool = True,
+        contextual_seq_len: int = 0,
+        sla_k1: int = 0,
+        sla_k2: int = 0,
+        scaling_seqlen: int = -1,
+        is_inference: bool = False,
+    ) -> None:
+        super().__init__(
+            is_inference=is_inference,
+        )
+        self.reset_kv_cache()
+        self._num_heads: int = num_heads
+        self._embedding_dim: int = embedding_dim
+        self._hidden_dim: int = hidden_dim
+        self._attention_dim: int = attention_dim
+        self._output_dropout_ratio: float = output_dropout_ratio
+        self._target_aware: bool = target_aware
+        self._causal: bool = causal
+        self._max_attn_len: int = max_attn_len or 0
+        self._attn_alpha: float = attn_alpha or 1.0 / (self._attention_dim**0.5)
+        self._use_group_norm: bool = use_group_norm
+        self._recompute_normed_x: bool = recompute_normed_x
+        self._recompute_uvqk: bool = recompute_uvqk
+        self._recompute_y: bool = recompute_y
+        self._sort_by_length: bool = sort_by_length
+        self._contextual_seq_len: int = contextual_seq_len
+        self._sla_k1: int = sla_k1
+        self._sla_k2: int = sla_k2
+        self._scaling_seqlen: int = scaling_seqlen
+
+        self._uvqk_weight: torch.nn.Parameter = torch.nn.Parameter(
+            torch.empty(
+                (
+                    self._embedding_dim,
+                    (self._hidden_dim * 2 + self._attention_dim * 2) * self._num_heads,
+                )
+            ),
+        )
+        torch.nn.init.xavier_uniform_(self._uvqk_weight)
+        self._uvqk_beta: torch.nn.Parameter = torch.nn.Parameter(
+            torch.zeros(
+                (self._hidden_dim * 2 + self._attention_dim * 2) * self._num_heads,
+            ),
+        )
+        self._input_norm_weight: torch.nn.Parameter = torch.nn.Parameter(
+            torch.ones((self._embedding_dim,)),
+        )
+        self._input_norm_bias: torch.nn.Parameter = torch.nn.Parameter(
+            torch.zeros((self._embedding_dim,)),
+        )
+        self._output_weight = torch.nn.Parameter(
+            torch.empty(
+                (
+                    self._hidden_dim * self._num_heads * 3,
+                    self._embedding_dim,
+                )
+            ),
+        )
+        torch.nn.init.xavier_uniform_(self._output_weight)
+        output_norm_shape: int = (
+            self._hidden_dim * self._num_heads
+            if not self._use_group_norm
+            else self._num_heads
+        )
+        self._output_norm_weight: torch.nn.Parameter = torch.nn.Parameter(
+            torch.ones((output_norm_shape,)),
+        )
+        self._output_norm_bias: torch.nn.Parameter = torch.nn.Parameter(
+            torch.zeros((output_norm_shape,)),
+        )
+        self._enable_tma = env_util.enable_tma()
+
+    def reset_kv_cache(self) -> None:
+        """Reset the key-value cache."""
+        self.k_cache = None
+        self.v_cache = None
+        self.kv_caching_offsets = None
+        self.max_kv_caching_len = 0
+
+    def update_kv_cache(
+        self,
+        max_seq_len: int,
+        seq_offsets: torch.Tensor,
+        k: Optional[torch.Tensor],
+        v: Optional[torch.Tensor],
+        max_kv_caching_len: int,
+        kv_caching_lengths: Optional[torch.Tensor],
+    ) -> None:
+        """Update the key-value cache.
+
+        Args:
+            max_seq_len (int): maximum sequence length
+            seq_offsets (torch.Tensor): sequence offsets
+            k (Optional[torch.Tensor]): key tensor
+            v (Optional[torch.Tensor]): value tensor
+            max_kv_caching_len (int): maximum key-value caching length
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths
+        """
+        self.k_cache, self.v_cache, self.max_kv_caching_len, self.kv_caching_offsets = (
+            _update_kv_cache(
+                max_seq_len=max_seq_len,
+                seq_offsets=seq_offsets,
+                k=k,
+                v=v,
+                max_kv_caching_len=max_kv_caching_len,
+                kv_caching_lengths=kv_caching_lengths,
+                orig_k_cache=self.k_cache,
+                orig_v_cache=self.v_cache,
+                orig_max_kv_caching_len=self.max_kv_caching_len,
+                orig_kv_caching_offsets=self.kv_caching_offsets,
+            )
+        )
+
+    def construct_full_kv(
+        self,
+        delta_k: torch.Tensor,
+        delta_v: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, torch.Tensor]:
+        """Construct full key-value tensor.
+
+        Args:
+            delta_k (torch.Tensor): delta key tensor.
+            delta_v (torch.Tensor): delta value tensor.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, int, torch.Tensor]:
+                full key-value tensor,
+                full value tensor,
+                full key-value caching length,
+                full key-value caching offsets.
+        """
+        return _construct_full_kv(
+            delta_k=delta_k,
+            delta_v=delta_v,
+            k_cache=fx_unwrap_optional_tensor(self.k_cache),
+            v_cache=fx_unwrap_optional_tensor(self.v_cache),
+            max_kv_caching_len=self.max_kv_caching_len,
+            kv_caching_offsets=self.kv_caching_offsets,
+        )
+
+    def truncate_input(
+        self,
+        x: torch.Tensor,
+        x_offsets: torch.Tensor,
+        max_seq_len: int,
+        num_targets: Optional[torch.Tensor],
+        *,
+        truncate_tail_len: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, STUTruncationPlan]:
+        """Truncate the UIH tail of the jagged batch before this layer."""
+        plan = compute_stu_truncation_plan(
+            x_offsets=x_offsets,
+            num_targets=num_targets,
+            max_seq_len=max_seq_len,
+            truncate_tail_len=truncate_tail_len,
+            contextual_seq_len=self._contextual_seq_len,
+        )
+        x = apply_stu_truncation_plan(x, plan, kernel=self.kernel())
+        return x, plan.new_x_offsets, plan.new_max_seq_len, plan
+
+    @property
+    def attn_func_static_sig(self) -> str:
+        """SLA NFUNC cache key (colon-separated, fx-trace-safe)."""
+        return (
+            f"{self._sla_k1}:{self._sla_k2}:{self._contextual_seq_len}:"
+            f"{self._num_heads}:{int(self._target_aware)}:"
+            f"{self._max_attn_len}:{int(self._causal)}"
+        )
+
+    @property
+    def uses_arbitrary_mask(self) -> bool:
+        """Whether attention is driven by an NFUNC func tensor.
+
+        Must be a static Python bool -- it selects branches under fx
+        symbolic trace.  Subclass hook: override alongside
+        ``_build_attn_func`` and ``attn_func_static_sig`` to drive a
+        different two-interval mask (see ``OneRankSTULayer``).
+        """
+        return self._sla_k1 > 0 or self._sla_k2 > 0
+
+    def _build_attn_func(
+        self,
+        x: torch.Tensor,
+        x_offsets: torch.Tensor,
+        num_targets: torch.Tensor,
+    ) -> torch.Tensor:
+        """Build this layer's NFUNC=3 mask tensor.
+
+        Only reached when ``uses_arbitrary_mask`` is True and no tensor
+        cached from an earlier layer matched ``attn_func_static_sig``.
+        """
+        return build_sla_func_tensor(
+            nheads=self._num_heads,
+            sla_k1=self._sla_k1,
+            sla_k2=self._sla_k2,
+            seq_offsets=x_offsets,
+            total_q=x.size(0),
+            num_targets=num_targets if self._target_aware else None,
+            contextual_seq_len=self._contextual_seq_len,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        x_offsets: torch.Tensor,
+        max_seq_len: int,
+        num_targets: torch.Tensor,
+        max_kv_caching_len: int = 0,
+        kv_caching_lengths: Optional[torch.Tensor] = None,
+        prev_attn_func: Optional[torch.Tensor] = None,
+        prev_attn_func_sig: Optional[str] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Forward the layer.
+
+        Args:
+            x (torch.Tensor): input sequence embedding tensor.
+            x_offsets (torch.Tensor): input sequence offsets.
+            max_seq_len (int): maximum sequence length.
+            num_targets (torch.Tensor): number of targets.
+            max_kv_caching_len (int): maximum key-value caching length.
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths.
+            prev_attn_func (Optional[torch.Tensor]): SLA NFUNC mask
+                from a prior layer; reused if its sig matches this
+                layer's ``attn_func_static_sig``.
+            prev_attn_func_sig (Optional[str]):
+                ``attn_func_static_sig`` of the layer that produced
+                ``prev_attn_func``.  Pass ``None`` to force a rebuild
+                (caller's responsibility across a mid-stack truncation
+                boundary; ``STUStack`` bakes this into its precomputed
+                sig list).
+
+        Returns:
+            ``(output, attn_func)``.
+        """
+        attn_func: Optional[torch.Tensor] = None
+        uses_arbitrary_mask: bool = self.uses_arbitrary_mask
+        if uses_arbitrary_mask:
+            if self.kernel() == Kernel.TRITON:
+                raise ValueError(
+                    "the NFUNC arbitrary-mask path (SLA, OneRank) requires "
+                    "Kernel.CUTLASS or Kernel.PYTORCH; Kernel.TRITON has no "
+                    "NFUNC mask path."
+                )
+            # str==str, fx-trace-safe. Truncation-boundary invalidation
+            # is encoded by the caller passing prev_attn_func_sig=None.
+            if (
+                prev_attn_func is not None
+                and prev_attn_func_sig == self.attn_func_static_sig
+            ):
+                attn_func = prev_attn_func
+            else:
+                attn_func = self._build_attn_func(
+                    x=x, x_offsets=x_offsets, num_targets=num_targets
+                )
+        else:
+            attn_func = prev_attn_func
+
+        local_attn_func = attn_func if uses_arbitrary_mask else None
+        # A func tensor is the *sole* mask: it already encodes causality,
+        # the local window, the contextual prefix and target isolation.
+        # Withhold num_targets / contextual_seq_len from the kernel so no
+        # backend can AND a second mask on top -- CUTLASS forwards both to
+        # the kernel while the PyTorch reference ignores them, so a mask
+        # that deliberately lets a target row attend *inside* the target
+        # block (OneRank task tokens) would silently lose those columns on
+        # CUTLASS only.  For SLA this is a no-op: its func intervals are a
+        # subset of both fixed masks.
+        kernel_num_targets: Optional[torch.Tensor] = None
+        kernel_contextual_seq_len: int = 0
+        if not uses_arbitrary_mask:
+            kernel_num_targets = num_targets if self._target_aware else None
+            kernel_contextual_seq_len = self._contextual_seq_len
+        with record_function("## stu_preprocess_and_attention ##"):
+            u, attn_output, k, v = hstu_preprocess_and_attention(
+                x=x,
+                norm_weight=self._input_norm_weight.to(x.dtype),
+                norm_bias=self._input_norm_bias.to(x.dtype),
+                norm_eps=1e-6,
+                num_heads=self._num_heads,
+                attn_dim=self._attention_dim,
+                hidden_dim=self._hidden_dim,
+                uvqk_weight=self._uvqk_weight.to(x.dtype),
+                uvqk_bias=self._uvqk_beta.to(x.dtype),
+                max_seq_len=max_seq_len,
+                seq_offsets=x_offsets,
+                attn_alpha=self._attn_alpha,
+                causal=self._causal,
+                num_targets=kernel_num_targets,
+                max_attn_len=self._max_attn_len,
+                contextual_seq_len=kernel_contextual_seq_len,
+                recompute_uvqk_in_backward=self._recompute_uvqk,
+                recompute_normed_x_in_backward=self._recompute_normed_x,
+                sort_by_length=self._sort_by_length,
+                prefill=kv_caching_lengths is not None,
+                kernel=self.kernel(),
+                enable_tma=self._enable_tma,
+                attn_func=local_attn_func,
+                scaling_seqlen=self._scaling_seqlen,
+            )
+
+        self.update_kv_cache(
+            max_seq_len=max_seq_len,
+            seq_offsets=x_offsets,
+            k=k,
+            v=v,
+            max_kv_caching_len=max_kv_caching_len,
+            kv_caching_lengths=kv_caching_lengths,
+        )
+
+        with record_function("## stu_compute_output ##"):
+            output = hstu_compute_output(
+                attn=attn_output,
+                u=u,
+                x=x,
+                norm_weight=self._output_norm_weight.to(x.dtype),
+                norm_bias=self._output_norm_bias.to(x.dtype),
+                norm_eps=1e-6,
+                dropout_ratio=self._output_dropout_ratio,
+                output_weight=self._output_weight.to(x.dtype),
+                group_norm=self._use_group_norm,
+                num_heads=self._num_heads,
+                linear_dim=self._hidden_dim,
+                concat_ux=True,
+                training=self.training,
+                kernel=self.kernel(),
+                recompute_y_in_backward=self._recompute_y,
+            )
+        return output, attn_func
+
+    def cached_forward(
+        self,
+        delta_x: torch.Tensor,
+        num_targets: torch.Tensor,
+        max_kv_caching_len: int = 0,
+        kv_caching_lengths: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward with cached key-value tensors.
+
+        Args:
+            delta_x (torch.Tensor): delta input sequence embedding tensor.
+            num_targets (torch.Tensor): number of targets.
+            max_kv_caching_len (int): maximum key-value caching length.
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths.
+
+        Returns:
+            torch.Tensor: output sequence embedding tensor.
+        """
+        with record_function("## stu_compute_uqvk ##"):
+            delta_u, delta_q, delta_k, delta_v = hstu_compute_uqvk(
+                x=delta_x,
+                norm_weight=self._input_norm_weight.to(delta_x.dtype),
+                norm_bias=self._input_norm_bias.to(delta_x.dtype),
+                norm_eps=1e-6,
+                num_heads=self._num_heads,
+                attn_dim=self._attention_dim,
+                hidden_dim=self._hidden_dim,
+                uvqk_weight=self._uvqk_weight.to(delta_x.dtype),
+                uvqk_bias=self._uvqk_beta.to(delta_x.dtype),
+                kernel=self.kernel(),
+            )
+        k, v, max_seq_len, seq_offsets = self.construct_full_kv(
+            delta_k=delta_k.flatten(1, 2),
+            delta_v=delta_v.flatten(1, 2),
+        )
+        self.update_kv_cache(
+            max_seq_len=max_seq_len,
+            seq_offsets=seq_offsets,
+            k=k,
+            v=v,
+            max_kv_caching_len=max_kv_caching_len,
+            kv_caching_lengths=kv_caching_lengths,
+        )
+        k = k.view(-1, self._num_heads, self._attention_dim)
+        v = v.view(-1, self._num_heads, self._hidden_dim)
+        with record_function("## delta_hstu_mha ##"):
+            delta_attn_output = delta_hstu_mha(
+                max_seq_len=max_seq_len,
+                alpha=self._attn_alpha,
+                delta_q=delta_q,
+                k=k,
+                v=v,
+                seq_offsets=seq_offsets,
+                num_targets=num_targets if self._target_aware else None,
+                max_attn_len=self._max_attn_len,
+                contextual_seq_len=self._contextual_seq_len,
+                kernel=self.kernel(),
+                enable_tma=self._enable_tma,
+                scaling_seqlen=self._scaling_seqlen,
+            ).view(-1, self._hidden_dim * self._num_heads)
+        with record_function("## stu_compute_output ##"):
+            return hstu_compute_output(
+                attn=delta_attn_output,
+                u=delta_u,
+                x=delta_x,
+                norm_weight=self._output_norm_weight.to(delta_x.dtype),
+                norm_bias=self._output_norm_bias.to(delta_x.dtype),
+                norm_eps=1e-6,
+                dropout_ratio=self._output_dropout_ratio,
+                output_weight=self._output_weight.to(delta_x.dtype),
+                group_norm=self._use_group_norm,
+                num_heads=self._num_heads,
+                linear_dim=self._hidden_dim,
+                concat_ux=True,
+                training=self.training,
+                kernel=self.kernel(),
+                recompute_y_in_backward=self._recompute_y,
+            )
+
+
+class STUStack(BaseModule):
+    """Stack of ``STU`` layers with optional mid-stack attention truncation.
+
+    Args:
+        stu_list (List[STU]): list of STU layers.
+        truncate_split_layer (int): layer index after which UIH tokens
+            are truncated.  Must be in ``(0, len(stu_list))`` when
+            ``truncate_tail_len > 0``, else ``0``.
+        truncate_tail_len (int): max UIH tokens kept on layers
+            ``>= truncate_split_layer``.  Both fields must be ``> 0``
+            to enable truncation.
+        is_inference (bool): whether to run in inference mode.
+    """
+
+    def __init__(
+        self,
+        stu_list: List[STU],
+        truncate_split_layer: int = 0,
+        truncate_tail_len: int = 0,
+        is_inference: bool = False,
+    ) -> None:
+        super().__init__(is_inference=is_inference)
+        self._stu_layers: torch.nn.ModuleList = torch.nn.ModuleList(modules=stu_list)
+        if truncate_split_layer < 0 or truncate_tail_len < 0:
+            raise ValueError(
+                f"truncate_split_layer and truncate_tail_len must be "
+                f"non-negative; got truncate_split_layer={truncate_split_layer}, "
+                f"truncate_tail_len={truncate_tail_len}."
+            )
+        if (truncate_split_layer > 0) != (truncate_tail_len > 0):
+            raise ValueError(
+                f"truncate_split_layer and truncate_tail_len must both be "
+                f"> 0 to enable truncation, or both 0 to disable; got "
+                f"truncate_split_layer={truncate_split_layer}, "
+                f"truncate_tail_len={truncate_tail_len}."
+            )
+        if truncate_tail_len > 0 and not (
+            0 < truncate_split_layer < len(self._stu_layers)
+        ):
+            raise ValueError(
+                f"truncate_split_layer must be in (0, {len(self._stu_layers)}) "
+                f"when truncate_tail_len > 0; got "
+                f"truncate_split_layer={truncate_split_layer}, "
+                f"truncate_tail_len={truncate_tail_len}."
+            )
+        self._truncate_split_layer: int = truncate_split_layer
+        self._truncate_tail_len: int = truncate_tail_len
+
+        # Per-layer prev_attn_func_sig: previous layer's static sig,
+        # except None at layer 0 and at the truncation-split layer
+        # (cache invalidation -- post-truncation total_q differs).
+        self._prev_attn_func_sig_per_layer: List[Optional[str]] = []
+        for i in range(len(self._stu_layers)):
+            if i == 0 or (
+                self._truncate_tail_len > 0 and i == self._truncate_split_layer
+            ):
+                prev_sig: Optional[str] = None
+            else:
+                prev_sig = cast(
+                    Optional[str], self._stu_layers[i - 1].attn_func_static_sig
+                )
+            self._prev_attn_func_sig_per_layer.append(prev_sig)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        x_offsets: torch.Tensor,
+        max_seq_len: int,
+        num_targets: torch.Tensor,
+        max_kv_caching_len: int = 0,
+        kv_caching_lengths: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, Optional[STUTruncationPlan]]:
+        """Forward stack of stu layer.
+
+        Args:
+            x (torch.Tensor): input sequence embedding tensor.
+            x_offsets (torch.Tensor): input sequence offsets.
+            max_seq_len (int): maximum sequence length.
+            num_targets (torch.Tensor): number of targets.
+            max_kv_caching_len (int): maximum key-value caching length.
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths.
+
+        Returns:
+            ``(x, x_offsets, max_seq_len, plan)``.  ``plan`` is the
+            :class:`STUTruncationPlan` produced when mid-stack truncation
+            fired, else ``None``.  When ``plan`` is not ``None``,
+            ``x_offsets`` and ``max_seq_len`` reflect the post-truncation
+            state; ``num_targets`` is preserved intact across truncation,
+            so the caller's input tensor is still valid.  Callers that
+            hold parallel jagged tensors (e.g. ``seq_timestamps``) replay
+            the same split via :func:`apply_stu_truncation_plan`.
+        """
+        plan: Optional[STUTruncationPlan] = None
+        prev_attn_func: Optional[torch.Tensor] = None
+        for i, layer in enumerate(self._stu_layers):
+            if self._truncate_tail_len > 0 and i == self._truncate_split_layer:
+                x, x_offsets, max_seq_len, plan = layer.truncate_input(
+                    x,
+                    x_offsets,
+                    max_seq_len,
+                    num_targets,
+                    truncate_tail_len=self._truncate_tail_len,
+                )
+                # No `prev_attn_func = None` reset: the precomputed sig
+                # at this index is already None, so the layer rebuilds.
+            x, prev_attn_func = layer(
+                x=x,
+                x_offsets=x_offsets,
+                max_seq_len=max_seq_len,
+                num_targets=num_targets,
+                max_kv_caching_len=max_kv_caching_len,
+                kv_caching_lengths=kv_caching_lengths,
+                prev_attn_func=prev_attn_func,
+                prev_attn_func_sig=self._prev_attn_func_sig_per_layer[i],
+            )
+        return x, x_offsets, max_seq_len, plan
+
+    def cached_forward(
+        self,
+        delta_x: torch.Tensor,
+        num_targets: torch.Tensor,
+        max_kv_caching_len: int = 0,
+        kv_caching_lengths: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Forward stack of stu layer with cached key-value tensors.
+
+        Args:
+            delta_x (torch.Tensor): delta input sequence embedding tensor.
+            num_targets (torch.Tensor): number of targets.
+            max_kv_caching_len (int): maximum key-value caching length.
+            kv_caching_lengths (Optional[torch.Tensor]): key-value caching lengths.
+
+        Returns:
+            torch.Tensor: output sequence embedding tensor.
+        """
+        if self._truncate_tail_len > 0 and self._truncate_split_layer > 0:
+            # Cached / delta path keeps a rolling KV cache; mid-stack
+            # truncation would drop UIH prefix tokens that post-truncation
+            # layers still reference via the cache (train/serve skew).
+            raise NotImplementedError(
+                "STUStack attention truncation is not supported in "
+                "cached_forward (serving path). Either disable truncation "
+                "or use the non-cached forward path."
+            )
+        for layer in self._stu_layers:
+            delta_x = layer.cached_forward(
+                delta_x=delta_x,
+                num_targets=num_targets,
+                max_kv_caching_len=max_kv_caching_len,
+                kv_caching_lengths=kv_caching_lengths,
+            )
+        return delta_x

@@ -1,0 +1,23 @@
+# Two-Tower 召回训练默认值（与 recsys.training.trainer.TrainConfig 对齐）
+# 当前训练脚本仍从命令行读取参数；这里的数值是「已交付实验使用的默认值」，
+# 由 scripts/check_project.py 校验与代码默认值一致，后续统一配置入口直接读这份文件。
+
+[model]
+id = "two_tower"
+entry = "recsys.training.trainer"
+evaluator = "recsys.evaluation.evaluator"
+checkpoint = "artifacts/{dataset}/two_tower.pt"
+
+[defaults]
+epochs = 9
+batch_size = 256
+learning_rate = 0.01
+embedding_dim = 128
+hidden_dim = 128
+output_dim = 128
+temperature = 0.1
+tower_type = "embedding"
+mask_false_negatives = true
+weight_decay = 0.0
+seed = 42
+device = "auto"

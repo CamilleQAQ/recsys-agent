@@ -1,0 +1,1054 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import multiprocessing as mp
+import os
+import time
+import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+import numpy as np
+import pyarrow as pa
+import requests
+from odps import ODPS
+from odps.apis.storage_api import SessionRequest, SessionStatus
+from odps.errors import ODPSError
+from parameterized import param, parameterized
+from torch import distributed as dist
+from torch.utils.data import DataLoader
+
+from tzrec.constant import Mode
+from tzrec.datasets import odps_dataset
+from tzrec.datasets.odps_dataset import OdpsDataset, OdpsWriter, _create_odps_account
+from tzrec.features.feature import FgMode, create_features
+from tzrec.protos import data_pb2, feature_pb2, sampler_pb2
+from tzrec.utils import test_util
+from tzrec.utils.checkpoint_util import update_dataloder_state
+from tzrec.utils.misc_util import get_free_port, random_name
+
+
+class OdpsDatasetTest(unittest.TestCase):
+    def setUp(self):
+        self.o = None
+        self.test_project = os.environ.get("CI_ODPS_PROJECT_NAME", None)
+        self.test_schema_project = os.environ.get("CI_ODPS_SCHEMA_PROJECT_NAME", None)
+        self.test_quota = os.environ.get("ODPS_DATA_QUOTA_NAME", "")
+        if "ODPS_CONFIG_FILE_PATH" in os.environ:
+            with open(os.environ["ODPS_CONFIG_FILE_PATH"], "r") as f:
+                for line in f.readlines():
+                    values = line.split("=", 1)
+                    if len(values) == 2 and values[0] == "project_name":
+                        self.test_project = values[1].strip()
+        self.test_suffix = random_name()
+
+    def tearDown(self):
+        if self.o is not None:
+            self.o.delete_table(f"test_odps_dataset_{self.test_suffix}", if_exists=True)
+            self.o.delete_table(f"test_odps_sampler_{self.test_suffix}", if_exists=True)
+        self.o = None
+        os.environ.pop("USE_HASH_NODE_ID", None)
+
+    def _create_test_table_and_feature_cfgs(self, has_lookup=True):
+        self.o.delete_table(f"test_odps_dataset_{self.test_suffix}", if_exists=True)
+        t = self.o.create_table(
+            f"test_odps_dataset_{self.test_suffix}",
+            (
+                "unused string, id_a string, tag_b string, raw_c bigint, raw_d double, "
+                "raw_e int, raw_f float, raw_g array<float>, map_h map<string,bigint>, "
+                "label bigint",
+                "dt string",
+            ),
+            if_not_exists=True,
+            hints={"odps.sql.type.system.odps2": "true"},
+        )
+        for dt in ["20240319", "20240320"]:
+            with t.open_writer(partition=f"dt={dt}", create_partition=True) as writer:
+                writer.write(
+                    [
+                        [
+                            "unused",
+                            "1",
+                            "\x1d".join(["2\x1d3"] * 10000),
+                            4,
+                            5.0,
+                            3,
+                            4.0,
+                            [1.0, 2.0, 3.0],
+                            {"1": 1, "2": 2},
+                            0,
+                        ]
+                    ]
+                    * 10000
+                )
+        feature_cfgs = [
+            feature_pb2.FeatureConfig(
+                id_feature=feature_pb2.IdFeature(
+                    feature_name="id_a", expression="item:id_a", num_buckets=100000
+                )
+            ),
+            feature_pb2.FeatureConfig(
+                id_feature=feature_pb2.IdFeature(
+                    feature_name="tag_b", expression="user:tag_b", num_buckets=10
+                )
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(
+                    feature_name="raw_c", expression="item:raw_c"
+                )
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(
+                    feature_name="raw_d", expression="item:raw_d"
+                )
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(
+                    feature_name="raw_e", expression="user:raw_e"
+                )
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(
+                    feature_name="raw_f", expression="user:raw_f"
+                )
+            ),
+            feature_pb2.FeatureConfig(
+                raw_feature=feature_pb2.RawFeature(
+                    feature_name="raw_g", expression="user:raw_g", value_dim=3
+                ),
+            ),
+        ]
+        if has_lookup:
+            feature_cfgs.append(
+                feature_pb2.FeatureConfig(
+                    lookup_feature=feature_pb2.LookupFeature(
+                        feature_name="lookup_h", map="user:map_h", key="item:id_a"
+                    ),
+                )
+            )
+        return feature_cfgs
+
+    def _test_odps_dataset(self, is_orderby_partition=False, schema=None):
+        account, odps_endpoint = _create_odps_account()
+        project = self.test_project
+        tb_prefix = ""
+        if schema is not None:
+            project = self.test_schema_project
+            tb_prefix = f"{schema}."
+        self.o = ODPS(
+            account=account, project=project, endpoint=odps_endpoint, schema=schema
+        )
+        feature_cfgs = self._create_test_table_and_feature_cfgs()
+        features = create_features(feature_cfgs, fg_mode=FgMode.FG_DAG)
+
+        dataset = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=8196,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                is_orderby_partition=is_orderby_partition,
+                odps_data_quota_name=self.test_quota,
+            ),
+            features=features,
+            input_path=f"odps://{project}/tables/{tb_prefix}test_odps_dataset_{self.test_suffix}/dt=20240319&dt=20240320",
+        )
+        self.assertEqual(len(dataset.input_fields), 9)
+        self.assertEqual(
+            len(list(dataset._reader._input_to_sess.values())[0]),
+            2 if is_orderby_partition else 1,
+        )
+        if is_orderby_partition:
+            with self.assertLogs("tzrec", level="INFO") as logs:
+                next(iter(dataset))
+            self.assertIn(
+                f"Reading test_odps_dataset_{self.test_suffix}/dt=20240319 (1/2)",
+                "\n".join(logs.output),
+            )
+        dataloader = DataLoader(
+            dataset=dataset,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        iterator = iter(dataloader)
+        for _ in range(2):
+            data = next(iterator)
+            data_dict = data.to_dict()
+            self.assertEqual(
+                sorted(data_dict.keys()),
+                [
+                    "id_a.lengths",
+                    "id_a.values",
+                    "label",
+                    "lookup_h.values",
+                    "raw_c.values",
+                    "raw_d.values",
+                    "raw_e.values",
+                    "raw_f.values",
+                    "raw_g.values",
+                    "tag_b.lengths",
+                    "tag_b.values",
+                ],
+            )
+            self.assertEqual(len(data_dict["id_a.lengths"]), 8196)
+
+    @parameterized.expand([[False], [True]])
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset(self, is_orderby_partition=False):
+        self._test_odps_dataset(is_orderby_partition=is_orderby_partition)
+
+    @unittest.skipIf(
+        os.environ.get("CI_ODPS_SCHEMA_PROJECT_NAME", "") == ""
+        or (
+            os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+            and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        ),
+        "schema odps project not found",
+    )
+    def test_odps_dataset_has_schema(self):
+        self._test_odps_dataset(is_orderby_partition=False, schema="rec")
+
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset_init_session_multi_rank(self):
+        account, odps_endpoint = _create_odps_account()
+        self.o = ODPS(
+            account=account, project=self.test_project, endpoint=odps_endpoint
+        )
+        feature_cfgs = self._create_test_table_and_feature_cfgs()
+        t = self.o.get_table(f"test_odps_dataset_{self.test_suffix}")
+        # distinct partition sizes pin the session order
+        for dt, num_rows in [("20240321", 5000), ("20240322", 3000)]:
+            with t.open_writer(partition=f"dt={dt}", create_partition=True) as writer:
+                writer.write(
+                    [["unused", "1", "2", 4, 5.0, 3, 4.0, [1.0], {}, 0]] * num_rows
+                )
+
+        world_size = 2
+        queue = mp.Queue()
+
+        def _reader_worker(rank, port):
+            os.environ["RANK"] = str(rank)
+            os.environ["WORLD_SIZE"] = str(world_size)
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(port)
+            dist.init_process_group(backend="gloo")
+            time.sleep(rank)  # prevent get credential failed
+            dataset = OdpsDataset(
+                data_config=data_pb2.DataConfig(
+                    batch_size=8196,
+                    dataset_type=data_pb2.DatasetType.OdpsDataset,
+                    fg_mode=FgMode.FG_DAG,
+                    label_fields=["label"],
+                    is_orderby_partition=True,
+                    odps_data_quota_name=self.test_quota,
+                    num_workers=2,
+                ),
+                features=create_features(feature_cfgs, fg_mode=FgMode.FG_DAG),
+                input_path=f"odps://{self.test_project}/tables/test_odps_dataset_{self.test_suffix}/dt=20240319&dt=20240321&dt=20240322",
+            )
+            reader = dataset._reader
+            session_ids = [
+                x.session_id for x in list(reader._input_to_sess.values())[0]
+            ]
+            queue.put(
+                (
+                    rank,
+                    session_ids,
+                    [reader._sess_row_counts[x] for x in session_ids],
+                )
+            )
+
+        port = get_free_port()
+        procs = []
+        for rank in range(world_size):
+            p = mp.Process(target=_reader_worker, args=(rank, port))
+            p.start()
+            procs.append(p)
+        for p in procs:
+            p.join(timeout=600)
+        for i, p in enumerate(procs):
+            if p.is_alive():
+                p.terminate()
+                p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"reader worker-{i} failed.")
+        results = sorted(queue.get(timeout=10) for _ in range(world_size))
+
+        self.assertEqual(results[0][1:], results[1][1:])
+        self.assertEqual(len(set(results[0][1])), 3)
+        self.assertEqual(results[0][2], [10000, 5000, 3000])
+
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset_checkpoint_metadata(self):
+        """Test that checkpoint_info is present and has correct format."""
+        account, odps_endpoint = _create_odps_account()
+        project = self.test_project
+        self.o = ODPS(account=account, project=project, endpoint=odps_endpoint)
+        feature_cfgs = self._create_test_table_and_feature_cfgs()
+        features = create_features(feature_cfgs, fg_mode=FgMode.FG_DAG)
+        input_path = (
+            f"odps://{project}/tables/test_odps_dataset_{self.test_suffix}/dt=20240319"
+        )
+
+        dataset = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                odps_data_quota_name=self.test_quota,
+            ),
+            features=features,
+            input_path=input_path,
+        )
+        dataloader = DataLoader(
+            dataset=dataset,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        iterator = iter(dataloader)
+        batch = next(iterator)
+
+        # Verify checkpoint_info is present and has correct format
+        self.assertIsNotNone(batch.checkpoint_info)
+        self.assertIsInstance(batch.checkpoint_info, dict)
+
+        # Checkpoint keys are "{input_path}#{sess_idx}#{session_id}:{start}"
+        for key, value in batch.checkpoint_info.items():
+            self.assertIn(":", key)
+            self.assertIn("#", key)
+            parts = key.rsplit(":", 1)
+            self.assertEqual(len(parts), 2)
+            # start should be numeric
+            self.assertTrue(parts[1].isdigit())
+            input_path, sess_idx, session_id = parts[0].split("#")
+            self.assertGreater(len(input_path), 0)
+            self.assertTrue(sess_idx.isdigit())
+            self.assertGreater(len(session_id), 0)
+            # Value should be a non-negative integer
+            self.assertIsInstance(value, int)
+            self.assertGreaterEqual(value, 0)
+
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset_checkpoint_resume(self):
+        """Test checkpoint resume functionality."""
+        account, odps_endpoint = _create_odps_account()
+        project = self.test_project
+        self.o = ODPS(account=account, project=project, endpoint=odps_endpoint)
+        feature_cfgs = self._create_test_table_and_feature_cfgs()
+        features = create_features(feature_cfgs, fg_mode=FgMode.FG_DAG)
+        input_path = (
+            f"odps://{project}/tables/test_odps_dataset_{self.test_suffix}/dt=20240319"
+        )
+
+        # First, read some batches and capture checkpoint info
+        dataset1 = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                odps_data_quota_name=self.test_quota,
+            ),
+            features=features,
+            input_path=input_path,
+        )
+        dataloader1 = DataLoader(
+            dataset=dataset1,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        iterator1 = iter(dataloader1)
+
+        # Read first batch and capture checkpoint
+        checkpoint_state_acc = {}
+        batch1 = next(iterator1)
+        first_checkpoint_state = batch1.checkpoint_info.copy()
+        update_dataloder_state(checkpoint_state_acc, first_checkpoint_state)
+        self.assertIsNotNone(first_checkpoint_state)
+        self.assertGreater(len(first_checkpoint_state), 0)
+
+        # Read more batches
+        for _ in range(3):
+            batch1 = next(iterator1)
+            update_dataloder_state(checkpoint_state_acc, batch1.checkpoint_info.copy())
+        del iterator1
+        del dataloader1
+
+        # Now create a new dataset with checkpoint state set
+        dataset2 = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                odps_data_quota_name=self.test_quota,
+            ),
+            features=features,
+            input_path=input_path,
+        )
+        dataloader2 = DataLoader(
+            dataset=dataset2,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        # Set first batch checkpoint state to resume from saved offsets
+        dataloader2.dataset.load_state_dict(first_checkpoint_state)
+        iterator2 = iter(dataloader2)
+
+        # Read batch from resumed dataset
+        batch2 = next(iterator2)
+
+        # The resumed batch should have offsets greater than the checkpoint
+        for key, new_offset in batch2.checkpoint_info.items():
+            if key in first_checkpoint_state:
+                # New offset should be greater than first checkpoint offset
+                self.assertGreater(new_offset, first_checkpoint_state[key])
+            if key in checkpoint_state_acc:
+                # New offset should be less than or equal to acc checkpoint offset
+                self.assertLessEqual(new_offset, checkpoint_state_acc[key])
+
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset_checkpoint_resume_orderby_partition(self):
+        """Test checkpoint resume with is_orderby_partition=True."""
+        account, odps_endpoint = _create_odps_account()
+        project = self.test_project
+        self.o = ODPS(account=account, project=project, endpoint=odps_endpoint)
+        feature_cfgs = self._create_test_table_and_feature_cfgs()
+        features = create_features(feature_cfgs, fg_mode=FgMode.FG_DAG)
+        # Use both partitions: dt=20240319 & dt=20240320
+        input_path = (
+            f"odps://{project}/tables/test_odps_dataset_{self.test_suffix}/"
+            "dt=20240319&dt=20240320"
+        )
+
+        # First dataset with is_orderby_partition=True
+        dataset1 = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                is_orderby_partition=True,
+                odps_data_quota_name=self.test_quota,
+                min_batch_size=2,
+            ),
+            features=features,
+            input_path=input_path,
+        )
+        # Verify 2 sessions created (one per partition)
+        sess_list = list(dataset1._reader._input_to_sess.values())[0]
+        self.assertEqual(len(sess_list), 2)
+
+        dataloader1 = DataLoader(
+            dataset=dataset1,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        iterator1 = iter(dataloader1)
+
+        # Read only 1 batch (partial consumption of first partition only)
+        batch1 = next(iterator1)
+        first_checkpoint_state = batch1.checkpoint_info.copy()
+        self.assertIsNotNone(first_checkpoint_state)
+        del iterator1
+        del dataloader1
+
+        # Create new dataset and restore from checkpoint
+        dataset2 = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=1024,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                is_orderby_partition=True,
+                odps_data_quota_name=self.test_quota,
+            ),
+            features=features,
+            input_path=input_path,
+        )
+        # Load checkpoint state (only has first partition session)
+        dataset2.load_state_dict(first_checkpoint_state)
+
+        # Verify sessions are preserved: checkpoint session + new session for
+        # unconsumed partition
+        restored_sess_list = list(dataset2._reader._input_to_sess.values())[0]
+        self.assertEqual(
+            len(restored_sess_list),
+            2,
+            "Should have 2 sessions: 1 restored + 1 for unconsumed partition",
+        )
+        self.assertEqual(
+            restored_sess_list[0].session_id,
+            list(first_checkpoint_state.keys())[0].rsplit("#", 1)[1].split(":")[0],
+        )
+
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset_checkpoint_resume_empty_partition(self):
+        """Test checkpoint resume keeps sessions at their partition position."""
+        account, odps_endpoint = _create_odps_account()
+        project = self.test_project
+        self.o = ODPS(account=account, project=project, endpoint=odps_endpoint)
+        feature_cfgs = self._create_test_table_and_feature_cfgs()
+        features = create_features(feature_cfgs, fg_mode=FgMode.FG_DAG)
+        table_name = f"test_odps_dataset_{self.test_suffix}"
+        # an empty partition between two 10000-row partitions never yields a
+        # checkpoint key, so the consumed sessions are not a prefix of the list
+        self.o.get_table(table_name).create_partition("dt=20240318")
+        input_path = (
+            f"odps://{project}/tables/{table_name}/dt=20240319&dt=20240318&dt=20240320"
+        )
+        data_config = data_pb2.DataConfig(
+            batch_size=1024,
+            dataset_type=data_pb2.DatasetType.OdpsDataset,
+            fg_mode=FgMode.FG_DAG,
+            label_fields=["label"],
+            is_orderby_partition=True,
+            odps_data_quota_name=self.test_quota,
+        )
+
+        dataset1 = OdpsDataset(
+            data_config=data_config, features=features, input_path=input_path
+        )
+        self.assertEqual(len(list(dataset1._reader._input_to_sess.values())[0]), 3)
+        dataloader1 = DataLoader(
+            dataset=dataset1,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        iterator1 = iter(dataloader1)
+
+        # consume into the last partition
+        checkpoint_state = {}
+        num_consumed = 0
+        for _ in range(20):
+            batch = next(iterator1)
+            update_dataloder_state(checkpoint_state, batch.checkpoint_info.copy())
+            num_consumed += len(batch.labels["label"])
+            if any("#2#" in key for key in checkpoint_state):
+                break
+        self.assertTrue(any("#2#" in key for key in checkpoint_state))
+        self.assertFalse(any("#1#" in key for key in checkpoint_state))
+        del iterator1
+        del dataloader1
+
+        dataset2 = OdpsDataset(
+            data_config=data_config, features=features, input_path=input_path
+        )
+        fresh_sess_list = list(dataset2._reader._input_to_sess.values())[0]
+        dataset2.load_state_dict(checkpoint_state)
+
+        ckpt_sess_ids = {
+            int(key.rsplit("#", 2)[1]): key.rsplit("#", 1)[1].split(":")[0]
+            for key in checkpoint_state
+        }
+        restored_sess_list = list(dataset2._reader._input_to_sess.values())[0]
+        self.assertEqual(len(restored_sess_list), 3)
+        self.assertEqual(restored_sess_list[0].session_id, ckpt_sess_ids[0])
+        self.assertEqual(
+            restored_sess_list[1].session_id, fresh_sess_list[1].session_id
+        )
+        self.assertEqual(restored_sess_list[2].session_id, ckpt_sess_ids[2])
+
+        # the remaining rows are read exactly once
+        num_remaining = sum(len(batch.labels["label"]) for batch in dataset2)
+        self.assertEqual(num_consumed + num_remaining, 20000)
+
+    def _test_odps_dataset_with_sampler(self, id_type="bigint", schema=None):
+        account, odps_endpoint = _create_odps_account()
+        project = self.test_project
+        tb_prefix = ""
+        if schema is not None:
+            project = self.test_schema_project
+            tb_prefix = f"{schema}."
+        self.o = ODPS(
+            account=account, project=project, endpoint=odps_endpoint, schema=schema
+        )
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        feature_cfgs = self._create_test_table_and_feature_cfgs(has_lookup=False)
+
+        self.o.delete_table(f"test_odps_sampler_{self.test_suffix}", if_exists=True)
+        t = self.o.create_table(
+            f"test_odps_sampler_{self.test_suffix}",
+            (
+                f"id {id_type}, weight double, features string",
+                "dt string, alpha string",
+            ),
+            if_not_exists=True,
+            hints={"odps.sql.type.system.odps2": "true"},
+        )
+        with t.open_writer(
+            partition="dt=20240319,alpha=1", create_partition=True
+        ) as writer:
+            writer.write([[i, 1.0, f"{i}:4:5.0"] for i in range(10000)])
+
+        features = create_features(
+            feature_cfgs, fg_mode=FgMode.FG_DAG, neg_fields=["id_a", "raw_c", "raw_d"]
+        )
+        dataset = OdpsDataset(
+            data_config=data_pb2.DataConfig(
+                batch_size=8196,
+                dataset_type=data_pb2.DatasetType.OdpsDataset,
+                fg_mode=FgMode.FG_DAG,
+                label_fields=["label"],
+                odps_data_quota_name=self.test_quota,
+                negative_sampler=sampler_pb2.NegativeSampler(
+                    input_path=f"odps://{project}/tables/{tb_prefix}test_odps_sampler_{self.test_suffix}/dt=20240319/alpha=1",
+                    num_sample=100,
+                    attr_fields=["id_a", "raw_c", "raw_d"],
+                    item_id_field="id_a",
+                ),
+            ),
+            features=features,
+            input_path=f"odps://{project}/tables/{tb_prefix}test_odps_dataset_{self.test_suffix}/dt=20240319&dt=20240320",
+        )
+        dataset.launch_sampler_cluster(2)
+        dataloader = DataLoader(
+            dataset=dataset,
+            batch_size=None,
+            num_workers=2,
+            pin_memory=True,
+            collate_fn=lambda x: x,
+        )
+        iterator = iter(dataloader)
+        for _ in range(2):
+            data = next(iterator)
+            data_dict = data.to_dict()
+            self.assertEqual(
+                sorted(data_dict.keys()),
+                [
+                    "id_a.lengths",
+                    "id_a.values",
+                    "label",
+                    "raw_c.values",
+                    "raw_d.values",
+                    "raw_e.values",
+                    "raw_f.values",
+                    "raw_g.values",
+                    "tag_b.lengths",
+                    "tag_b.values",
+                ],
+            )
+            self.assertEqual(len(data_dict["id_a.lengths"]), 8296)
+            self.assertEqual(len(data_dict["raw_c.values"]), 8296)
+            self.assertEqual(len(data_dict["raw_e.values"]), 8196)
+
+    @parameterized.expand([["bigint"], ["string"], ["int"]])
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_dataset_with_sampler(self, id_type="bigint"):
+        self._test_odps_dataset_with_sampler(id_type=id_type)
+
+    @unittest.skipIf(
+        os.environ.get("CI_ODPS_SCHEMA_PROJECT_NAME", "") == ""
+        or (
+            os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+            and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        ),
+        "schema odps project not found",
+    )
+    def test_odps_dataset_with_sampler_has_schema(self):
+        self._test_odps_dataset_with_sampler(id_type="bigint", schema="rec")
+
+
+class OdpsWriterTest(unittest.TestCase):
+    def setUp(self):
+        self.o = None
+        self.test_project = os.environ.get("CI_ODPS_PROJECT_NAME", None)
+        self.test_schema_project = os.environ.get("CI_ODPS_SCHEMA_PROJECT_NAME", None)
+        self.test_quota = os.environ.get("ODPS_DATA_QUOTA_NAME", "")
+        if "ODPS_CONFIG_FILE_PATH" in os.environ:
+            with open(os.environ["ODPS_CONFIG_FILE_PATH"], "r") as f:
+                for line in f.readlines():
+                    values = line.split("=", 1)
+                    if len(values) == 2 and values[0] == "project_name":
+                        self.test_project = values[1].strip()
+        self.test_suffix = random_name()
+
+    def tearDown(self):
+        if self.o is not None:
+            self.o.delete_table(f"test_odps_dataset_{self.test_suffix}", if_exists=True)
+        self.o = None
+
+    @parameterized.expand(
+        [["", 2, 2], ["/dt=20240401", 2, 2], ["/dt=20240401", 2, 1]],
+        name_func=test_util.parameterized_name_func,
+    )
+    @unittest.skipIf(
+        os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+        and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        "odps config not found",
+    )
+    def test_odps_writer(self, partition_spec, default_world_size, writer_world_size):
+        account, odps_endpoint = _create_odps_account()
+        self.o = ODPS(
+            account=account,
+            project=self.test_project,
+            endpoint=odps_endpoint,
+        )
+
+        def _writer_worker(rank, port):
+            os.environ["RANK"] = str(rank)
+            os.environ["WORLD_SIZE"] = str(default_world_size)
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(port)
+            dist.init_process_group(backend="gloo")
+            time.sleep(rank)  # prevent get credential failed
+            writer = OdpsWriter(
+                f"odps://{self.test_project}/tables/test_odps_dataset_{self.test_suffix}{partition_spec}",
+                quota_name=self.test_quota,
+                world_size=writer_world_size,
+            )
+            for _ in range(5):
+                writer.write(
+                    {
+                        "int_a": pa.array(np.random.randint(0, 100, 128)),
+                        "float_b": pa.array(np.random.random(128)),
+                    }
+                )
+            writer.close()
+
+        writer_world_size = 2
+        port = get_free_port()
+        procs = []
+        for rank in range(writer_world_size):
+            p = mp.Process(
+                target=_writer_worker,
+                args=(rank, port),
+            )
+            p.start()
+            procs.append(p)
+        for i, p in enumerate(procs):
+            p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"writer worker-{i} failed.")
+
+        t = self.o.get_table(f"test_odps_dataset_{self.test_suffix}")
+        if partition_spec:
+            partition = ",".join(partition_spec.strip("/").split("/"))
+        else:
+            partition = None
+        with t.open_reader(partition=partition) as reader:
+            self.assertEqual(reader.count, 1280)
+
+    @unittest.skipIf(
+        os.environ.get("CI_ODPS_SCHEMA_PROJECT_NAME", "") == ""
+        or (
+            os.environ.get("ODPS_CONFIG_FILE_PATH", "") == ""
+            and os.environ.get("ALIBABA_CLOUD_ECS_METADATA", "") == "",
+        ),
+        "schema odps project not found",
+    )
+    def test_odps_writer_has_schema(self):
+        partition_spec = "/dt=20240401"
+        default_world_size = 2
+        writer_world_size = 2
+        account, odps_endpoint = _create_odps_account()
+        self.o = ODPS(
+            account=account,
+            project=self.test_schema_project,
+            endpoint=odps_endpoint,
+        )
+        schema = "rec"
+        if not self.o.exist_schema(schema):
+            self.o.create_schema(schema)
+        self.o = ODPS(
+            account=account,
+            project=self.test_schema_project,
+            endpoint=odps_endpoint,
+            schema=schema,
+        )
+
+        def _writer_worker(rank, port):
+            os.environ["RANK"] = str(rank)
+            os.environ["WORLD_SIZE"] = str(default_world_size)
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(port)
+            dist.init_process_group(backend="gloo")
+            time.sleep(rank)  # prevent get credential failed
+            writer = OdpsWriter(
+                f"odps://{self.test_schema_project}/tables/{schema}.test_odps_dataset_{self.test_suffix}{partition_spec}",
+                quota_name=self.test_quota,
+                world_size=writer_world_size,
+            )
+            for _ in range(5):
+                writer.write(
+                    {
+                        "int_a": pa.array(np.random.randint(0, 100, 128)),
+                        "float_b": pa.array(np.random.random(128)),
+                    }
+                )
+            writer.close()
+
+        writer_world_size = 2
+        port = get_free_port()
+        procs = []
+        for rank in range(writer_world_size):
+            p = mp.Process(
+                target=_writer_worker,
+                args=(rank, port),
+            )
+            p.start()
+            procs.append(p)
+        for i, p in enumerate(procs):
+            p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"writer worker-{i} failed.")
+
+        t = self.o.get_table(f"test_odps_dataset_{self.test_suffix}")
+        if partition_spec:
+            partition = ",".join(partition_spec.strip("/").split("/"))
+        else:
+            partition = None
+        with t.open_reader(partition=partition) as reader:
+            self.assertEqual(reader.count, 1280)
+
+
+class _FailingStorageClient:
+    """Stub storage-api client whose calls raise a connection-reset error."""
+
+    table = SimpleNamespace(full_table_name="test_project.test_table")
+    _quota_name = "test_quota"
+    _rest_endpoint = "http://service.odps.test"
+
+    def _raise(self):
+        raise requests.exceptions.ConnectionError(
+            "Connection aborted.",
+            ConnectionResetError(104, "Connection reset by peer"),
+        )
+
+    def read_rows_arrow(self, read_req):
+        self._raise()
+
+    def get_read_session(self, sess_req):
+        self._raise()
+
+
+class _RetryingStorageClient:
+    """Stub whose read_rows_arrow raises ODPSError `fail_times` times, then succeeds."""
+
+    table = SimpleNamespace(full_table_name="test_project.test_table")
+    _quota_name = "test_quota"
+    _rest_endpoint = "http://service.odps.test"
+
+    def __init__(self, fail_times):
+        self._fail_times = fail_times
+        self.calls = 0
+        self.sentinel = object()
+
+    def read_rows_arrow(self, read_req):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise ODPSError("synthetic ODPS error", request_id="REQ-XYZ")
+        return self.sentinel
+
+
+class _StubScanClient:
+    def __init__(self, status=SessionStatus.NORMAL):
+        self.status = status
+
+    def get_read_session(self, sess_req):
+        return SimpleNamespace(session_status=self.status, record_count=100)
+
+
+class OdpsDatasetConfigTest(unittest.TestCase):
+    """data_config fields reach the reader, without odps access."""
+
+    @parameterized.expand(
+        [
+            param("train", mode=Mode.TRAIN, expected_shuffle=True),
+            param("eval", mode=Mode.EVAL, expected_shuffle=False),
+        ]
+    )
+    def test_shuffle_config_reaches_reader(self, _name, mode, expected_shuffle):
+        data_config = data_pb2.DataConfig(
+            batch_size=4,
+            dataset_type=data_pb2.DatasetType.OdpsDataset,
+            fg_mode=data_pb2.FgMode.FG_NONE,
+            label_fields=["label"],
+            shuffle=True,
+            shuffle_buffer_size=64,
+        )
+        features = create_features(
+            [
+                feature_pb2.FeatureConfig(
+                    id_feature=feature_pb2.IdFeature(feature_name="id_a")
+                )
+            ]
+        )
+        with mock.patch.object(odps_dataset, "OdpsReader") as m_reader:
+            OdpsDataset(
+                data_config=data_config,
+                features=features,
+                input_path="odps://test_project/tables/test_table/dt=20240319",
+                mode=mode,
+            )
+        self.assertEqual(m_reader.call_args.kwargs["shuffle"], expected_shuffle)
+        self.assertEqual(m_reader.call_args.kwargs["shuffle_buffer_size"], 64)
+
+
+class OdpsRestoreSessionsTest(unittest.TestCase):
+    input_path = "odps://p/tables/t/dt=1&dt=2&dt=3"
+
+    def _reader(self):
+        reader = odps_dataset.OdpsReader.__new__(odps_dataset.OdpsReader)
+        reader._input_to_sess = {
+            self.input_path: [SessionRequest(session_id=f"new{i}") for i in range(3)]
+        }
+        reader._table_to_cli = {"t": _StubScanClient()}
+        reader._sess_row_counts = {"new0": 100, "new1": 0, "new2": 100}
+        return reader
+
+    def test_restore_keeps_partition_position(self):
+        reader = self._reader()
+        reader._restore_sessions(
+            {
+                f"{self.input_path}#2#old2:0": 39,
+                f"{self.input_path}#0#old0:50": 99,
+                f"{self.input_path}#0#old0:0": 49,
+                "__data_ts_watermark__": 5,
+            }
+        )
+        self.assertEqual(
+            [x.session_id for x in reader._input_to_sess[self.input_path]],
+            ["old0", "new1", "old2"],
+        )
+        self.assertEqual(reader._sess_row_counts["old2"], 100)
+
+    def test_restore_skips_unknown_input_path(self):
+        reader = self._reader()
+        with mock.patch.object(odps_dataset, "logger") as m_logger:
+            reader._restore_sessions(
+                {"odps://p/tables/other/dt=1#0#old0:0": 9, "/data/a#b.parquet:0": 9}
+            )
+        self.assertEqual(m_logger.warning.call_count, 2)
+        self.assertEqual(
+            [x.session_id for x in reader._input_to_sess[self.input_path]],
+            ["new0", "new1", "new2"],
+        )
+
+    def test_restore_rejects_key_without_session_index(self):
+        reader = self._reader()
+        with self.assertRaisesRegex(RuntimeError, "older TorchEasyRec version"):
+            reader._restore_sessions({f"{self.input_path}#old0:0": 9})
+
+    def test_restore_rejects_session_index_out_of_range(self):
+        reader = self._reader()
+        with self.assertRaisesRegex(RuntimeError, "only 3 partition sessions"):
+            reader._restore_sessions({f"{self.input_path}#3#old3:0": 9})
+
+
+class OdpsStorageErrorLogTest(unittest.TestCase):
+    def test_read_rows_arrow_logs_session_and_reraises(self):
+        client = _FailingStorageClient()
+        read_req = SimpleNamespace(
+            session_id="sess-read-123",
+            row_index=0,
+            row_count=10,
+            max_batch_rows=100,
+        )
+        with mock.patch.object(odps_dataset, "logger") as m_logger:
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                odps_dataset._read_rows_arrow_with_retry(client, read_req)
+        m_logger.error.assert_called_once()
+        logged = m_logger.error.call_args[0][0]
+        self.assertIn("sess-read-123", logged)
+        self.assertIn("test_project.test_table", logged)
+
+    def test_get_read_session_logs_session_and_reraises(self):
+        client = _FailingStorageClient()
+        sess_req = SimpleNamespace(session_id="sess-scan-456")
+        with mock.patch.object(odps_dataset, "logger") as m_logger:
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                odps_dataset._get_session_record_count(client, sess_req)
+        m_logger.error.assert_called_once()
+        logged = m_logger.error.call_args[0][0]
+        self.assertIn("sess-scan-456", logged)
+
+    def test_read_rows_arrow_retries_odps_error_then_succeeds(self):
+        client = _RetryingStorageClient(fail_times=2)
+        read_req = SimpleNamespace(
+            session_id="sess-retry-1",
+            row_index=0,
+            row_count=10,
+            max_batch_rows=100,
+        )
+        with mock.patch.object(odps_dataset.time, "sleep"):
+            with mock.patch.object(odps_dataset, "logger") as m_logger:
+                reader = odps_dataset._read_rows_arrow_with_retry(client, read_req)
+        self.assertIs(reader, client.sentinel)
+        self.assertEqual(client.calls, 3)  # 2 failures + 1 success
+        self.assertEqual(m_logger.warning.call_count, 2)
+        m_logger.error.assert_not_called()
+
+    def test_read_rows_arrow_odps_error_exhausts_retries_and_raises(self):
+        client = _RetryingStorageClient(fail_times=99)
+        read_req = SimpleNamespace(
+            session_id="sess-retry-2",
+            row_index=5,
+            row_count=10,
+            max_batch_rows=100,
+        )
+        with mock.patch.object(odps_dataset.time, "sleep"):
+            with mock.patch.object(odps_dataset, "logger") as m_logger:
+                with self.assertRaises(ODPSError):
+                    odps_dataset._read_rows_arrow_with_retry(client, read_req)
+        self.assertEqual(client.calls, 4)  # initial + 3 retries
+        self.assertEqual(m_logger.warning.call_count, 3)
+        m_logger.error.assert_called_once()
+        logged = m_logger.error.call_args[0][0]
+        self.assertIn("after 3 retries", logged)
+        self.assertIn("sess-retry-2", logged)
+
+
+if __name__ == "__main__":
+    unittest.main()

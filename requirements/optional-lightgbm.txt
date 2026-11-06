@@ -1,0 +1,6 @@
+# 精排基线：LightGBM LambdaRank（third_party/LightGBM 源码只在需要自定义编译时使用）
+# 安装 wheel 即可，无需本地编译。
+
+-r base.txt
+lightgbm>=4.0
+scikit-learn>=1.3

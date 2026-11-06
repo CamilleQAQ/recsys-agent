@@ -1,0 +1,7 @@
+# 遗留环境 A：BERT4Rec 原始实现（TF1.12 + tf.contrib）
+# 不能与主环境共存：需要 Python 3.6/3.7 独立虚拟环境（conda 最省事）。
+# 仅作算法参考；本项目主栈为 PyTorch，不在此环境里跑 KuaiSAR 数据。
+
+tensorflow-gpu==1.12.0
+numpy<1.17
+six

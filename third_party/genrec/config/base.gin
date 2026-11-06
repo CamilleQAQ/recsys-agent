@@ -1,0 +1,10 @@
+# Local pretrained model directories, relative to the repository root.
+# Populate models_hub/ before running LLM/text-embedding pipelines.
+# Override a macro with --gin "MODEL_HUB_QWEN3_4B='/path/to/Qwen3-4B'".
+# Paths are local directories; this config does not expand environment variables.
+
+MODEL_HUB_SENTENCE_T5_BASE = "./models_hub/sentence-t5-base"
+MODEL_HUB_SENTENCE_T5_XL = "./models_hub/sentence-t5-xl"
+MODEL_HUB_QWEN3_EMBEDDING_8B = "./models_hub/Qwen3-Embedding-8B"
+MODEL_HUB_QWEN3_1_7B = "./models_hub/Qwen3-1.7B"
+MODEL_HUB_QWEN3_4B = "./models_hub/Qwen3-4B"

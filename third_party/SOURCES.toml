@@ -1,0 +1,173 @@
+# third_party 来源清单（维护版，机器可读）
+#
+# repository_manifest.csv 是 Phase 0 静态审计时的**快照**（由 build_audit.py 生成，含实现文件与符号级证据），
+# 本文件是后续持续维护的来源清单：新增仓库先在这里登记，再由
+# python scripts/check_project.py 校验「目录 ↔ 条目 ↔ 许可证文件 ↔ commit 格式」是否一致。
+#
+# 字段：
+#   name           third_party 下的目录名
+#   url            原始 GitHub 地址
+#   branch         克隆时的默认分支
+#   commit         完整 SHA（40 位）
+#   license        许可证（以仓库根 LICENSE 为准）
+#   license_file   仓库根许可证文件名；空字符串表示上游缺失
+#   coverage       模型/能力覆盖
+#   usability      在本项目里的可用性结论
+#   local_changes  相对上游的本地改动（只允许删除缓存/数据、加说明文件）
+#   added          纳入日期
+
+[[repos]]
+name = "RecBole"
+url = "https://github.com/RUCAIBox/RecBole"
+branch = "master"
+commit = "7b02be5ec80a88310f2d04a27a82adfcbb5dc211"
+license = "MIT"
+license_file = "LICENSE"
+coverage = "协同过滤、图推荐、序列、CTR、知识图谱（框架复现）"
+usability = "需独立环境安装 recbole；数据需转成 atomic 文件"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "TorchEasyRec"
+url = "https://github.com/alibaba/TorchEasyRec"
+branch = "master"
+commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "双塔、MIND、HSTU、语义 ID、CTR、多任务"
+usability = "依赖阿里 OSS 的 Linux-only wheel，Windows 不可安装"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "generative-recommenders"
+url = "https://github.com/meta-recsys/generative-recommenders"
+branch = "main"
+commit = "b8e6ff07c5d4c3354b0807ead76b74d771557fd7"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "HSTU、SASRec 基线、DLRMv3、ULTRA 算子、MoL 检索"
+usability = "Linux + CUDA + fbgemm_gpu；CUTLASS 子模块未拉取"
+local_changes = ["删除 .git", "删除 .idea", "删除 triton_aot/build"]
+added = "2026-11-04"
+
+[[repos]]
+name = "OpenOneRec"
+url = "https://github.com/Kuaishou-OneRec/OpenOneRec"
+branch = "main"
+commit = "a969edcadd579a06c1966ae1db5984e02f48beff"
+license = "Apache-2.0（README 声明；根 LICENSE 缺失）"
+license_file = ""
+coverage = "Qwen3 生成式推荐、Residual K-Means tokenizer、SFT/蒸馏/GRPO"
+usability = "多卡 Linux + 外部权重；再分发前须确认授权"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "MMRec"
+url = "https://github.com/enoche/MMRec"
+branch = "master"
+commit = "c68ee7c9b0de1ca7c5150258322edb4994be29d9"
+license = "GPL-3.0"
+license_file = "LICENSE"
+coverage = "多模态图推荐（22 个实现：VBPR、LATTICE、DualGNN 等）"
+usability = "Python 3.7 + torch 1.11 独立环境；GPL-3.0 传染性需评估"
+local_changes = ["删除 .git", "删除 .idea"]
+added = "2026-11-04"
+
+[[repos]]
+name = "DeepCTR-Torch"
+url = "https://github.com/shenweichen/DeepCTR-Torch"
+branch = "master"
+commit = "9eccef78e5810c61d6a04ddc7d96279e3db9c970"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "CTR 特征交叉、DIN/DIEN、多任务"
+usability = "主环境可跑（torch>=2.4）；缺特征通道"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "LightGBM"
+url = "https://github.com/lightgbm-org/LightGBM"
+branch = "main"
+commit = "3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9"
+license = "MIT"
+license_file = "LICENSE"
+coverage = "GBDT/DART/GOSS/RF；LambdaRank、rank_xendcg 排序目标"
+usability = "pip 安装 wheel 即可；源码编译需 5 个子模块（未拉取）"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "faiss"
+url = "https://github.com/facebookresearch/faiss"
+branch = "main"
+commit = "9acf8b0c16a51aafa12b9d9bcf13998b9138a8c5"
+license = "MIT"
+license_file = "LICENSE"
+coverage = "Flat/IVF/PQ/HNSW/LSH 索引与聚类"
+usability = "pip 安装 faiss-cpu 即可；仓库源码仅作参考"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "SASRec.pytorch"
+url = "https://github.com/pmixer/SASRec.pytorch"
+branch = "main"
+commit = "26a8fa880f312c3700f8dcca5512d5854b257f4e"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "SASRec 第三方复现（PyTorch + Rust 两条实现）"
+usability = "代码可直接读；示例语料已删除，数据需自备"
+local_changes = ["删除 .git", "删除 python/data 下 5 个示例语料", "新增 python/data/README.md"]
+added = "2026-11-04"
+
+[[repos]]
+name = "BERT4Rec"
+url = "https://github.com/FeiSun/BERT4Rec"
+branch = "master"
+commit = "615eaf2004abecda487a38d5b0c72f3dcfcae5b3"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "BERT4Rec 原作者实现（TF1.12）"
+usability = "tf.contrib 依赖，需 Python 3.6/3.7 独立环境"
+local_changes = ["删除 .git", "删除 data 下 4 个示例语料", "新增 data/README.md"]
+added = "2026-11-04"
+
+[[repos]]
+name = "recommenders"
+url = "https://github.com/tensorflow/recommenders"
+branch = "main"
+commit = "a8a90aee3f0b470cda96d47e26de99eedb7fc730"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "TFRS：双塔任务、排序任务、factorized_top_k 检索层"
+usability = "TF2 独立环境，与 PyTorch 主栈隔离"
+local_changes = ["删除 .git"]
+added = "2026-11-04"
+
+[[repos]]
+name = "FuxiCTR"
+url = "https://github.com/reczoo/FuxiCTR"
+branch = "main"
+commit = "183da1c944ba8930fcdcd54114837c081959d748"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "CTR 预估：DIN、DIEN、DCNv2、DeepFM、MMoE/PLE、DSSM 等 model_zoo"
+usability = "PyTorch 版本可跑（需 ray[data]/polars 等）；数据需转成 parquet/csv 特征表"
+local_changes = ["删除 .git"]
+added = "2026-11-05"
+
+[[repos]]
+name = "genrec"
+url = "https://github.com/phonism/genrec"
+branch = "main"
+commit = "2676b5b08e2efc0b873ab4c3d66882611a62ca2e"
+license = "MIT"
+license_file = "LICENSE"
+coverage = "生成式推荐：TIGER、RPG、COBRA、GRACE/HSTU、LC-Rec、OneRec、RQ-VAE"
+usability = "torch==2.6 + transformers + gin_config；需 item embedding 与语义 ID 预处理"
+local_changes = ["删除 .git"]
+added = "2026-11-05"

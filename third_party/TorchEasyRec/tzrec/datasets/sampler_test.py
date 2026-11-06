@@ -1,0 +1,734 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import math
+import multiprocessing as mp
+import os
+import tempfile
+import time
+import traceback
+import unittest
+
+import numpy as np
+import pyarrow as pa
+from parameterized import parameterized
+from torch import distributed as dist
+
+from tzrec.datasets.sampler import (
+    HardNegativeSampler,
+    HardNegativeSamplerV2,
+    NegativeSampler,
+    NegativeSamplerV2,
+    TDMPredictSampler,
+    TDMSampler,
+    _to_arrow_array,
+)
+from tzrec.protos import sampler_pb2
+from tzrec.utils import misc_util
+
+
+class SamplerTest(unittest.TestCase):
+    def setUp(self):
+        self._temp_files = []
+        os.environ.pop("USE_HASH_NODE_ID", None)
+
+    def tearDown(self):
+        for f in self._temp_files:
+            f.close()
+
+    def _create_item_gl_data(self, id_type="int64"):
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"id:{id_type}\tweight:float\tattrs:string\n")
+        for i in range(100):
+            f.write(f"{i}\t{1}\t{i}:{i + 1000}:我们{i}\n")
+        f.flush()
+        return f
+
+    def _create_item_gl_data_with_null(self):
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write("id:int64\tweight:float\tattrs:string\n")
+        for i in range(100):
+            f.write(f"{i}\t{1}\t::我们{i}\n")
+        f.flush()
+        return f
+
+    def _create_user_gl_data(self, id_type="int64"):
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"id:{id_type}\tweight:float\n")
+        for i in range(100):
+            f.write(f"{i}\t{1}\n")
+        f.flush()
+        return f
+
+    def _create_clk_edge_gl_data(self, id_type="int64"):
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"userid:{id_type}\titemid:{id_type}\tweight:float\n")
+        for i in range(100):
+            f.write(f"{i}\t{i}\t{1}\n")
+        f.flush()
+        return f
+
+    def _create_noclk_edge_gl_data(self, id_type="int64", empty=False):
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"userid:{id_type}\titemid:{id_type}\tweight:float\n")
+        if not empty:
+            for i in range(100):
+                f.write(f"{i}\t{99 - i}\t{1}\n")
+        f.flush()
+        return f
+
+    def _create_item_gl_data_for_tdm(self, id_type="int64"):
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"id:{id_type}\tweight:float\tattrs:string\n")
+        for i in range(63):
+            if i <= 30 and id_type == "string":
+                node_id = f"nonleaf#{i:02d}"
+            else:
+                node_id = i
+            f.write(
+                f"{node_id}\t{1}\t{int(math.log(i + 1, 2))}:{node_id}:{i}:{i + 1000}:我们{i}\n"  # NOQA
+            )
+        f.flush()
+        return f
+
+    def _create_edge_gl_data_for_tdm(self, id_type="int64"):
+        def _ancestor(code):
+            ancs = []
+            while True:
+                code = int((code - 1) / 2)
+                if code <= 0:
+                    break
+                ancs.append(code)
+            return ancs
+
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"src_id:{id_type}\tdst_id:{id_type}\tweight:float\n")
+        for i in range(31, 63):
+            for ancestor in _ancestor(i):
+                node_id = f"nonleaf#{ancestor:02d}" if id_type == "string" else ancestor
+                f.write(f"{i}\t{node_id}\t{1.0}\n")
+        f.flush()
+        return f
+
+    def _create_predict_edge_gl_data_for_tdm(self, id_type="int64"):
+        def _childern(code):
+            return [2 * code + 1, 2 * code + 2]
+
+        f = tempfile.NamedTemporaryFile("w")
+        self._temp_files.append(f)
+        f.write(f"src_id:{id_type}\tdst_id:{id_type}\tweight:float\n")
+        for i in range(7, 15):
+            node_id = f"nonleaf#{i:02d}" if id_type == "string" else i
+            f.write(f"0\t{node_id}\t{1}\n")
+        for i in range(7, 31):
+            node_id = f"nonleaf#{i:02d}" if id_type == "string" else i
+            for child in _childern(i):
+                f.write(f"{node_id}\t{child}\t{1}\n")
+        f.flush()
+        return f
+
+    def test_to_arrow_array_with_list_type(self):
+        x = _to_arrow_array(np.array(["1\x1d2", "3", ""]), pa.list_(pa.int32()))
+        self.assertEqual(x, pa.array([[1, 2], [3], None], type=pa.list_(pa.int32())))
+
+    def test_to_arrow_array_with_map_type(self):
+        x = _to_arrow_array(
+            np.array(["a:1\x1db:2", "c:3", ""]), pa.map_(pa.string(), pa.int32())
+        )
+        self.assertEqual(
+            x,
+            pa.MapArray.from_arrays(
+                offsets=pa.array([0, 2, 3, 3]),
+                keys=pa.array(["a", "b", "c"]),
+                items=pa.array([1, 2, 3], type=pa.int32()),
+                type=pa.map_(pa.string(), pa.int32()),
+            ),
+        )
+
+    @parameterized.expand([["int64"], ["string"]])
+    def test_negative_sampler(self, id_type):
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        f = self._create_item_gl_data(id_type)
+
+        def _sampler_worker(res):
+            config = sampler_pb2.NegativeSampler(
+                input_path=f.name,
+                num_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+            )
+            sampler = NegativeSampler(
+                config=config,
+                fields=[
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 8
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            res.update(
+                sampler.get(
+                    {
+                        "item_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string())
+                    }
+                )
+            )
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_sampler_worker, args=(res,))
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        self.assertEqual(len(res["int_a"]), 8)
+        self.assertEqual(len(res["float_b"]), 8)
+        self.assertEqual(len(res["str_c"]), 8)
+
+    def test_server_liveness_watchdog_aborts_on_server_death(self):
+        f = self._create_item_gl_data("int64")
+
+        def _watchdog_worker(res):
+            try:
+                from tzrec.datasets import sampler as sampler_mod
+
+                # poll fast so the watchdog reacts within the test window.
+                sampler_mod._SERVER_LIVENESS_CHECK_INTERVAL_S = 0.3
+                config = sampler_pb2.NegativeSampler(
+                    input_path=f.name,
+                    num_sample=8,
+                    attr_fields=["int_a", "float_b", "str_c"],
+                    item_id_field="item_id",
+                )
+                sampler = NegativeSampler(
+                    config=config,
+                    fields=[
+                        pa.field(name="int_a", type=pa.int64()),
+                        pa.field(name="float_b", type=pa.float64()),
+                        pa.field(name="str_c", type=pa.string()),
+                    ],
+                    batch_size=4,
+                )
+                sampler.init_cluster()
+                sampler.launch_server()
+                res["captured"] = sampler._server_proc is not None
+                if sampler._server_proc is None:
+                    os._exit(2)
+                time.sleep(1.0)
+                # simulate an abnormal death (e.g. OOM kill) of the server.
+                if sampler._server_proc.is_alive():
+                    sampler._server_proc.kill()
+                # the watchdog should os._exit(1) before this returns.
+                time.sleep(5.0)
+            except BaseException:
+                traceback.print_exc()
+                os._exit(2)
+            os._exit(0)
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_watchdog_worker, args=(res,))
+        p.start()
+        p.join(timeout=60)
+        self.assertTrue(res.get("captured"))
+        # exit 1 == watchdog fired; 0 == it missed the death; 2 == setup error.
+        self.assertEqual(p.exitcode, 1)
+
+    def test_negative_sampler_with_null(self):
+        f = self._create_item_gl_data_with_null()
+
+        def _sampler_worker(res):
+            config = sampler_pb2.NegativeSampler(
+                input_path=f.name,
+                num_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+            )
+            sampler = NegativeSampler(
+                config=config,
+                fields=[
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 8
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            res.update(sampler.get({"item_id": pa.array([0, 1, 2, 3])}))
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_sampler_worker, args=(res,))
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        self.assertEqual(res["int_a"], pa.array([None] * 8, type=pa.int64()))
+        self.assertEqual(res["float_b"], pa.array([None] * 8, type=pa.float64()))
+        self.assertEqual(len(res["str_c"]), 8)
+
+    def test_negative_sampler_with_ignore_feature(self):
+        f = self._create_item_gl_data()
+
+        def _sampler_worker(res):
+            config = sampler_pb2.NegativeSampler(
+                input_path=f.name,
+                num_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+            )
+            sampler = NegativeSampler(
+                config=config,
+                fields=[
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 8
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            res.update(sampler.get({"item_id": pa.array([0, 1, 2, 3])}))
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_sampler_worker, args=(res,))
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        self.assertEqual(len(res["int_a"]), 8)
+        self.assertEqual(len(res["str_c"]), 8)
+
+    @unittest.skip("accidental process defunct error")
+    def test_negative_sampler_multi_node(self):
+        f = self._create_item_gl_data()
+
+        def _launch_client(
+            sampler,
+        ):
+            sampler.init()
+            res = sampler.get({"item_id": pa.array([0, 1, 2, 3])})
+            assert len(res["int_a"]) == 8
+            assert len(res["float_b"]) == 8
+            assert len(res["str_c"]) == 8
+
+        def _sampler_worker(
+            rank,
+            local_rank,
+            group_rank,
+            local_world_size,
+            world_size,
+            gl_num_client,
+            port,
+        ):
+            os.environ["RANK"] = str(rank)
+            os.environ["LOCAL_RANK"] = str(local_rank)
+            os.environ["GROUP_RANK"] = str(group_rank)
+            os.environ["LOCAL_WORLD_SIZE"] = str(local_world_size)
+            os.environ["WORLD_SIZE"] = str(world_size)
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(port)
+            dist.init_process_group(backend="gloo")
+
+            config = sampler_pb2.NegativeSampler(
+                input_path=f.name,
+                num_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+            )
+            sampler = NegativeSampler(
+                config=config,
+                fields=[
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            sampler.init_cluster(gl_num_client)
+            sampler.launch_server()
+            procs = []
+            for _ in range(gl_num_client):
+                p = mp.Process(target=_launch_client, args=(sampler,))
+                p.start()
+                # on ecs, popen too fast may become <defunct> process
+                time.sleep(1)
+                procs.append(p)
+            for i, p in enumerate(procs):
+                p.join()
+                if p.exitcode != 0:
+                    raise RuntimeError(f"client-{i} of worker-{rank} failed.")
+
+        num_node = 2
+        num_proc_per_node = 3
+        num_dl_per_proc = 2
+        procs = []
+        port = misc_util.get_free_port()
+        for i in range(num_node):
+            for j in range(num_proc_per_node):
+                rank = i * num_proc_per_node + j
+                world_size = num_node * num_proc_per_node
+                p = mp.Process(
+                    target=_sampler_worker,
+                    args=(
+                        rank,
+                        j,
+                        i,
+                        num_proc_per_node,
+                        world_size,
+                        num_dl_per_proc,
+                        port,
+                    ),
+                )
+                p.start()
+                procs.append(p)
+
+        for i, p in enumerate(procs):
+            p.join()
+            if p.exitcode != 0:
+                raise RuntimeError(f"worker-{i} failed.")
+
+    @parameterized.expand([["int64"], ["string"]])
+    def test_negative_sampler_v2(self, id_type):
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        f_user = self._create_user_gl_data(id_type)
+        f_item = self._create_item_gl_data(id_type)
+        f_clk_edge = self._create_clk_edge_gl_data(id_type)
+
+        def _sampler_worker(res):
+            config = sampler_pb2.NegativeSamplerV2(
+                user_input_path=f_user.name,
+                item_input_path=f_item.name,
+                pos_edge_input_path=f_clk_edge.name,
+                num_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+                user_id_field="user_id",
+            )
+            sampler = NegativeSamplerV2(
+                config=config,
+                fields=[
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 8
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            res.update(
+                sampler.get(
+                    {
+                        "user_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string()),
+                        "item_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string()),
+                    }
+                )
+            )
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_sampler_worker, args=(res,))
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        self.assertEqual(len(res["int_a"]), 8)
+        self.assertEqual(len(res["float_b"]), 8)
+        self.assertEqual(len(res["str_c"]), 8)
+
+    @parameterized.expand([["int64", False], ["string", False], ["int64", True]])
+    def test_hard_negative_sampler(self, id_type, empty_edge=False):
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        f_user = self._create_user_gl_data(id_type)
+        f_item = self._create_item_gl_data(id_type)
+        f_noclk_edge = self._create_noclk_edge_gl_data(id_type, empty=empty_edge)
+
+        def _sampler_worker(res):
+            config = sampler_pb2.HardNegativeSampler(
+                user_input_path=f_user.name,
+                item_input_path=f_item.name,
+                hard_neg_edge_input_path=f_noclk_edge.name,
+                num_sample=8,
+                num_hard_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+                user_id_field="user_id",
+            )
+            sampler = HardNegativeSampler(
+                config=config,
+                fields=[
+                    pa.field(
+                        name="int_a",
+                        type=pa.int64() if id_type == "int64" else pa.string(),
+                    ),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 40
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            res.update(
+                sampler.get(
+                    {
+                        "user_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string()),
+                        "item_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string()),
+                    }
+                )
+            )
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_sampler_worker, args=(res,))
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        if empty_edge:
+            self.assertEqual(len(res["int_a"]), 8)
+            self.assertEqual(len(res["float_b"]), 8)
+            self.assertEqual(len(res["str_c"]), 8)
+        else:
+            self.assertGreater(len(res["int_a"]), 8)
+            self.assertGreater(len(res["float_b"]), 8)
+            self.assertGreater(len(res["str_c"]), 8)
+
+    @parameterized.expand([["int64", False], ["string", False], ["int64", True]])
+    def test_hard_negative_sampler_v2(self, id_type, empty_edge=False):
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        f_user = self._create_user_gl_data(id_type)
+        f_item = self._create_item_gl_data(id_type)
+        f_clk_edge = self._create_clk_edge_gl_data(id_type)
+        f_noclk_edge = self._create_noclk_edge_gl_data(id_type, empty=empty_edge)
+
+        def _sampler_worker(res):
+            config = sampler_pb2.HardNegativeSamplerV2(
+                user_input_path=f_user.name,
+                item_input_path=f_item.name,
+                pos_edge_input_path=f_clk_edge.name,
+                hard_neg_edge_input_path=f_noclk_edge.name,
+                num_sample=8,
+                num_hard_sample=8,
+                attr_fields=["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+                user_id_field="user_id",
+            )
+            sampler = HardNegativeSamplerV2(
+                config=config,
+                fields=[
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 40
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            res.update(
+                sampler.get(
+                    {
+                        "user_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string()),
+                        "item_id": pa.array([0, 1, 2, 3])
+                        if id_type == "int64"
+                        else pa.array(["0", "1", "2", "3"], type=pa.string()),
+                    }
+                )
+            )
+
+        res = mp.Manager().dict()
+        p = mp.Process(target=_sampler_worker, args=(res,))
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        if empty_edge:
+            self.assertEqual(len(res["int_a"]), 8)
+            self.assertEqual(len(res["float_b"]), 8)
+            self.assertEqual(len(res["str_c"]), 8)
+        else:
+            self.assertGreater(len(res["int_a"]), 8)
+            self.assertGreater(len(res["float_b"]), 8)
+            self.assertGreater(len(res["str_c"]), 8)
+
+    @parameterized.expand([["int64", True], ["string", True], ["string", False]])
+    def test_tdm_sampler(self, id_type, cfg_additional_attrs=True):
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        f_item = self._create_item_gl_data_for_tdm(id_type)
+        f_edge = self._create_edge_gl_data_for_tdm(id_type)
+        f_predict_edge = self._create_predict_edge_gl_data_for_tdm(id_type)
+
+        def _sampler_worker(pos_res, neg_res):
+            config = sampler_pb2.TDMSampler(
+                item_input_path=f_item.name,
+                edge_input_path=f_edge.name,
+                predict_edge_input_path=f_predict_edge.name,
+                attr_fields=["tree_level", "item_id", "int_a", "float_b", "str_c"]
+                if cfg_additional_attrs
+                else ["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+                layer_num_sample=[0, 1, 2, 3, 4, 5],
+            )
+            sampler = TDMSampler(
+                config=config,
+                fields=[
+                    pa.field(
+                        name="item_id",
+                        type=pa.int64() if id_type == "int64" else pa.string(),
+                    ),
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 76
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            pos_res.update(
+                sampler.get(
+                    {
+                        "item_id": pa.array([31, 41, 51, 61])
+                        if id_type == "int64"
+                        else pa.array(["31", "41", "51", "61"], type=pa.string()),
+                    }
+                )[0]
+            )
+            neg_res.update(
+                sampler.get(
+                    {
+                        "item_id": pa.array([31, 41, 51, 61])
+                        if id_type == "int64"
+                        else pa.array(["31", "41", "51", "61"], type=pa.string()),
+                    }
+                )[1]
+            )
+
+        pos_res = mp.Manager().dict()
+        neg_res = mp.Manager().dict()
+        p = mp.Process(
+            target=_sampler_worker,
+            args=(
+                pos_res,
+                neg_res,
+            ),
+        )
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        self.assertEqual(len(pos_res["int_a"]), 4 * 4)
+        self.assertEqual(len(pos_res["float_b"]), 4 * 4)
+        self.assertEqual(len(pos_res["str_c"]), 4 * 4)
+        self.assertEqual(len(neg_res["int_a"]), 4 * 15)
+        self.assertEqual(len(neg_res["float_b"]), 4 * 15)
+        self.assertEqual(len(neg_res["str_c"]), 4 * 15)
+
+    @parameterized.expand([["int64", True], ["string", True], ["string", False]])
+    def test_tdm_predict_sampler(self, id_type, cfg_additional_attrs=True):
+        if id_type == "string":
+            os.environ["USE_HASH_NODE_ID"] = "1"
+        f_item = self._create_item_gl_data_for_tdm(id_type)
+        f_edge = self._create_edge_gl_data_for_tdm(id_type)
+        f_predict_edge = self._create_predict_edge_gl_data_for_tdm(id_type)
+
+        def _sampler_worker(res):
+            config = sampler_pb2.TDMSampler(
+                item_input_path=f_item.name,
+                edge_input_path=f_edge.name,
+                predict_edge_input_path=f_predict_edge.name,
+                attr_fields=["tree_level", "item_id", "int_a", "float_b", "str_c"]
+                if cfg_additional_attrs
+                else ["int_a", "float_b", "str_c"],
+                item_id_field="item_id",
+                layer_num_sample=[0, 1, 2, 3, 4, 5],
+            )
+            sampler = TDMPredictSampler(
+                config=config,
+                fields=[
+                    pa.field(
+                        name="item_id",
+                        type=pa.int64() if id_type == "int64" else pa.string(),
+                    ),
+                    pa.field(name="int_a", type=pa.int64()),
+                    pa.field(name="float_b", type=pa.float64()),
+                    pa.field(name="str_c", type=pa.string()),
+                ],
+                batch_size=4,
+            )
+            assert sampler.estimated_sample_num == 128
+            sampler.init_cluster()
+            sampler.launch_server()
+            sampler.init()
+            sampler.init_sampler(2)
+            res.update(
+                sampler.get(
+                    {
+                        "item_id": pa.array([21, 22, 23, 24])
+                        if id_type == "int64"
+                        else pa.array(
+                            ["nonleaf#21", "nonleaf#22", "nonleaf#23", "nonleaf#24"],
+                            type=pa.string(),
+                        )
+                    },
+                )
+            )
+
+        res = mp.Manager().dict()
+        p = mp.Process(
+            target=_sampler_worker,
+            args=(res,),
+        )
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise RuntimeError("worker failed.")
+        self.assertEqual(len(res["int_a"]), 4 * 2)
+        self.assertEqual(len(res["float_b"]), 4 * 2)
+        self.assertEqual(len(res["str_c"]), 4 * 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,648 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Copyright (c) Alibaba, Inc. and its affiliates.
+import threading
+from collections import OrderedDict
+from queue import Queue
+from typing import Any, Dict, Final, Iterable, List, Optional, Tuple, cast
+
+import torch
+import torch.utils._pytree as pytree
+import torchmetrics
+from torch import nn
+from torchrec.modules.embedding_modules import (
+    EmbeddingBagCollectionInterface,
+    EmbeddingCollectionInterface,
+)
+
+from tzrec.acc import utils as acc_utils
+from tzrec.constant import TARGET_REPEAT_INTERLEAVE_KEY
+from tzrec.datasets.data_parser import DataParser
+from tzrec.datasets.utils import Batch
+from tzrec.features.feature import BaseFeature
+from tzrec.loss.pe_mtl_loss import ParetoEfficientMultiTaskLoss
+from tzrec.modules.utils import BaseModule
+from tzrec.prompt.assembler import OUTPUT_KEYS, PromptAssembler
+from tzrec.prompt.hole_keys import HOLE_KEYS, HoleKeyBuilder
+from tzrec.protos.loss_pb2 import LossConfig
+from tzrec.protos.model_pb2 import FeatureGroupConfig, ModelConfig
+from tzrec.utils import config_util
+from tzrec.utils.fx_util import fx_get_label
+from tzrec.utils.load_class import get_register_class_meta
+
+torch.fx.wrap(fx_get_label)
+
+_MODEL_CLASS_MAP = {}
+_meta_cls = get_register_class_meta(_MODEL_CLASS_MAP)
+
+
+class BaseModel(BaseModule, metaclass=_meta_cls):
+    """TorchEasyRec base model.
+
+    Args:
+        model_config (ModelConfig): an instance of ModelConfig.
+        features (list): list of features.
+        labels (list): list of label names.
+        sample_weights (list): sample weight names.
+    """
+
+    def __init__(
+        self,
+        model_config: ModelConfig,
+        features: List[BaseFeature],
+        labels: List[str],
+        sample_weights: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._base_model_config = model_config
+        self._model_type = model_config.WhichOneof("model")
+        self._features = features
+        self._feature_groups = list(model_config.feature_groups)
+        self._labels = labels
+        if self._model_type == "custom_model":
+            self._model_config = config_util.unpack_any(
+                model_config.custom_model.config
+            )
+        elif self._model_type:
+            self._model_config = getattr(model_config, self._model_type)
+        else:
+            self._model_config = None
+        self._metric_modules = nn.ModuleDict()
+        self._loss_modules = nn.ModuleDict()
+
+        if sample_weights:
+            self._sample_weights = sample_weights
+
+        self._train_metric_modules = nn.ModuleDict()
+
+    @property
+    def features(self) -> List[BaseFeature]:
+        """Model's features (default property forwarding to ``self._features``)."""
+        return self._features
+
+    @property
+    def feature_groups(self) -> List[FeatureGroupConfig]:
+        """Model's feature_groups (default forward to ``self._feature_groups``)."""
+        return self._feature_groups
+
+    def get_label(self, batch: Batch, label_name: str) -> torch.Tensor:
+        """Get a label of the batch.
+
+        A label stored as a list column is parsed into a jagged label, take its
+        values so that fixed-length list labels can be used as ordinary labels.
+
+        Args:
+            batch (Batch): input batch data.
+            label_name (str): name of the label.
+
+        Return:
+            label (Tensor): label tensor.
+        """
+        return fx_get_label(batch.labels, batch.jagged_labels, label_name)
+
+    def predict(self, batch: Batch) -> Dict[str, torch.Tensor]:
+        """Predict the model.
+
+        Args:
+            batch (Batch): input batch data.
+
+        Return:
+            predictions (dict): a dict of predicted result.
+        """
+        raise NotImplementedError
+
+    def init_from_pretrained(self) -> None:
+        """Load pretrained weights at cold start (no checkpoint to restore).
+
+        The training pipeline calls this hook before distributed wrapping when
+        no checkpoint was selected. The default is a no-op; models backed by an
+        external pretrained source, such as an HF backbone, override it.
+        """
+
+    def init_loss(self) -> None:
+        """Initialize loss modules."""
+        raise NotImplementedError
+
+    def loss(
+        self, predictions: Dict[str, torch.Tensor], batch: Batch
+    ) -> Dict[str, torch.Tensor]:
+        """Compute loss of the model.
+
+        Args:
+            predictions (dict): a dict of predicted result.
+            batch (Batch): input batch data.
+
+        Return:
+            losses (dict): a dict of loss tensor.
+        """
+        raise NotImplementedError
+
+    def init_metric(self) -> None:
+        """Initialize metric modules."""
+        raise NotImplementedError
+
+    def update_metric(
+        self,
+        predictions: Dict[str, torch.Tensor],
+        batch: Batch,
+        losses: Optional[Dict[str, torch.Tensor]] = None,
+    ) -> None:
+        """Update metric state.
+
+        Args:
+            predictions (dict): a dict of predicted result.
+            batch (Batch): input batch data.
+            losses (dict, optional): a dict of loss.
+        """
+        raise NotImplementedError
+
+    def compute_metric(self) -> Dict[str, torch.Tensor]:
+        """Compute metric.
+
+        Return:
+            metric_result (dict): a dict of metric result tensor.
+        """
+        metric_results = {}
+        for metric_name, metric in self._metric_modules.items():
+            metric_results[metric_name] = metric.compute()
+            metric.reset()
+        return metric_results
+
+    def compute_train_metric(self) -> Dict[str, torch.Tensor]:
+        """Compute train metric."""
+        metric_results = {}
+        for metric_name, metric in self._train_metric_modules.items():
+            metric_results[metric_name] = metric.compute()
+        return metric_results
+
+    def reset_train_metric(self) -> None:
+        """Reset train metric state."""
+        for metric in self._train_metric_modules.values():
+            metric.reset()
+
+    def on_train_end(self) -> None:
+        """Hook fired once after the train_eval loop exits.
+
+        Default no-op; override for one-shot end-of-loop work (e.g.
+        :class:`SidRqkmeans` fits its FAISS codebook here). The tail
+        ``final=True`` checkpoint persists whatever it produced.
+        """
+        return
+
+    def sparse_parameters(
+        self,
+    ) -> Tuple[Iterable[nn.Parameter], Iterable[nn.Parameter]]:
+        """Get an iterator over sparse parameters of the module."""
+        q = Queue()
+        q.put(self)
+        trainable_parameters_list = []
+        frozen_parameters_list = []
+        while not q.empty():
+            m = q.get()
+            if isinstance(m, EmbeddingBagCollectionInterface):
+                frozen_names = {
+                    f".{t.name}.weight"
+                    for t in m.embedding_bag_configs()
+                    # pyre-ignore [16]
+                    if not t.trainable
+                }
+                for name, param in m.named_parameters():
+                    frozen = any(map(lambda x: name.endswith(x), frozen_names))
+                    if frozen:
+                        frozen_parameters_list.append(param)
+                    else:
+                        trainable_parameters_list.append(param)
+            elif isinstance(m, EmbeddingCollectionInterface):
+                frozen_names = {
+                    f".{t.name}.weight"
+                    for t in m.embedding_configs()
+                    # pyre-ignore [16]
+                    if not t.trainable
+                }
+                for name, param in m.named_parameters():
+                    frozen = any(map(lambda x: name.endswith(x), frozen_names))
+                    if frozen:
+                        frozen_parameters_list.append(param)
+                    else:
+                        trainable_parameters_list.append(param)
+            else:
+                for child in m.children():
+                    q.put(child)
+        return trainable_parameters_list, frozen_parameters_list
+
+    def forward(self, batch: Batch) -> Dict[str, torch.Tensor]:
+        """Predict the model."""
+        return self.predict(batch)
+
+    def _init_loss_metric_impl(self, loss_cfg: LossConfig, suffix: str = "") -> None:
+        loss_type = loss_cfg.WhichOneof("loss")
+        loss_name = loss_type + suffix
+        self._metric_modules[loss_name] = torchmetrics.MeanMetric()
+
+    def _update_loss_metric_impl(
+        self,
+        losses: Dict[str, torch.Tensor],
+        batch: Batch,
+        label: torch.Tensor,
+        loss_cfg: LossConfig,
+        suffix: str = "",
+    ) -> None:
+        loss_type = loss_cfg.WhichOneof("loss")
+        loss_name = loss_type + suffix
+        loss = losses[loss_name]
+        self._metric_modules[loss_name].update(loss, loss.new_tensor(label.size(0)))
+
+    def get_features_in_feature_groups(
+        self, feature_groups: List[FeatureGroupConfig]
+    ) -> List[BaseFeature]:
+        """Select features order by feature groups."""
+        name_to_feature = {x.name: x for x in self._features}
+        grouped_features = OrderedDict()
+        for feature_group in feature_groups:
+            for x in feature_group.feature_names:
+                grouped_features[x] = name_to_feature[x]
+            for sequence_group in feature_group.sequence_groups:
+                for x in sequence_group.feature_names:
+                    grouped_features[x] = name_to_feature[x]
+        return list(grouped_features.values())
+
+
+TRAIN_OUT_TYPE = Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], Batch]
+TRAIN_FWD_TYPE = Tuple[torch.Tensor, TRAIN_OUT_TYPE]
+
+
+class TrainWrapper(BaseModule):
+    """Model train wrapper for pipeline."""
+
+    def __init__(
+        self,
+        module: nn.Module,
+        device: Optional[torch.device] = None,
+        mixed_precision: Optional[str] = None,
+    ) -> None:
+        super().__init__()
+        self.model = module
+        self.model.init_loss()
+        self.model.init_metric()
+        self._device = device
+        self._device_type = "cpu"
+        if device is not None:
+            self._device_type = device.type
+        self._mixed_dtype = acc_utils.mixed_precision_to_dtype(mixed_precision)
+        self.pareto = None
+        if (
+            hasattr(self.model, "_use_pareto_loss_weight")
+            and self.model._use_pareto_loss_weight
+        ):
+            self.pareto = ParetoEfficientMultiTaskLoss(
+                self.model._pareto_init_weight_cs
+            )
+
+    def forward(self, batch: Batch) -> TRAIN_FWD_TYPE:
+        """Predict and compute loss.
+
+        Args:
+            batch (Batch): input batch data.
+
+        Return:
+            total_loss (Tensor): total loss.
+            losses (dict): a dict of loss tensor.
+            predictions (dict): a dict of predicted result.
+            batch (Batch): input batch data.
+        """
+        with torch.amp.autocast(
+            device_type=self._device_type,
+            dtype=self._mixed_dtype,
+            enabled=self._mixed_dtype is not None,
+        ):
+            predictions = self.model.predict(batch)
+            losses = self.model.loss(predictions, batch)
+            if self.training and self.pareto:
+                total_loss = self.pareto(losses, self.model)
+            else:
+                total_loss = torch.stack(list(losses.values())).sum()
+
+        losses = {k: v.detach() for k, v in losses.items()}
+        predictions = {k: v.detach() for k, v in predictions.items()}
+        return total_loss, (losses, predictions, batch)
+
+
+class PredictWrapper(BaseModule):
+    """Model predict wrapper for pipeline."""
+
+    def __init__(
+        self,
+        module: nn.Module,
+        device: Optional[torch.device] = None,
+        mixed_precision: Optional[str] = None,
+        output_cols: Optional[str] = None,
+    ) -> None:
+        super().__init__()
+        self.model = module
+        self._device = device
+        self._device_type = "cpu"
+        if device is not None:
+            self._device_type = device.type
+        self._mixed_dtype = acc_utils.mixed_precision_to_dtype(mixed_precision)
+        self._output_cols = output_cols
+
+    def forward(
+        self, batch: Batch
+    ) -> Tuple[None, Tuple[Dict[str, torch.Tensor], Batch]]:
+        """Predict.
+
+        Args:
+            batch (Batch): input batch data.
+
+        Return:
+            predictions (dict): a dict of predicted result.
+            batch (Batch): input batch data.
+        """
+        with torch.amp.autocast(
+            device_type=self._device_type,
+            dtype=self._mixed_dtype,
+            enabled=self._mixed_dtype is not None,
+        ):
+            predictions = self.model.predict(batch)
+            if self._output_cols is not None:
+                result = dict()
+                for c in self._output_cols:
+                    result[c] = predictions[c]
+                if TARGET_REPEAT_INTERLEAVE_KEY in predictions:
+                    result[TARGET_REPEAT_INTERLEAVE_KEY] = predictions[
+                        TARGET_REPEAT_INTERLEAVE_KEY
+                    ]
+            else:
+                result = predictions
+            if self._device_type == "cuda":
+                result = {k: v.to("cpu", non_blocking=True) for k, v in result.items()}
+        return None, (result, batch)
+
+
+class ScriptWrapper(BaseModule):
+    """Model inference wrapper for jit.script.
+
+    Parses a request dict into a ``Batch`` and runs the wrapped module's
+    ``predict``. A module that also exposes ``compiled_prompt`` has its prompt
+    assembled here by the same walk the training collator runs, with the
+    serving-only ``hole_keys`` fold beside it, which training never computes.
+    """
+
+    def __init__(self, module: nn.Module) -> None:
+        super().__init__()
+        self.model = module
+        self._data_parser = DataParser(
+            self.model.features,
+            sampler_type=str(module.sampler_type)
+            if hasattr(module, "sampler_type")
+            else None,
+        )
+        prompt = getattr(module, "compiled_prompt", None)
+        self._prompt_assembler = (
+            PromptAssembler(
+                prompt.prompt_plan, prompt.sid_space, include_response=False
+            )
+            if prompt is not None
+            else None
+        )
+        self._hole_keys = (
+            HoleKeyBuilder(prompt.prompt_plan) if prompt is not None else None
+        )
+
+    @property
+    def features(self) -> List[BaseFeature]:
+        """Live read of the wrapped module's features (no snapshot)."""
+        return cast(List[BaseFeature], self.model.features)
+
+    @property
+    def feature_groups(self) -> List[FeatureGroupConfig]:
+        """Live read of the wrapped module's feature_groups."""
+        return cast(List[FeatureGroupConfig], self.model.feature_groups)
+
+    def get_batch(
+        self,
+        data: Dict[str, torch.Tensor],
+        # pyre-ignore [9]
+        device: torch.device = "cpu",
+    ) -> Batch:
+        """Get batch."""
+        batch = self._data_parser.to_batch(data)
+        if self._prompt_assembler is not None:
+            streams = self._prompt_assembler(data)
+            batch.additional_infos.update({k: streams[k] for k in OUTPUT_KEYS})
+        if self._hole_keys is not None:
+            batch.additional_infos[HOLE_KEYS] = self._hole_keys(data)
+        batch = batch.to(device, non_blocking=True)
+        return batch
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        # pyre-ignore [9]
+        device: torch.device = "cpu",
+    ) -> Dict[str, torch.Tensor]:
+        """Predict the model.
+
+        Args:
+            data (dict): a dict of input data for Batch.
+            device (torch.device): inference device.
+
+        Return:
+            predictions (dict): a dict of predicted result.
+        """
+        batch = self.get_batch(data, device)
+        return self.model.predict(batch)
+
+
+class CudaAutocastWrapper(nn.Module):
+    """Wraps a module in a torch.autocast context for torch.export.
+
+    torch.export captures ``with torch.autocast(...)`` as a
+    ``wrap_with_autocast`` Higher Order Op that AOT Inductor lowers to
+    proper dtype casts. CUTLASS HSTU attention requires bf16/fp16 inputs.
+
+    When ``device`` is set, it is passed as a second positional argument
+    to ``inner.forward(x, device)`` — this binds the device for models
+    like ``ScriptWrapper`` whose forward takes ``(data, device)``.
+
+    ``_mixed_dtype_id: Final[int]`` encodes the dtype so that
+    ``torch.export`` resolves each if/elif branch statically during
+    tracing.
+
+    Args:
+        inner (nn.Module): inner module to wrap.
+        mixed_precision (Optional[str]): one of "BF16", "FP16", or None.
+        device (str): device string to pass to inner, empty means no device arg.
+    """
+
+    _mixed_dtype_id: Final[int]
+    _device: Final[str]
+
+    def __init__(
+        self,
+        inner: nn.Module,
+        mixed_precision: Optional[str] = None,
+        device: str = "",
+    ) -> None:
+        super().__init__()
+        self.inner = inner
+        self._device = device
+        if mixed_precision == "BF16":
+            self._mixed_dtype_id = 1
+        elif mixed_precision == "FP16":
+            self._mixed_dtype_id = 2
+        else:
+            self._mixed_dtype_id = 0
+
+    def _call_inner(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        if self._device != "":
+            return self.inner(x, self._device)
+        return self.inner(x)
+
+    def forward(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Forward through inner module under an autocast context."""
+        if self._mixed_dtype_id == 1:
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                return self._call_inner(x)
+        elif self._mixed_dtype_id == 2:
+            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                return self._call_inner(x)
+        else:
+            return self._call_inner(x)
+
+
+class CombinedModelWrapper(nn.Module):
+    """Model inference wrapper for two-stage export (JIT sparse + AOTI dense).
+
+    Must remain ``torch.jit.script``-friendly (used by TRT export).
+
+    Args:
+        sparse_model (nn.Module): sparse part scripted model.
+        dense_model (nn.Module): dense part AOTInductor model.
+    """
+
+    _dense_is_aoti: bool
+
+    def __init__(self, sparse_model: nn.Module, dense_model: nn.Module) -> None:
+        super().__init__()
+        self.sparse_model = sparse_model
+        self.dense_model = dense_model
+        # Only AOTI dense models need the GIL + model-pool-mutex guard:
+        # AOTI extern ops release the GIL and then block on the AOTI
+        # model-pool mutex, deadlocking the predict forward workers.
+        dense_is_aoti = False
+        try:
+            from torch.export.pt2_archive._package import AOTICompiledModel
+
+            dense_is_aoti = isinstance(dense_model, AOTICompiledModel)
+        except ImportError:
+            pass
+        self._dense_is_aoti = dense_is_aoti
+        if dense_is_aoti:
+            object.__setattr__(self, "_lock", threading.Lock())
+
+    @torch.jit.unused
+    def _locked_dense(
+        self,
+        sparse_out: Dict[str, torch.Tensor],
+        # pyre-ignore [9]
+        device: torch.device,
+    ) -> Dict[str, torch.Tensor]:
+        torch.cuda.set_device(device)
+        with cast(Any, self._lock):
+            return self.dense_model(sparse_out)
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        # pyre-ignore [9]
+        device: torch.device = "cuda:0",
+    ) -> Dict[str, torch.Tensor]:
+        """Predict the model.
+
+        Args:
+            data (dict): a dict of input data for Batch.
+            device (torch.device): inference device.
+
+        Return:
+            predictions (dict): a dict of predicted result.
+        """
+        sparse_out, _ = self.sparse_model(data, device)
+        return self.dense_forward(sparse_out, device)
+
+    def dense_forward(
+        self,
+        sparse_out: Dict[str, torch.Tensor],
+        # pyre-ignore [9]
+        device: torch.device = "cuda:0",
+    ) -> Dict[str, torch.Tensor]:
+        """Run the dense model on the sparse model's outputs."""
+        if self._dense_is_aoti:
+            return self._locked_dense(sparse_out, device)
+        return self.dense_model(sparse_out)
+
+
+class UnifiedAOTIModelWrapper(nn.Module):
+    """Model inference wrapper for unified AOTI model (sparse+dense fused).
+
+    Args:
+        model (nn.Module): unified AOTInductor compiled model.
+    """
+
+    # Set through object.__setattr__, so declare the types here. _lock cannot be
+    # declared: torch.jit.script rejects a threading.Lock annotation.
+    _key_order: Optional[List[str]]
+
+    def __init__(self, model: nn.Module) -> None:
+        super().__init__()
+        self.model = model
+        # Serializes forward to prevent GIL + C++ mutex deadlock.
+        # AOTI extern ops go through redispatch_boxed which releases the
+        # GIL; a second thread can then hold the GIL while blocking on
+        # the AOTI model-pool mutex, deadlocking with the first thread.
+        # object.__setattr__ bypasses nn.Module's strict registration.
+        object.__setattr__(self, "_lock", threading.Lock())
+        object.__setattr__(self, "_key_order", None)
+        # AOTICompiledModel.__call__ reparses the call spec on every call.
+        object.__setattr__(
+            self,
+            "_out_spec",
+            pytree.treespec_loads(cast(Any, model).loader.get_call_spec()[1]),
+        )
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        # pyre-ignore [9]
+        device: torch.device = "cuda:0",
+    ) -> Dict[str, torch.Tensor]:
+        """Predict the model.
+
+        Args:
+            data (dict): a dict of input data for Batch.
+            device (torch.device): target CUDA device.
+
+        Return:
+            predictions (dict): a dict of predicted result.
+        """
+        key_order = self._key_order
+        if key_order is None:
+            key_order = sorted(data.keys())
+            object.__setattr__(self, "_key_order", key_order)
+        # Force CUDA primary context creation on worker threads.
+        torch.cuda.set_device(device)
+        with cast(Any, self._lock):
+            flat_outputs = cast(Any, self.model).loader.boxed_run(
+                [data[k] for k in key_order]
+            )
+        return pytree.tree_unflatten(flat_outputs, self._out_spec)

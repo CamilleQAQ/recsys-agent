@@ -1,0 +1,460 @@
+# Copyright (c) 2025, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import unittest
+
+import torch
+from hypothesis import Verbosity, given
+from hypothesis import strategies as st
+
+from tzrec.ops import Kernel
+from tzrec.utils.test_util import (
+    cleanup_cuda_memory,
+    generate_sparse_seq_len,
+    get_test_dtypes,
+    gpu_unavailable,
+    mark_ci_scope,
+)
+from tzrec.utils.test_util import hypothesis_settings as settings
+
+
+def _retry(max_attempts=3):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    print(f"run {attempt + 1} failed: {e}")
+                    if attempt >= max_attempts - 1:
+                        raise
+            return None
+
+        return wrapper
+
+    return decorator
+
+
+@mark_ci_scope("h20", "gpu")
+class PositionEmbeddingsTest(unittest.TestCase):
+    def teardown_example(self, example):
+        cleanup_cuda_memory()
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        batch_size=st.integers(4, 8),
+        max_uih_len=st.integers(50, 500),
+        max_targets=st.sampled_from([10, 20]),
+        D=st.integers(20, 200),
+        alpha=st.sampled_from([0.5, 1.0]),
+        dtype=st.sampled_from([torch.float32]),
+        interleave_targets=st.sampled_from([True, False]),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=20,
+        deadline=None,
+    )
+    # pyre-ignore[2]
+    def test_add_positional_embeddings_triton(self, *args, **kwargs) -> None:
+        self._test_add_position_embeddings(
+            *args,
+            **kwargs,
+            test_backward=True,
+            ref_kernel=Kernel.PYTORCH,
+            real_kernel=Kernel.TRITON,
+        )
+
+    def _test_add_position_embeddings(
+        self,
+        batch_size: int,
+        max_uih_len: int,
+        max_targets: int,
+        D: int,
+        alpha: float,
+        dtype: torch.dtype,
+        interleave_targets: bool,
+        ref_kernel: Kernel,
+        real_kernel: Kernel,
+        test_backward: bool,
+    ) -> None:
+        from tzrec.ops.position import add_positional_embeddings
+
+        num_targets = torch.randint(
+            max_targets + 1, size=(batch_size,), device=torch.device("cuda")
+        )
+        lengths = torch.randint(
+            max_targets * 2,
+            max_uih_len + 1,
+            size=(batch_size,),
+            device=torch.device("cuda"),
+        )
+        seq_offsets = torch.zeros(
+            (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
+        )
+        seq_offsets[1:] = torch.cumsum(lengths, dim=0)
+        max_seq_len = max_uih_len + max_targets
+
+        position_embeddings_weight = (
+            torch.empty(
+                (max_seq_len, D), dtype=torch.float32, device=torch.device("cuda")
+            )
+            .uniform_(-1.0, 1.0)
+            .requires_grad_()
+        )
+        seq_embeddings = (
+            torch.empty(
+                (int(seq_offsets[-1].item()), D),
+                dtype=dtype,
+                device=torch.device("cuda"),
+            )
+            .uniform_(-0.1, 0.1)
+            .requires_grad_()
+        )
+
+        # ref implementation
+        ref_out = add_positional_embeddings(
+            alpha=alpha,
+            max_seq_len=max_seq_len,
+            position_embeddings_weight=position_embeddings_weight,
+            seq_offsets=seq_offsets,
+            seq_lengths=lengths,
+            seq_embeddings=seq_embeddings,
+            num_targets=num_targets,
+            interleave_targets=interleave_targets,
+            kernel=ref_kernel,
+        )
+
+        dout = torch.randn_like(ref_out) * 0.01
+        ref_out.backward(dout)
+        # pyre-ignore
+        ref_d_seq_embeddings, seq_embeddings.grad = seq_embeddings.grad.clone(), None
+        ref_d_pos_emb_weight, position_embeddings_weight.grad = (
+            position_embeddings_weight.grad.clone(),
+            None,
+        )
+
+        # real implementation
+        seq_embeddings = seq_embeddings.detach().clone().requires_grad_()
+        position_embeddings_weight = (
+            position_embeddings_weight.detach().clone().requires_grad_()
+        )
+        real_out = add_positional_embeddings(
+            alpha=alpha,
+            max_seq_len=max_seq_len,
+            position_embeddings_weight=position_embeddings_weight,
+            seq_offsets=seq_offsets,
+            seq_lengths=lengths,
+            seq_embeddings=seq_embeddings,
+            num_targets=num_targets,
+            interleave_targets=interleave_targets,
+            kernel=real_kernel,
+        )
+        torch.testing.assert_close(ref_out, real_out)
+        if test_backward:
+            real_out.backward(dout)
+            real_d_seq_embeddings = seq_embeddings.grad.clone()
+            real_d_pos_emb_weight = position_embeddings_weight.grad.clone()
+            torch.testing.assert_close(ref_d_seq_embeddings, real_d_seq_embeddings)
+            torch.testing.assert_close(ref_d_pos_emb_weight, real_d_pos_emb_weight)
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        alpha=st.sampled_from([0.5]),
+        max_uih_len=st.integers(50, 500),
+        max_contextual_seq_len=st.sampled_from([10]),
+        interleave_targets=st.sampled_from([True, False]),
+        batch_size=st.integers(16, 32),
+        D=st.integers(20, 200),
+        max_targets=st.sampled_from([10, 20]),
+        time_bucket_fn=st.sampled_from(["sqrt", "log"]),
+        time_bucket_increments=st.integers(10, 100),
+        dtype=st.sampled_from(
+            get_test_dtypes([torch.float32, torch.bfloat16, torch.float16])
+        ),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=20,
+        deadline=None,
+    )
+    # pyre-ignore[2]
+    def test_add_timestamp_positional_embeddings_triton(self, *args, **kwargs) -> None:
+        self._test_add_timestamp_positional_embeddings(
+            *args,
+            **kwargs,
+            test_backward=True,
+            ref_kernel=Kernel.PYTORCH,
+            real_kernel=Kernel.TRITON,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        alpha=st.sampled_from([0.5]),
+        max_uih_len=st.sampled_from([32768]),
+        max_contextual_seq_len=st.sampled_from([10]),
+        interleave_targets=st.sampled_from([False]),
+        batch_size=st.sampled_from([130]),
+        D=st.sampled_from([128]),
+        max_targets=st.sampled_from([10]),
+        time_bucket_fn=st.sampled_from(["sqrt", "log"]),
+        time_bucket_increments=st.integers(10, 100),
+        dtype=st.sampled_from(get_test_dtypes([torch.bfloat16, torch.float16])),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=2,
+        deadline=None,
+    )
+    def test_add_timestamp_positional_embeddings_triton_large_tensor(
+        self,
+        # pyre-fixme[2]: Parameter must be annotated.
+        *args,
+        # pyre-ignore[2]
+        **kwargs,
+    ) -> None:
+        self._test_add_timestamp_positional_embeddings(
+            *args,
+            **kwargs,
+            test_backward=False,
+            ref_kernel=Kernel.TRITON,
+            real_kernel=Kernel.TRITON,
+            sparsity=1.0,
+        )
+
+    # the test case may fail, when ts_ind is on bucket boundary, so we retry it
+    @_retry(max_attempts=3)
+    def _test_add_timestamp_positional_embeddings(
+        self,
+        alpha: float,
+        max_uih_len: int,
+        max_contextual_seq_len: int,
+        interleave_targets: bool,
+        batch_size: int,
+        D: int,
+        max_targets: int,
+        time_bucket_fn: str,
+        time_bucket_increments: float,
+        dtype: torch.dtype,
+        ref_kernel: Kernel,
+        real_kernel: Kernel,
+        test_backward: bool,
+        sparsity: float = -1,
+    ) -> None:
+        from tzrec.ops.position import (
+            add_timestamp_positional_embeddings,
+        )
+
+        num_targets = torch.randint(
+            low=1, high=max_targets + 1, size=(batch_size,), device=torch.device("cuda")
+        )
+        if sparsity > 0.0:
+            lengths = generate_sparse_seq_len(
+                size=batch_size,
+                max_seq_len=max_uih_len,
+                sparsity=sparsity,
+                device=torch.device("cuda"),
+            ).to(torch.int64)
+        else:
+            lengths = torch.randint(
+                max_uih_len + 1, size=(batch_size,), device=torch.device("cuda")
+            )
+        if interleave_targets:
+            seq_lengths = max_contextual_seq_len + lengths + num_targets * 2
+            max_seq_len = max_contextual_seq_len + max_uih_len + max_targets * 2
+        else:
+            seq_lengths = max_contextual_seq_len + lengths + num_targets
+            max_seq_len = max_contextual_seq_len + max_uih_len + max_targets
+        seq_offsets = torch.zeros(
+            (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
+        )
+        seq_offsets[1:] = torch.cumsum(seq_lengths, dim=0)
+
+        position_embeddings_weight = (
+            torch.empty(
+                (max_seq_len, D), dtype=torch.float32, device=torch.device("cuda")
+            )
+            .uniform_(-1.0, 1.0)
+            .requires_grad_()
+        )
+        num_time_buckets = 1000
+        timestamp_embeddings_weight = (
+            torch.empty(
+                (num_time_buckets + 1, D),
+                dtype=torch.float32,
+                device=torch.device("cuda"),
+            )
+            .uniform_(-1.0, 1.0)
+            .requires_grad_()
+        )
+        seq_embeddings = (
+            torch.empty(
+                (int(seq_offsets[-1].item()), D),
+                dtype=dtype,
+                device=torch.device("cuda"),
+            )
+            .uniform_(-0.1, 0.1)
+            .requires_grad_()
+        )
+        timestamp_deltas: torch.Tensor = torch.randint(
+            86400,
+            size=(batch_size, max_seq_len),
+            device="cuda",
+        )
+        timestamps = timestamp_deltas.cumsum(dim=1)
+        mask = torch.arange(
+            max_seq_len, device=timestamps.device
+        ) < seq_lengths.unsqueeze(1)
+        timestamps = timestamps[mask.view(batch_size, -1)]
+
+        ref_out = add_timestamp_positional_embeddings(
+            alpha=alpha,
+            max_seq_len=max_seq_len,
+            max_contextual_seq_len=max_contextual_seq_len,
+            position_embeddings_weight=position_embeddings_weight,
+            timestamp_embeddings_weight=timestamp_embeddings_weight,
+            seq_offsets=seq_offsets,
+            seq_lengths=seq_lengths,
+            seq_embeddings=seq_embeddings,
+            timestamps=timestamps,
+            num_targets=num_targets,
+            interleave_targets=interleave_targets,
+            time_bucket_fn=time_bucket_fn,
+            time_bucket_increments=time_bucket_increments,
+            kernel=ref_kernel,
+        )
+        dout = torch.randn_like(ref_out) * 0.01
+        ref_out.backward(dout)
+        # pyre-ignore
+        ref_d_seq_embeddings, seq_embeddings.grad = seq_embeddings.grad.clone(), None
+        ref_d_position_embeddings_weight, position_embeddings_weight.grad = (
+            position_embeddings_weight.grad.clone(),
+            None,
+        )
+        ref_d_timestamp_embeddings_weight, timestamp_embeddings_weight.grad = (
+            timestamp_embeddings_weight.grad.clone(),
+            None,
+        )
+
+        real_out = add_timestamp_positional_embeddings(
+            alpha=alpha,
+            max_seq_len=max_seq_len,
+            max_contextual_seq_len=max_contextual_seq_len,
+            position_embeddings_weight=position_embeddings_weight,
+            timestamp_embeddings_weight=timestamp_embeddings_weight,
+            seq_offsets=seq_offsets,
+            seq_lengths=seq_lengths,
+            seq_embeddings=seq_embeddings,
+            timestamps=timestamps,
+            num_targets=num_targets,
+            interleave_targets=interleave_targets,
+            time_bucket_fn=time_bucket_fn,
+            time_bucket_increments=time_bucket_increments,
+            kernel=real_kernel,
+        )
+        torch.testing.assert_close(ref_out, real_out)
+        if test_backward:
+            real_out.backward(dout)
+            real_d_seq_embeddings = seq_embeddings.grad.clone()
+            real_d_position_embeddings_weight = position_embeddings_weight.grad.clone()
+            real_d_timestamp_embeddings_weight = (
+                timestamp_embeddings_weight.grad.clone()
+            )
+            torch.testing.assert_close(ref_d_seq_embeddings, real_d_seq_embeddings)
+            torch.testing.assert_close(
+                ref_d_position_embeddings_weight,
+                real_d_position_embeddings_weight,
+                atol=5e-2 if dtype != torch.float32 else None,
+                rtol=2e-2 if dtype != torch.float32 else None,
+            )
+            torch.testing.assert_close(
+                ref_d_timestamp_embeddings_weight,
+                real_d_timestamp_embeddings_weight,
+                atol=5e-2 if dtype != torch.float32 else None,
+                rtol=2e-2 if dtype != torch.float32 else None,
+            )
+
+    @unittest.skipIf(*gpu_unavailable)
+    def test_add_timestamp_positional_embeddings_explicit_query_time(self) -> None:
+        """Explicit per-row query_time anchors ts_gap.
+
+        Contract checked here:
+          * passing the last in-sequence timestamp as ``query_time`` reproduces
+            the ``query_time=None`` (gather-last) path exactly, on both kernels;
+          * the pytorch and triton explicit paths agree;
+          * a later ``query_time`` (a request after the last event) shifts the
+            gaps and changes the output -- the bug this fixes: a UIH-only tower
+            could never represent staleness relative to the request time.
+        """
+        from tzrec.ops.position import add_timestamp_positional_embeddings
+
+        device = torch.device("cuda")
+        torch.manual_seed(0)
+        batch_size, d, max_seq_len, num_time_buckets = 4, 16, 48, 1000
+
+        seq_lengths = torch.randint(1, max_seq_len + 1, (batch_size,), device=device)
+        seq_offsets = torch.zeros(batch_size + 1, dtype=torch.int64, device=device)
+        seq_offsets[1:] = torch.cumsum(seq_lengths, dim=0)
+        total = int(seq_offsets[-1].item())
+
+        pos_w = torch.empty(max_seq_len, d, device=device).uniform_(-1.0, 1.0)
+        ts_w = torch.empty(num_time_buckets + 1, d, device=device).uniform_(-1.0, 1.0)
+        seq_emb = torch.empty(total, d, device=device).uniform_(-0.1, 0.1)
+        # strictly increasing per-row timestamps
+        timestamps = torch.cat(
+            [
+                torch.cumsum(
+                    torch.randint(1, 100, (int(n.item()),), device=device), dim=0
+                )
+                for n in seq_lengths
+            ]
+        ).to(torch.float32)
+        last_ts = timestamps[seq_offsets[1:] - 1]  # [B], per-row last event
+        # HSTUMatch's UIH-only path passes a zeros num_targets (not None).
+        num_targets = torch.zeros(batch_size, dtype=torch.int64, device=device)
+
+        def run(kernel: Kernel, query_time: object) -> torch.Tensor:
+            return add_timestamp_positional_embeddings(
+                alpha=1.0,
+                max_seq_len=max_seq_len,
+                max_contextual_seq_len=0,
+                position_embeddings_weight=pos_w,
+                timestamp_embeddings_weight=ts_w,
+                seq_offsets=seq_offsets,
+                seq_lengths=seq_lengths,
+                seq_embeddings=seq_emb,
+                timestamps=timestamps,
+                num_targets=num_targets,
+                interleave_targets=False,
+                time_bucket_fn="sqrt",
+                time_bucket_increments=60.0,
+                kernel=kernel,
+                query_time=query_time,  # pyre-ignore[6]
+            )
+
+        for kernel in (Kernel.PYTORCH, Kernel.TRITON):
+            torch.testing.assert_close(run(kernel, None), run(kernel, last_ts))
+        # explicit path agrees across kernels
+        torch.testing.assert_close(
+            run(Kernel.PYTORCH, last_ts), run(Kernel.TRITON, last_ts)
+        )
+        # a request strictly after every event shifts the gaps -> output changes
+        future = last_ts + 100000.0
+        self.assertFalse(
+            torch.allclose(run(Kernel.TRITON, None), run(Kernel.TRITON, future))
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

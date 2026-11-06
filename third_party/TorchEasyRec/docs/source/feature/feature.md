@@ -1,0 +1,1017 @@
+# 特征
+
+TorchEasyRec多种类型的特征，包括IdFeature、RawFeature、ComboFeature、CombineFeature、LookupFeature、MatchFeature、ExprFeature、OverlapFeature、TokenizeFeature、KvDotProduct、BoolMaskFeature、RegexReplaceFeature、CustomFeature、SequenceFeature。
+
+**共用配置**
+
+- **feature_name**: 特征名/特征输出名
+
+- **embedding_dim**: 特征嵌入维度，计算方法可以参考: `embedding_dim=8+x^{0.25}`，`embedding_dim` 需要为4的倍数, 其中，x 为不同特征取值的个数
+
+- **embedding_name**: 特征嵌入名，默认不需要设置，如需两个特征共享嵌入(embedding)参数，可将这两个特征的嵌入名设置成相同
+
+- **pooling**: 多值特征嵌入池化方式，默认为`sum`，可以选`sum`/`mean`
+
+- **init_fn**: 特征嵌入初始化方式，默认不需要设置，如需自定义，可以设置任意的torch内置初始化函数，如`nn.init.uniform_,a=-0.01,b=0.01`
+
+- **default_value**: 特征默认值。如果默认值为""，则没有默认值，后续模型中对于空特征的嵌入为零向量。注意: 该默认值为`bucketize`前的默认值。`bucketize`的配置包括`num_buckets`/`hash_bucket_size`/`vocab_list`/`vocab_dict`/`vocab_file`/`boundaries`
+
+- **separator**: FG在输入为string类型时的多值分隔符，默认为`\x1d`。注意配置后会同时按`\x1d`和配置的符号切分。更建议用数组（ARRAY）类型来表示多值，训练和推理性能更好
+
+- **fg_encoded_default_value**: FG编码后的数据的默认值，当fg_mode=FG_NONE并且不是用pai-fg编码数据时，可以设置该参数填充空值
+
+- **trainable**: Embedding Variable是否可训练，默认为true
+
+- **stub_type**: 是否只作为FG的中间结果，不作为FG的输出特征，默认为false。注意: 不能在fg_mode=FG_NORMAL模式下使用。
+
+- **data_type**: 训练的EmbeddingTable的数据类型，支持FP32和FP16，默认为FP32。
+
+## IdFeature: 类别型特征
+
+类别型特征，例如手机品牌、item_id、user_id、年龄段、星座等，一般在表里面存储的类型一般是string、bigint、array\<string>或array\<bigint>。可支持多值Id特征
+
+```
+feature_configs {
+    id_feature {
+        feature_name: "uid"
+        # fg_mode=FG_NONE 数据已经被FG编号好的情况下，expression可以不写
+        expression: "user:uid"
+        embedding_dim: 32
+        hash_bucket_size: 100000
+    }
+}
+feature_configs {
+    id_feature {
+        feature_name: "month"
+        expression: "user:month"
+        embedding_dim: 32
+        num_buckets: 12
+        default_value: "0"
+    }
+}
+feature_configs {
+    id_feature {
+        feature_name: "cate"
+        expression: "item:cate"
+        embedding_dim: 32
+        vocab_list: ["1", "2", "3", "4", "5", "6", "7"]
+    }
+}
+feature_configs {
+    id_feature {
+        feature_name: "cate"
+        expression: "item:cate"
+        embedding_dim: 32
+        vocab_dict: [{key:"a" value:2}, {key:"b" value:3}, {key:"c" value:2}]
+    }
+}
+feature_configs {
+    id_feature {
+        feature_name: "cate"
+        expression: "item:cate"
+        embedding_dim: 32
+        zch {
+            zch_size: 1000000
+            eviction_interval: 2
+            lfu {}
+        }
+    }
+}
+feature_configs {
+    id_feature {
+        feature_name: "tags"
+        expression: "item:tag_ids"
+        weight_expression: "item:tag_weights"
+        use_weight: true
+        hash_bucket_size: 100000
+        embedding_dim: 16
+    }
+}
+```
+
+- **expression**: 特征FG所依赖的字段来源，由两部分组成`input_side`:`input_name`
+
+  - `input_side`一共支持五种 \[`user`, `item`, `context`, `feature`, `const`\]
+    - `user`: 用户侧特征输入，线上推理时从请求中传入
+    - `item`: 物品侧特征输入，线上推理时会从实时缓存在内存中的特征表里获取
+    - `context`: 由上下文产生物品侧特征输入，线上推理时从请求中传入，如`recall_name`等
+    - `feature`: 来自其他特征FG的输出，如下述`lookup_age_feat`的输入`age_binning`来自于RawFeature `age`的分箱结果
+    - `const`: 输入为常量
+  - `input_name`为来源字段的实际名称
+
+- **hash_bucket_size**: hash bucket的大小。为减少hash冲突，建议设置
+  `hash_bucket_size  = number_ids*ratio, ratio in [5,10]`
+
+  - 如果需要跟tensorflow的hash保持一致，可以设置环境变量 USE_FARM_HASH_TO_BUCKETIZE=true
+
+- **num_buckets**: buckets数量, 仅仅当输入是integer类型时，可以使用num_buckets。取值不在\[0, num_buckets)范围内时，分箱结果为0
+
+- **vocab_list**: 指定词表，适合取值比较少可以枚举的特征，如星期，月份，星座等
+
+  - 未设置**default_bucketize_value**时: default_bucketize_value=1, **编号需会从2开始**，编码0预留给默认值(default_value)，编码1预留给超出词表的词
+    - 注意：如果default_value本身在vocab_list中，那么default_value的编码不为0，将会是vocab_list中的编码
+  - 设置**default_bucketize_value**时: vocab_list 用户完全自主控制
+
+- **vocab_dict**: 指定字典形式词表，适合多个词需要编码到同一个编号情况
+
+  - 未设置**default_bucketize_value**时: default_bucketize_value=1, **编号需要从2开始**，编码0预留给默认值(default_value)，编码1预留给超出词表的词
+    - 注意：如果default_value本身在vocab_dict中，vocab_dict中的等于default_value的元素的索引值将会被更新为0
+  - 设置**default_bucketize_value**时: vocab_dict 用户完全自主控制
+
+- **vocab_file**: 指定词表或字典形式词表的文件路径，适合取值比较多兵可以枚举的特征，编码未预留，必须设置**default_bucketize_value**参数
+
+  - 词表形式：一行一个词
+  - 字典词表形式：一行一个词和编号，词和编号间用空格分隔
+
+- **zch**: 零冲突hash，可设置Id的准入和驱逐策略，详见[文档](./zch.md)
+
+- **weighted**: 是否为带权重的Id特征，输入形式为`k1:v1\x1dk2:v2`
+
+- **weight_expression**: 权重所在的输入字段，如`item:tag_weights`，用于id和权重分两列存放的场景，设置后等价于weighted=true，需配合**use_weight**=true使权重参与embedding pooling
+
+  - 与**expression**按位置一一对应，两列均支持array类型或按**separator**分隔的字符串；同一行id与权重个数须相同（id为空的行忽略权重），array中不能有null元素
+  - 重复的id会累加权重
+
+- **use_weight**: 默认值是false，仅在**weighted**=true时生效。默认情况下，权重仅用于从`k:v`格式的输入中解析出id，解析后即被丢弃，不参与模型计算，也不会传输给模型。设置为true时，权重会参与embedding pooling。注意：开启后，同一**数据组**（data group）内的所有特征都会带上权重（其余特征填充为1），会有一定的内存和计算开销
+
+- **value_dim**: 默认值是0，可以设置1，value_dim=0时支持多值ID输出
+
+- **embedding_dim** 可省略：省略时该特征不建 embedding 表，只能作为 prompt_config 中的 inline slot，此时 `value_dim` 需等于 `sid_space.codebook` 的层数，每个序列元素携带每层一个 offset SID 编码，且不能再声明 `hash_bucket_size`/`vocab_*`/`zch`/`dynamicemb`；`num_buckets` 只能等于 `sid_space.codebook` 之和（各层编码总数）。需要 FG 时（训练时 fg_mode 不是 FG_NONE，或线上 Processor 按导出的 fg.json 做 FG）必须这样配置，否则 FG 不处理该序列特征，这个取值下每个编码原样输出
+
+- **default_bucketize_value**: （可选）指定超出词表的词的编码。当配置了default_bucketize_value时，vocab_list和vocab_dict将不会预留编码给默认值和超出词表的词，用户可完全自主控制vocab_list或vocab_dict
+
+- NOTE: hash_bucket_size, num_buckets, vocab_list, 只能指定其中之一，不能同时指定
+
+## RawFeature: 数值型特征
+
+```
+feature_configs {
+    raw_feature {
+        feature_name: "ctr"
+        expression: "item:ctr"
+    }
+}
+```
+
+- **expression**: 特征FG所依赖的字段来源，由两部分组成`input_side`:`input_name`，`input_side`可以取值为\[`user`, `item`, `context`, `feature`, `const`\]，`input_name`为来源字段的名称
+
+- **normalizer**: 指定连续值特征的变换方式，支持4种，默认不变换
+
+  - log10
+
+  ```
+  配置例子: method=log10,threshold=1e-10,default=-10
+  计算公式: x = x > threshold ? log10(x) : default;
+  ```
+
+  - zscore
+
+  ```
+  配置例子: method=zscore,mean=0.0,standard_deviation=10.0
+  计算公式: x = (x - mean) / standard_deviation
+  ```
+
+  - minmax
+
+  ```
+  配置例子: method=minmax,min=2.1,max=2.2
+  计算公式: x = (x - min) / (max - min)
+  ```
+
+  - expression，表达式配置方式详见**ExprFeature**
+
+  ```
+  配置例子: method=expression,expr=sign(x)
+  计算公式: 可以配置任意的函数或表达式，变量名固定为x，代表表达式的输入
+  ```
+
+连续值类特征可以先使用分箱组件+进行离散化，可以进行等频/等距/自动离散化，变成离散值。分箱组件使用方法见:
+[机器学习组件](https://help.aliyun.com/zh/pai/user-guide/binning)
+
+```
+feature_configs {
+    raw_feature {
+        feature_name: "ctr"
+        expression: "item:ctr"
+        boundaries: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        embedding_dim: 8
+    }
+}
+feature_configs {
+    raw_feature {
+        feature_name: "price"
+        expression: "item:price"
+        embedding_dim: 8
+        mlp {}
+    }
+}
+feature_configs {
+    raw_feature {
+        feature_name: "price"
+        expression: "item:price"
+        embedding_dim: 8
+        autodis {
+           num_channels: 3
+           temperature: 0.1
+           keep_prob: 0.8
+        }
+    }
+}
+```
+
+- **boundaries**: 分箱/分桶的边界值，通过一个数组来设置。分箱区间**左闭右开**，如`boundaries: [0.0, 1.0, 2.0]`分成`(-inf, 0.0)`、`[0.0, 1.0)`、`[1.0, 2.0)`、`[2.0, +inf)`四个桶。
+- **mlp**: 由一层MLP变换特征到`embedding_dim`维度
+- **autodis**: 由AutoDis模块变换特征到`embedding_dim`维度，详见[AutoDis文档](./autodis.md)
+
+Embedding特征: 支持string类型如`"0.1|0.2|0.3|0.4"`；支持ARRAY\<float>类型如`[0.1,0.2,0.3,0.4]`（建议，性能更好），配置方式如下
+
+```
+feature_configs {
+    raw_feature {
+        feature_name: "pic_emb"
+        expression: "item:pic_emb"
+        separator: "|"
+        value_dim: 4
+    }
+}
+```
+
+- **separator**: FG多值分隔符，默认为`\x1d`，只在`value_dim`大于1时生效
+- **value_dim**: 默认值为1， 指定Embedding特征的输入维度。注意输入按分隔符切分出来的值个数必须等于`value_dim`
+
+## ComboFeature: 组合特征
+
+对输入的离散值进行组合（即笛卡尔积）, 如age + cate:
+
+```
+feature_configs {
+    combo_feature {
+        feature_name: "combo_age_cate"
+        expression: ["user:age", "item:cate"]
+        embedding_dim: 16
+        hash_bucket_size: 1000
+    }
+}
+```
+
+- expression: 特征FG所依赖组合字段的来源，数量 >= 2
+- 其余配置同IdFeature，NOTE: ComboFeature不包含`num_buckets`配置
+
+## CombineFeature: 组合映射特征
+
+通过`value_map`映射输入值到浮点值，支持离散（sparse）和连续（dense）两种输出模式。当设置了`boundaries`或`num_buckets`分箱配置时为离散输出，否则为连续输出。
+
+注意: CombineFeature不支持`hash_bucket_size`、`zch`、`dynamicemb`、`vocab_list`、`vocab_dict`、`vocab_file`配置，仅支持`num_buckets`和`boundaries`两种离散化方式。
+
+**输入示例**
+
+| 字段   | 值              | 说明                                                |
+| ------ | --------------- | --------------------------------------------------- |
+| tag    | "tag1\\x1dtag2" | 多值输入，通过value_map分别映射为1.0和2.0后聚合     |
+| weight | "1.5\\x1d2.5"   | 不使用value_map时，多值连续值输入，通过combiner聚合 |
+
+使用`value_map`和`num_buckets`的离散化用法：
+
+```
+feature_configs {
+    combine_feature {
+        feature_name: "tag_feat"
+        expression: "user:tag"
+        embedding_dim: 16
+        num_buckets: 100
+        combiner: "sum"
+        value_map: [{key:"tag1" value:1.0}, {key:"tag2" value:2.0}]
+    }
+}
+```
+
+不使用`value_map`的连续值用法：
+
+```
+feature_configs {
+    combine_feature {
+        feature_name: "weight_list"
+        expression: "user:weight"
+        boundaries: [0.1, 0.5, 1.0, 2.0, 5.0]
+        embedding_dim: 8
+        combiner: "sum"
+    }
+}
+```
+
+- **expression**: 特征FG所依赖的字段来源，由两部分组成`input_side`:`input_name`
+- **value_map**: 输入字符串值到浮点值的映射，可与`num_buckets`或`boundaries`配合使用。不在映射表里的值会被**跳过**（不参与聚合，也不计入`mean`/`count`的个数）
+- **combiner**: 如果输入为多值，可以设置combiner来对值进行聚合，默认为`sum`，支持`sum`/`mean`(`avg`)/`min`/`max`/`count`
+- **num_buckets**: 离散化桶数量，设置后输出为离散整数值（value_type为int64），值范围为\[0, num_buckets)。注意聚合结果会先转成整数再分箱，所以`mean`等非整数结果会被截断
+- **boundaries**: 分箱/分桶的边界值，通过一个数组来设置
+- **normalizer**: 连续值变换方式，支持`log10`/`zscore`/`minmax`/`expression`。注意与RawFeature不同，这里的归一化作用在**聚合之后**的结果上，即`log10(sum(x))`而不是`sum(log10(x))`
+
+## LookupFeature: 字典查询特征
+
+`lookup_feature`依赖`map`和`key`两个字段从一组kv中匹配特征值。生成特征时，使用key在map字段所持有的kv对中进行匹配，获取最终的特征。
+
+`map`是一个多值的kv map，支持string类型，如`"k1:v1\x1dk2:v2"`，其中`:`为kv分割符，`\x1d`为固定的多值分隔符；也支持MAP\<string,bigint>/MAP\<bigint,bigint>等MAP类型，如`{"k1":v1,"k2":v2}`（建议，性能更好）
+
+`key`是一个多值的id，多值分隔符可以由**separator**指定，默认为`\x1d`。
+
+```
+feature_configs {
+    lookup_feature {
+        feature_name: "user_cate_cnt"
+        map: "user:kv_cate_cnt"
+        key: "item:cate"
+        embedding_dim: 16
+        boundaries: [0, 1, 2, 3, 4]
+    }
+}
+```
+
+- **map**: 特征FG所依赖map字段的来源
+- **key**: 特征FG所依赖key字段的来源
+- **combiner**: 如果key为多值，可以设置combiner来对查找的值进行聚合，默认为`sum`，支持`sum`/`mean`(`avg`)/`min`/`max`/`count`。配置为空字符串时不做聚合，直接输出查到的多个值（`need_discrete=true`时会自动置空）
+- **default_value**: 没查到时的取值，默认为`0`。注意配置为空字符串时FG会不输出任何值，离散特征在模型中的嵌入为零向量；序列特征不支持空默认值，TorchEasyRec会把它重置为`"0"`
+- **need_discrete**: 查到的值是否为离散值，默认为false
+- **need_key**: 查到的值是否拼接key作为前缀，默认为false。只在输出是字符串（即配置了`hash_bucket_size`/`num_buckets`/`vocab_list`/`vocab_dict`/`vocab_file`或`need_discrete=true`）时生效
+
+如果Map的值为离散值 或 `need_key=true`，可设置:
+
+- **value_dim**: 默认值是1，可以设置0，value_dim=0时支持多值ID输出
+- 其余配置同IdFeature
+
+如果Map的值为连续值，可设置:
+
+- **value_dim**: 默认值是1，连续值输出维度
+- 其余配置同RawFeature
+
+## MatchFeature: 主从键字典查询特征
+
+`match_feature`依赖`nested_map`和`pkey`和`skey`三个字段从kkv中匹配到特征值。`nested_map`是一个多值的kkv map，如`pk1^sk1:0.2,sk2:0.3,sk3:0.5|pk2^sk4:0.1`，`:`为内层kv分割符，`,`为内层多值分隔符，`^`为外层kv分割符，`|`为外层KV分隔符，分隔符不可以指定；也支持MAP\<K, string>类型（K为string/bigint），如`{"pk1":"sk1:0.2,sk2:0.3,sk3:0.5","pk2":"sk4:0.1"}`（建议，性能更好）。生成特征时，使用`pkey`作为主键`skey`作为子健在`nested_map`字段所持有的kkv对中进行匹配，获取最终的特征。
+
+```
+feature_configs {
+    match_feature {
+        feature_name: "user_cate_brand_cnt"
+        nested_map: "user:kkv_cate_brand_cnt"
+        pkey: "item:cate"
+        skey: "item:brand"
+        embedding_dim: 16
+        boundaries: [0, 1, 2, 3, 4]
+    }
+}
+```
+
+- **nested_map**: 特征FG所依赖nested_map字段的来源
+- **pkey**: 特征FG所依赖主键字段的来源。可以设置为ALL，将匹配所有pkey下面的指定的skey的值
+- **skey**: 特征FG所依赖子键字段的来源。可以设置为ALL，将指定pkey下面所有skey的值
+- **need_discrete**: 查到的值是否为离散值，默认为false。配置为true时输出必须是字符串，即必须同时配置`hash_bucket_size`/`num_buckets`/`vocab_list`/`vocab_dict`/`vocab_file`之一
+- **show_pkey**: 查到的值是否拼接pkey作为前缀，默认为false
+- **show_skey**: 查到的值是否拼接skey作为前缀，默认为false。`show_pkey`/`show_skey`只在`need_discrete=true`时生效
+
+如果Map的值为离散值 或 `show_pkey=true` 或 `show_skey=true`，可设置:
+
+- **value_dim**: 默认值是1，可以设置0，value_dim=0时支持多值ID输出
+- 其余配置同IdFeature
+
+如果Map的值为连续值，可设置:
+
+- **value_dim**: 目前只支持value_dim=1
+- 其余配置同RawFeature
+
+## ExprFeature: 表达式特征
+
+对数值型特征进行运算，如判断当前用户年龄是否>18，用户年龄是否符合物品年龄需求等。
+
+```
+feature_configs {
+    expr_feature {
+        feature_name: "combo_age_cate"
+        variables: ["user:u_age", "item:i_age"]
+        expression: "u_age == i_age ? 1 : 0"
+        embedding_dim: 8
+        boundaries: [0.5]
+    }
+}
+```
+
+- **variables**: 特征FG所依赖表达式中的字段的来源
+
+- **expression**: 表达式本身
+
+- **value_dim**: 默认值是0，value_dim=0时支持多值ID输出
+
+- **default_value**: 表达式结果为NaN/Inf或输入为空时的取值，默认为`0`。注意配置为空字符串时FG会丢弃该值而不是输出默认值；序列特征不支持空默认值，TorchEasyRec会把它重置为`"0"`
+
+- **fill_missing**: 变量长度不一致时的填充值，默认为NaN。注意长度为1的变量会被广播成最长变量的长度，不走填充逻辑，即只有长度为0或者长度介于2和最大长度之间的变量才会被填充
+
+- **fg_value_type**: 表达式的计算与输出类型，默认是`float`，可选`double` / `int32` / `int64`。
+  需要精确的整数输出（如0/1的Mask）时配置为`int64`。注意`int`类型不能与`boundaries`或
+  `hash_bucket_size`同时使用（FG会先把值四舍五入成整数，分桶结果不符合预期），配置了会报错
+
+- **num_buckets**: 表达式输出为整数ID时的ID数目，ID取值范围为\[0, num_buckets)，配置后
+  `fg_value_type`默认为`int64`
+
+- **hash_bucket_size**: 对表达式输出做Hash分桶的桶数目，Hash基于字符串值计算，
+  故只能与浮点类型的`fg_value_type`一起使用
+
+- **内置函数**: 详见[表达式文档](https://help.aliyun.com/zh/airec/what-is-pai-rec/user-guide/built-in-feature-operator?#1d09c2da3aajb)
+
+  | 函数名      | 参数数量 | 解释                                                                    |
+  | ----------- | -------- | ----------------------------------------------------------------------- |
+  | rnd         | 0        | Generate a random number between 0 and 1                                |
+  | isnan       | 1        | 输入为NaN时返回1.0，否则返回0.0（pyfg>=1.0.5）                          |
+  | sin         | 1        | sine function                                                           |
+  | cos         | 1        | cosine function                                                         |
+  | tan         | 1        | tangens function                                                        |
+  | asin        | 1        | arcus sine function                                                     |
+  | acos        | 1        | arcus cosine function                                                   |
+  | atan        | 1        | arcus tangens function                                                  |
+  | sinh        | 1        | hyperbolic sine function                                                |
+  | cosh        | 1        | hyperbolic cosine                                                       |
+  | tanh        | 1        | hyperbolic tangens function                                             |
+  | asinh       | 1        | hyperbolic arcus sine function                                          |
+  | acosh       | 1        | hyperbolic arcus tangens function                                       |
+  | atanh       | 1        | hyperbolic arcur tangens function                                       |
+  | log2        | 1        | logarithm to the base 2                                                 |
+  | log10       | 1        | logarithm to the base 10                                                |
+  | log         | 1        | logarithm to base e (2.71828...)                                        |
+  | ln          | 1        | logarithm to base e (2.71828...)                                        |
+  | exp         | 1        | e raised to the power of x                                              |
+  | sqrt        | 1        | square root of a value                                                  |
+  | sign        | 1        | sign function -1 if x\<0; 1 if x>0                                      |
+  | abs         | 1        | absolute value                                                          |
+  | rint        | 1        | round to nearest integer                                                |
+  | floor       | 1        | 向下取整                                                                |
+  | ceil        | 1        | 向上取整                                                                |
+  | trunc       | 1        | 截断取整（直接去掉小数部分）                                            |
+  | round       | 1        | 四舍五入，总是使用"远离零"的舍入方式（round half away from zero）       |
+  | roundp      | 2        | 自定义精度取整函数, e.g. roundp(3.14159,2)=3.14                         |
+  | mod         | 2        | 取余, e.g. mod(7,3)=1                                                   |
+  | sigmoid     | 1        | sigmoid function                                                        |
+  | sphere_dist | 4        | sphere distance between two gps points, args(lng1, lat1, lng2, lat2)    |
+  | haversine   | 4        | haversine distance between two gps points, args(lng1, lat1, lng2, lat2) |
+  | min         | var.     | min of all arguments                                                    |
+  | max         | var.     | max of all arguments                                                    |
+  | sum         | var.     | sum of all arguments                                                    |
+  | avg         | var.     | mean value of all arguments                                             |
+
+备注：上述内置函数支持批量计算和广播机制
+
+- **内置向量函数**:
+
+  | 函数名       | 参数数量 | 解释                                                  |
+  | ------------ | -------- | ----------------------------------------------------- |
+  | len          | 1        | the length of a vector                                |
+  | l2_norm      | 1        | l2 normalize of a vector                              |
+  | squared_norm | 1        | squared normalize of a vector                         |
+  | dot          | 2        | dot product of two vectors                            |
+  | euclid_dist  | 2        | euclidean distance between two vectors                |
+  | corr         | 2        | Pearson correlation coefficient between two vectors   |
+  | std_dev      | 1        | standard deviation of a vector, divide n              |
+  | pop_std_dev  | 1        | population standard deviation of a vector, divide n-1 |
+  | variance     | 1        | sample variance of a vector, divide n                 |
+  | pop_variance | 1        | population variance of a vector, divide n-1           |
+  | reduce_min   | 1        | reduce min of a vector                                |
+  | reduce_max   | 1        | reduce max of a vector                                |
+  | reduce_sum   | 1        | reduce sum of a vector                                |
+  | reduce_mean  | 1        | reduce mean of a vector                               |
+  | reduce_prod  | 1        | reduce product of a vector                            |
+
+备注：当表达式包含上述内置向量函数时，非向量函数参数的其他变量只能是单值类型(scalar)。
+
+- **内置二元操作符**:
+
+  | 操作符 | 描述                      | 优先级 |
+  | ------ | ------------------------- | ------ |
+  | \|\|   | logical or                | 1      |
+  | &&     | logical and               | 2      |
+  | \|     | bitwise or                | 3      |
+  | &      | bitwise and               | 4      |
+  | \<=    | less or equal             | 5      |
+  | >=     | greater or equal          | 5      |
+  | !=     | not equal                 | 5      |
+  | ==     | equal                     | 5      |
+  | >      | greater than              | 5      |
+  | \<     | less than                 | 5      |
+  | +      | addition                  | 6      |
+  | -      | subtraction               | 6      |
+  | \*     | multiplication            | 7      |
+  | /      | division                  | 7      |
+  | ^      | raise x to the power of y | 8      |
+  | %      | modulo                    | 7      |
+
+- 支持临时变量和逗号表达式，如`x=roundp(a),(a-x)*b`，其中`x`是临时变量，不需要配置在`variables`中
+
+- **内置三元操作符**
+
+  | 操作符 | 描述                  | 优先级           |
+  | ------ | --------------------- | ---------------- |
+  | ?:     | if then else operator | C++ style syntax |
+
+- **内置常量**
+
+  | 操作符 | 描述                 | 优先级                     |
+  | ------ | -------------------- | -------------------------- |
+  | \_pi   | The one and only pi. | 3.141592653589793238462643 |
+  | \_e    | Euler's number.      | 2.718281828459045235360287 |
+
+- 其余配置同RawFeature
+
+- **序列Mask用法**: 表达式特征可以作为序列的Mask，配合下文的BoolMaskFeature
+  筛选出序列中符合条件的元素，如只保留与目标物品同类目的点击序列。Mask特征只作为FG的中间结果，
+  需配置`stub_type: true`，并用`fg_value_type: "int64"`输出0/1
+
+  ```
+  feature_configs {
+      sequence_feature {
+          sequence_name: "click_seq"
+          sequence_length: 50
+          sequence_delim: ";"
+          features {
+              expr_feature {
+                  feature_name: "is_same_cate"
+                  variables: ["item:cate", "item:tgt_cate"]
+                  sequence_fields: ["cate"]
+                  expression: "cate == tgt_cate"
+                  fg_value_type: "int64"
+                  stub_type: true
+              }
+          }
+          features {
+              bool_mask_feature {
+                  feature_name: "masked_iid"
+                  expression: ["item:iid", "feature:click_seq__is_same_cate"]
+                  embedding_dim: 16
+                  num_buckets: 1000
+              }
+          }
+      }
+  }
+  ```
+
+  其中`sequence_fields`指定表达式中的哪些字段是序列字段，未指定的item侧字段（如目标物品的
+  `tgt_cate`）为单值。BoolMaskFeature通过`feature:<sequence_name>__<feature_name>`
+  引用Mask特征。该用法需要`data_config.fg_mode`为`FG_DAG`
+
+## OverlapFeature: 重合匹配特征
+
+`overlap_feature`会计算`query`和`title`两个字段字词重合比例，`query`和`title`中字词的分割符默认为`\x1d`，可以用多值分隔符由**separator**指定，注意配置后FG会同时按`\x1d`和配置的符号切分。
+
+```
+feature_configs {
+    overlap_feature {
+        feature_name: "user_cate_cnt"
+        query: "user:query"
+        title: "item:title"
+        method: "title_common_ratio"
+        embedding_dim: 8
+        boundaries: [0.2, 0.5, 0.8]
+    }
+}
+```
+
+- **query**: 特征FG所依赖query字段的来源
+
+- **title**: 特征FG所依赖title字段的来源
+
+- **method**: 重合计算方式，可选 is_equal | is_contain | index_of | query_common_ratio | title_common_ratio | proximity_min_dist | proximity_max_dist | proximity_avg_dist | proximity_min_cover，含义见下表
+
+  | 方式                | 描述                                                        | 备注                                                          |
+  | ------------------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
+  | query_common_ratio  | 计算query与title间重复term数占query中term比例               | 取值为[0,1]                                                   |
+  | title_common_ratio  | 计算query与title间重复term数占title中term比例               | 取值为[0,1]                                                   |
+  | is_contain          | 计算query是否全部包含在title中，保持顺序                    | 0表示未包含，1表示包含                                        |
+  | is_equal            | 计算query是否与title完全相同                                | 0表示不完全相同，1表示完全相同                                |
+  | index_of            | 计算query作为整体第一次出现在title中的位置                  | 没有出现返回-1.0                                              |
+  | proximity_min_cover | 计算query term在title中的邻近度                             | 取值为[0, length(title)], 0表示存在不能匹配的term             |
+  | proximity_min_dist  | 计算query term在title中的邻近度 (minimum pairwise distance) | 取值为[0, length(title)+1], length(title)+1表示没有匹配的term |
+  | proximity_max_dist  | 计算query term在title中的邻近度 (maximum pairwise distance) | 取值为[0, length(title)+1], length(title)+1表示没有匹配的term |
+  | proximity_avg_dist  | 计算query term在title中的邻近度 (average pairwise distance) | 取值为[0, length(title)+1], length(title)+1表示没有匹配的term |
+
+- 其余配置同RawFeature，但不支持`default_value`、`value_dim`和`hash_bucket_size`等类别型分箱。
+  输入为空时的取值由FG决定：`index_of`为`-1`，其余method为`0`，配置`boundaries`时需要注意
+
+## TokenizeFeature: 分词特征
+
+`tokenize_feature` 对输入字符串分词，返回分词之后的词id。支持tokenize-cpp的分词词典文件。
+
+```
+feature_configs {
+    tokenize_feature {
+        feature_name: "title_token"
+        expression: "item:title"
+        vocab_file: "tokenizer.json"
+        embedding_dim: 8
+        text_normalizer {
+            norm_options: [TEXT_UPPER2LOWER, TEXT_SBC2DBC, TEXT_CHT2CHS, TEXT_FILTER]
+        }
+    }
+}
+```
+
+- **expression**: 特征FG所依赖分词字段的来源
+
+- **vocab_file**: 分词字典，完全兼容 https://github.com/mlc-ai/tokenizers-cpp 库的分词文件。未配置时自动取 `prompt_config.tokenizer_path`（未声明 `prompt_config` 时必须配置，否则创建特征时报错）；作为 inline slot 使用时，内容与之不一致会在 prompt 编译时报错
+
+- **embedding_dim** 可省略：省略时该特征不建 embedding 表，分词 id 直接作为 prompt_config 中 inline slot 的 token 输入；仅序列形态可 inline，即 `tokens_as_sequence: true`、`sequence_tokenize_feature` 或 `sequence_feature` 的子特征
+
+- **tokenizer_type**: 分词类型，默认为`bpe`。`bpe`表示用huggingface tokenizers的json词典，具体是BPE还是WordPiece等由`tokenizer.json`的内容决定；`sentencepiece`表示用sentencepiece模型
+
+- **default_value**: 输入为空时的默认值。注意该默认值是**文本**，会跟正常输入一样被分词。
+  序列特征（包括`tokens_as_sequence: true`）不支持空默认值，未配置时会被重置为`"0"`
+
+- **text_normalizer**: 可选，是否对文本进行归一化
+
+  - **max_length**: 可选，默认不限制。输入长度超过该值时**跳过归一化，原样输出原始文本**（不是截断），并且每条超长记录都会打一条ERROR日志。长度按**GBK编码的字节数**计算，中文和全角字符算2字节，ASCII算1字节，即`max_length: 512`约等于512个英文字符或256个汉字
+  - **stop_char_file**: 特殊符号表路径，默认为系统内置，详见[stop_char](https://tzrec.oss-accelerate.aliyuncs.com/third_party/stop_char)。文件必须是**GBK编码**、每行一个字符，配置后会**替换**（而不是追加）内置的特殊符号表
+  - **norm_options**: 归一化选项，默认为TEXT_UPPER2LOWER, TEXT_SBC2DBC, TEXT_CHT2CHS, TEXT_FILTER。注意`TEXT_REMOVE_SPACE`不是归一化选项而是单独的开关，只配它等价于没有配置归一化选项，FG会按默认选项归一化，也就是说无法表达“只去空格、不做其他归一化”
+
+  | 方式              | 描述                   |
+  | ----------------- | ---------------------- |
+  | TEXT_LOWER2UPPER  | 小写转换成大写         |
+  | TEXT_UPPER2LOWER  | 大写转换成小写         |
+  | TEXT_SBC2DBC      | 全角到半角             |
+  | TEXT_CHT2CHS      | 繁体到简体             |
+  | TEXT_FILTER       | 特殊符号替换成空格     |
+  | TEXT_SPLITCHRS    | 中文拆成单字(空格分隔) |
+  | TEXT_REMOVE_SPACE | 去除空格               |
+
+- **tokens_as_sequence**: 可选，默认为false。当设为true时，将分词结果作为序列（每个token作为一个序列元素，value_dim=1），可直接输入到sequence_encoder模块（如PoolingEncoder、SelfAttentionEncoder等），通过EmbeddingCollection获取每个token的embedding，输出形状为`(B, T, D)`。这与`sequence_tokenize_feature`不同，后者将输入视为以`sequence_delim`分隔的多段文本序列。使用时需同时设置`sequence_length`指定最大序列长度。
+
+  ```
+  feature_configs {
+      tokenize_feature {
+          feature_name: "title_token"
+          expression: "item:title"
+          vocab_file: "tokenizer.json"
+          embedding_dim: 8
+          tokens_as_sequence: true
+          sequence_length: 32
+      }
+  }
+  ```
+
+## KvDotProduct: KeyValue点积特征
+
+计算两个key-value索引的向量的点积，或两个集合的交集的大小。
+
+```
+feature_configs {
+    kv_dot_product {
+        feature_name: "query_doc_sim"
+        query: "user:query"
+        document: "item:title"
+        separator: "|"
+        default_value: "0"
+    }
+}
+```
+
+- **query**: 描述该feature所依赖的query字段来源
+
+- **document**: 描述该feature所依赖的document字段来源
+
+示例
+
+| query              | document           | output |
+| ------------------ | ------------------ | ------ |
+| "a:0.5\|b:0.5"     | "d:0.5\|b:0.5"     | 0.25   |
+| ["a:0.5", "b:0.5"] | ["d:0.5", "b:0.5"] | 0.25   |
+| {"a":0.5, "b":0.5} | {"d":0.5, "b":0.5} | 0.25   |
+| ["a:0.5", "b:0.5"] | {"d":0.5, "b":0.5} | 0.25   |
+| ["a", "b", "c"]    | ["a", "b", "d"]    | 2.0    |
+| ["a", "b", "c"]    | "a\|b\|d"          | 2.0    |
+| ["a", "b", "c"]    | {"a":0.5, "b":0.5} | 1.0    |
+
+- **kv_delimiter**: 可选项，指定输入特征中的kv对之间的分隔符，默认为 ":"，只能是单个符号
+
+- **normalizer**: 可选项，连续值变换方式，用法同RawFeature
+
+- 其余配置同RawFeature，但输出固定为单值（`value_dim`恒为1），也不支持`hash_bucket_size`等类别型分箱
+
+## BoolMaskFeature：布尔值过滤
+
+通过布尔值过滤元素，类似tf.boolean_mask(tensor, mask).
+
+```
+feature_configs {
+    bool_mask_feature {
+        feature_name: "query_doc_sim"
+        expression: ["user:click_items", "item:is_valid"]
+        embedding_dim: 16
+        hash_bucket_size: 1000
+        separator: ","
+    }
+}
+```
+
+- **expression**:该feature所依赖的字段来源,第一个字段表示字段的取值, 第二个字段表示对第一个字段的取值进行Mask
+
+  - Mask为字符串类型时，只有空串和`false`表示False，其余取值（包括`"0"`）都是True；
+    需要用0/1做Mask时，输入要是整型数组而不是字符串
+
+- 每个保留下来的元素只输出第一个值：FG内部把该特征当作序列特征处理并把`value_dim`归一为1，所以配置`value_dim: 0`也不会输出元素内的多值
+
+- 其余配置同IdFeature
+
+示例
+
+| 输入            | mask                    | 未进行bucketize的输出 |
+| --------------- | ----------------------- | --------------------- |
+| "123,456,90,80" | "true,false,true,false" | ["123", "90"]         |
+| "123,456,90,80" | [1, 0, 1, 0]            | ["123", "90"]         |
+| [1, 2, 3, 4]    | [1, 0, 1, 0]            | [1, 3]                |
+| [1, 2, 3, 4]    | "true,false,true,false" | [1, 3]                |
+
+## RegexReplaceFeature: 正则替换特征
+
+`regex_replace_feature`用正则表达式（[RE2语法](https://github.com/google/re2/wiki/Syntax)）替换输入文本中匹配的片段，可以配置多个pattern，匹配任一pattern的片段都会被替换。
+
+```
+feature_configs {
+    regex_replace_feature {
+        feature_name: "query_clean"
+        expression: "user:query"
+        regex_pattern: ["\\|", "#"]
+        replacement: " "
+        embedding_dim: 32
+        hash_bucket_size: 100000
+    }
+}
+```
+
+- **expression**: 特征FG所依赖字段的来源
+
+- **regex_pattern**: 必选项，正则表达式，`string`或`list<string>`类型，配置多个时取并集
+
+- **replacement**: 替换文本，可以用`\\1`引用pattern中的捕获组；为空时删除匹配的文本片段
+
+- **replace_all**: 是否全局替换，默认为true；设为false时只替换第一次匹配到的片段
+
+- **icase**: 匹配时是否忽略大小写，默认为false
+
+- **value_dim**: 输出值的维度，默认为1。为1时输出列的类型是单值`string`，为其他值时是`array<string>`，`tokenize_feature`等下游算子只接受单值输入。注意它不会截断输出，多值（array）输入的每个元素都会被替换，输出值的个数由输入决定
+
+- **default_value**: 输入为空时的默认值，默认值会**原样输出，不经过正则替换**；不配置时，输入为空则不输出任何值
+
+- 分箱支持`hash_bucket_size`/`vocab_list`/`vocab_dict`/`vocab_file`/`num_buckets`，其中`num_buckets`要求替换后的文本都能转成`[0, num_buckets)`的整数，非数字的文本会导致FG报错
+
+- 在分词前截断文本并追加EOS token的用法，见[FAQ](../faq.md)
+
+- **separator**: 只在序列场景下用来切分序列元素内的多值字符串，非序列的字符串输入不会按它切分
+
+- 其余配置同IdFeature
+
+示例
+
+| 输入               | regex_pattern               | replacement | 未进行bucketize的输出 |
+| ------------------ | --------------------------- | ----------- | --------------------- |
+| 中华\|人民\|共和国 | `["\\\|"]`                  | `" "`       | 中华 人民 共和国      |
+| a\|b#c(d)          | `["\\\|", "#", "\\(.*\\)"]` | `""`        | abc                   |
+
+## CustomFeature: 自定义特征
+
+自定义特征，自定义方式参考[自定义算子文档](https://help.aliyun.com/zh/airec/what-is-pai-rec/user-guide/custom-feature-operator)
+
+```
+feature_configs {
+    custom_feature {
+        feature_name: "edit_distance"
+        operator_name: "EditDistance"
+        operator_lib_file: "pyfg/lib/libedit_distance.so"
+        expression: ["user:query", "item:title"]
+        operator_params {
+            fields {
+                key: "encoding"
+                value {
+                    string_value: "utf-8"
+                }
+            }
+        }
+    }
+}
+```
+
+- operator_name: 特征算子注册的名字，建议与实现的类名保持一致
+
+- operator_lib_file: 指定特征算子动态库文件的路径，必须以.so结尾，需使用`_GLIBCXX_USE_CXX11_ABI=1`编译。如果是`pyfg/lib/`开头的路径，则为pyfg官方自定义so
+
+- operator_lib_cxx11abi0_file: 可选，指定使用`_GLIBCXX_USE_CXX11_ABI=0`编译的特征算子动态库文件的路径，仅在生成MaxCompute FG的fg json（`tzrec.tools.create_fg_json`）时使用，会作为MaxCompute资源上传，生成的fg json中的参数名仍为`operator_lib_file`。使用自定义算子跑MaxCompute FG时必须配置该参数；`pyfg/lib/`开头的官方算子so由MaxCompute FG自行提供并上传，无需配置该参数
+
+- expression: 特征FG所依赖组合字段的来源
+
+- operator_params: 特征算子的自定义参数，是一个[google.protobuf.Struct](https://protobuf.dev/reference/protobuf/google.protobuf/#struct)对象
+
+  - key: 参数名
+  - value: 参数值，是一个[google.protobuf.Value](https://protobuf.dev/reference/protobuf/google.protobuf/#value)对象，常用：
+    - number_value: 值为数值
+    - string_value: 值为字符串
+    - bool_value: 值为布尔
+
+- **value_dim**: 默认值为1，即算子输出取单值；算子输出多值时需要显式配置为0，否则每个元素只保留第一个值
+
+- **normalizer**: 只在数值型输出时生效，配置了类别型分箱（`hash_bucket_size`/`vocab_list`等）时FG会忽略它
+
+- 算子的`value_type`由分箱配置决定：配置`num_buckets`时为`int64`，配置`hash_bucket_size`/`vocab_*`时为`string`，
+  否则为`float`。算子需要实现对应的`ProcessWith*`方法，否则运行时会报错
+
+- **is_op_thread_safe**: 默认为false，即每个线程持有一份算子实例；算子本身线程安全时可以配置为true
+
+- 算子参数中以`_file`结尾的资源文件不会被自动收集到导出目录，需要自行保证在线离线路径一致
+
+- 其余配置如果是类别型特征同IdFeature，如果是数值型特征同RawFeature
+
+| 算子名称     | 算子功能                                | 算子动态库                   | 算子参数                                                                         |
+| ------------ | --------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------- |
+| EditDistance | 编辑距离                                | pyfg/lib/libedit_distance.so | • encoding: 输入文本的编码，可选：utf-8, latin，默认值为latin                    |
+| RegexReplace | 正则替换，建议直接用RegexReplaceFeature | pyfg/lib/libregex_replace.so | • regex_patten: 正则表达式，匹配的文本片段将会被替换 <br>• replacement: 替换文本 |
+|              |                                         |                              |                                                                                  |
+
+## SequenceFeature：序列特征
+
+序列特征分为**分组序列特征**和**普通序列特征**两种
+
+### 分组序列特征
+
+分组序列特征的子序列格式一般为`XX;XX;XX`，如用户点击的Item的序列特征为`item_id1;item_id2;item_id3`，其中`;`为序列分隔符，也支持ARRAY类型，详建下文。
+
+分组序列特征支持使用物品或行为的属性构建一组子序列，如类目序列`cate1;cate2;cate1`、品牌序列`brand1;brand2;brand1`、行为时间序列`ts1;ts2;ts3`等。一条样本中，同一分组的子序列的长度需要保持相同。
+
+分组序列特征在线上模型服务时比其他序列特征更加高效，只需传递`sequence_pk`，线上模型服务从物品特征内存Cache中关联出物品属性子特征的序列，无需从请求中传递。
+
+分组序列特征支持前文中**所有子特征类型**。
+
+```
+# 分组序列特征
+feature_configs {
+    sequence_feature {
+        sequence_name: "click_seq"
+        sequence_length: 50
+        sequence_delim: ";"
+        sequence_pk: "user:click_seq_pk"
+        features {
+            id_feature {
+                feature_name: "item_id"
+                expression: "item:iid"
+                embedding_dim: 32
+                hash_bucket_size: 100000
+            }
+        }
+        features {
+            id_feature {
+                feature_name: "cate"
+                expression: "item:cate"
+                embedding_dim: 32
+                hash_bucket_size: 1000
+            }
+        }
+        features {
+            raw_feature {
+                feature_name: "ts"
+                expression: "user:ts"
+            }
+        }
+        features {
+            lookup_feature {
+                feature_name: "user_cate_cnt"
+                map: "user:kv_cate_cnt"
+                key: "item:cate"
+                embedding_dim: 16
+                boundaries: [0, 1, 2, 3, 4]
+            }
+        }
+        features {
+            lookup_feature {
+                feature_name: "user_search_cate_cnt"
+                map: "user:kv_search_cate_cnt"
+                key: "user:searched_cate"
+                sequence_fields: ["searched_cate"]
+                embedding_dim: 16
+                boundaries: [0, 1, 2, 3, 4]
+            }
+        }
+        features {
+            combine_feature {
+                feature_name: "event_type"
+                expression: "user:event"
+                embedding_dim: 16
+                num_buckets: 10
+                combiner: "sum"
+                value_map: [{key:"click" value:1.0}, {key:"buy" value:2.0}]
+            }
+        }
+        features {
+            expr_feature {
+                feature_name: "user_item_dist"
+                variables: ["user:ulng", "user:ulat", "item:ilng", "item:ilat"]
+                expression: "sphere_dist(ulng, ulat, ilng, ilat)"
+            }
+        }
+        features {
+            custom_feature {
+                feature_name: "seq_expr"
+                operator_name: "SeqExpr"
+                operator_lib_file: "pyfg/lib/libseq_expr.so"
+                expression: ["user:ulng", "user:ulat", "item:ilng", "item:ilat"]
+                operator_params {
+                    fields {
+                        key: "formula"
+                        value {
+                            string_value: "spherical_distance"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+- **sequence_name**: 序列特征名
+- **sequence_length**: 序列特征最大长度
+- **sequence_delim**: 序列特征分隔符
+- **sequence_pk**: 序列特征主键，一般为ItemId列表，主要用于线上模型服务，线上模型服务会使用该ItemId列表从物品特征内存Cache中关联出物品属性子特征的序列，无需从请求中传递。而行为属性相关子序列（如行为时间序列`ts1;ts2;ts3`）跟用户相关，则仍需从请求从传递。
+- **sequence_entity**: 可选，指定该序列组在线上模型服务中关联的FeatureStore实体名，例如`sequence_entity: "app"`。实体名须是 TorchEasyRec Processor fs_entity 配置中列出的实体之一。
+- **features**: 序列特征子特征，配置同对应的子特征类型的配置
+  - **feature_name**: 子特征特征名，完整的子特征名应拼接上`${sequence_name}__`前缀，以上述配置中`item_id`子特征为例，子特征名列名应为`click_seq__item_id`
+  - **expression**: 特征FG所依赖子特征字段来源名，由两部分组成`input_side`:`input_name`。
+    - 在线上模型服务中，如果子特征的`input_side`为`item`，子序列无需从请求中传递；如果子特征的`input_side`为`user`，子序列需要从请求中传递。
+  - **sequence_fields**: (可选) 指定每个序列子特征的序列类型的输入字段名，序列类型的字段在输入样本数据中列名应拼接上`${sequence_name}__`前缀
+    - 在不指定sequence_fields的情况下:
+      - 对于只有一个输入字段的特征算子（如: IdFeature，RawFeature，TokenizeFeature等），`input_side != feature`的输入字段默认是序列类型
+        - 以上述配置中`item_id`子特征为例，`item:iid`对应的输入样本数据中列名应为`click_seq__iid`
+      - 对于输入字段大于一个的特征算子（如: LookupFeature，ComboFeature等），`input_side == item`的输入字段默认是序列类型，其余输入字段默认不是序列类型
+        - 以上述配置中`user_cate_cnt`子特征为例，`item:cate`对应的输入样本数据中列名应为`click_seq__cate`，`user:kv_cate_cnt`对应的输入样本数据中列名应为`kv_cate_cnt`
+    - 在指定sequence_fields的情况下：只有指定的字段认为是序列类型
+      - 以上述配置中`user_search_cate_cnt`子特征为例，`user:searched_cate`对应的输入样本数据中列名应为`click_seq__searched_cate`，`user:kv_search_cate_cnt`对应的输入样本数据中列名应为`kv_search_cate_cnt`
+  - 其中当特征值为离散值时（如IdFeature，ComboFeature等），value_dim的默认值与非序列的版本不同
+    - **value_dim**: 默认值是1，可以设置0，value_dim=0时支持多值ID输出
+- 序列类型的输入支持的类型:
+  - 支持string类型`item_id1;item_id2;item_id3`， 其中`;`为序列分隔符；
+  - 支持array\<string>或array\<bigint>类型为`[item_id1,item_id2,item_id3]`（建议，性能更好）；
+  - 支持多值序列array\<array\<string>>或array\<array\<bigint>>类型，多值序列需设置value_dim=0，通常情况下训练推理性能比单值序列差一些。
+  - 支持array\<float>为`[price1,price2,price3]`或者array\<array\<float>>类型为`[[emb11,emb12],[emb21,emb22]]`（建议，性能更好）。
+
+### 普通序列特征
+
+```
+# 普通特征
+feature_configs {
+    sequence_id_feature {
+        feature_name: "click_itemid_seq"
+        sequence_length: 50
+        sequence_delim: ";"
+        expression: "user:click_iid_seq"
+        embedding_dim: 32
+        hash_bucket_size: 100000
+    }
+}
+feature_configs {
+    sequence_raw_feature {
+        feature_name: "click_price_seq"
+        sequence_length: 50
+        sequence_delim: ";"
+        expression: "user:click_price_seq"
+    }
+}
+feature_configs {
+    sequence_combine_feature {
+        feature_name: "event_list"
+        expression: "user:event"
+        embedding_dim: 16
+        num_buckets: 10
+        combiner: "sum"
+        value_map: [{key:"click" value:1.0}, {key:"buy" value:2.0}]
+        sequence_length: 50
+        sequence_delim: ";"
+    }
+}
+feature_configs {
+    sequence_expr_feature {
+        feature_name: "seq_expr_2"
+        variables: ["user:ulng", "user:ulat", "item:ilng", "item:ilat"]
+        expression: "sphere_dist(ulng, ulat, ilng, ilat)"
+    }
+}
+feature_configs {
+    sequence_custom_feature {
+        feature_name: "seq_expr_1"
+        operator_name: "SeqExpr"
+        operator_lib_file: "pyfg/lib/libseq_expr.so"
+        expression: ["user:cur_time", "item:clk_time_seq"]
+        operator_params {
+            fields {
+                key: "formula"
+                value {
+                    string_value: "cur_time-clk_time_seq"
+                }
+            }
+        }
+    }
+}
+```
+
+- 配置同非序列版本，特征类型带`sequence_`前缀
+- 对于输入字段大于一个的特征算子（如: ExprFeature，LookupFeature，MatchFeature，ComboFeature，OverlapFeature，KvDotProduct等），`input_side == item`的输入字段默认是序列类型，其余输入字段默认不是序列类型
+  - **sequence_fields**: (可选) 指定哪些输入字段是序列类型，指定后只有指定的字段认为是序列类型。如上述`seq_expr_2`中，若行为时间序列从user侧传递（如`variables: ["user:request_time", "user:event_time"]`），需配置`sequence_fields: ["event_time"]`
+- 其中当特征值为离散值时（如IdFeature，ComboFeature等），value_dim的默认值与非序列的版本不同
+  - **value_dim**: 默认值是1，可以设置0，value_dim=0时支持多值ID输出

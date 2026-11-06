@@ -1,0 +1,910 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import copy
+import os
+import random
+from collections import OrderedDict
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+from torch import distributed as dist
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
+
+from tzrec.constant import Mode
+from tzrec.datasets.data_parser import DataParser
+from tzrec.datasets.sampler import BaseSampler, TDMSampler
+from tzrec.datasets.utils import (
+    C_NEG_SAMPLE_MASK,
+    C_SAMPLE_MASK,
+    CAND_POS_LENGTHS,
+    CKPT_ROW_IDX,
+    CKPT_SOURCE_ID,
+    DATA_TIMESTAMP,
+    HARD_NEG_INDICES,
+    Batch,
+    RecordBatchTensor,
+    build_sampler_input,
+    combine_negs_to_candidate_sequence,
+    expand_tdm_sample,
+    remove_nullable,
+)
+from tzrec.features.feature import BaseFeature
+from tzrec.prompt.assembler import OUTPUT_KEYS, PromptAssembler
+from tzrec.prompt.types import CompiledPrompt
+from tzrec.protos import data_pb2
+from tzrec.utils import config_util
+from tzrec.utils.load_class import get_register_class_meta
+from tzrec.utils.logging_util import logger
+
+_DATASET_CLASS_MAP = {}
+_READER_CLASS_MAP = {}
+_WRITER_CLASS_MAP = {}
+_dataset_meta_cls = get_register_class_meta(_DATASET_CLASS_MAP)
+_reader_meta_cls = get_register_class_meta(_READER_CLASS_MAP)
+_writer_meta_cls = get_register_class_meta(_WRITER_CLASS_MAP)
+
+AVAILABLE_PA_TYPES = {
+    pa.int64(),
+    pa.float64(),
+    pa.float32(),
+    pa.string(),
+    pa.int32(),
+    pa.list_(pa.int64()),
+    pa.list_(pa.float64()),
+    pa.list_(pa.float32()),
+    pa.list_(pa.string()),
+    pa.list_(pa.int32()),
+    pa.list_(pa.list_(pa.int64())),
+    pa.list_(pa.list_(pa.float64())),
+    pa.list_(pa.list_(pa.float32())),
+    pa.list_(pa.list_(pa.string())),
+    pa.list_(pa.list_(pa.int32())),
+    pa.map_(pa.string(), pa.int64()),
+    pa.map_(pa.string(), pa.float64()),
+    pa.map_(pa.string(), pa.float32()),
+    pa.map_(pa.string(), pa.string()),
+    pa.map_(pa.string(), pa.int32()),
+    pa.map_(pa.int64(), pa.int64()),
+    pa.map_(pa.int64(), pa.float64()),
+    pa.map_(pa.int64(), pa.float32()),
+    pa.map_(pa.int64(), pa.string()),
+    pa.map_(pa.int64(), pa.int32()),
+    pa.map_(pa.int32(), pa.int64()),
+    pa.map_(pa.int32(), pa.float64()),
+    pa.map_(pa.int32(), pa.float32()),
+    pa.map_(pa.int32(), pa.string()),
+    pa.map_(pa.int32(), pa.int32()),
+}
+
+
+class BaseDataset(IterableDataset, metaclass=_dataset_meta_cls):
+    """Dataset base class.
+
+    Args:
+        data_config (DataConfig): an instance of DataConfig.
+        features (list): list of features.
+        input_path (str): data input path.
+        reserved_columns (list): reserved columns in predict mode.
+        mode (Mode): train or eval or predict.
+        debug_level (int): dataset debug level, when mode=predict and
+            debug_level > 0, will dump fg encoded data to debug_str
+        compiled_prompt (CompiledPrompt, optional): compiled prompt assembly contract.
+    """
+
+    def __init__(
+        self,
+        data_config: data_pb2.DataConfig,
+        features: List[BaseFeature],
+        input_path: str,
+        reserved_columns: Optional[List[str]] = None,
+        mode: Mode = Mode.EVAL,
+        debug_level: int = 0,
+        compiled_prompt: Optional[CompiledPrompt] = None,
+    ) -> None:
+        super(BaseDataset, self).__init__()
+        self._prompt_assembler = (
+            PromptAssembler(
+                compiled_prompt.prompt_plan,
+                compiled_prompt.sid_space,
+                include_response=mode != Mode.PREDICT,
+            )
+            if compiled_prompt is not None
+            else None
+        )
+        self._data_config = data_config
+        self._features = features
+        self._input_path = input_path
+        self._reserved_columns = reserved_columns or []
+        self._mode = mode
+        self._debug_level = debug_level
+        self.sampler_type = (
+            self._data_config.WhichOneof("sampler")
+            if self._data_config.HasField("sampler")
+            else None
+        )
+
+        self._data_parser = DataParser(
+            features=features,
+            labels=list(data_config.label_fields)
+            if self._mode != Mode.PREDICT
+            else None,
+            sample_weights=list(data_config.sample_weight_fields)
+            if self._mode != Mode.PREDICT
+            else None,
+            mode=self._mode,
+            fg_threads=data_config.fg_threads,
+            force_base_data_group=data_config.force_base_data_group,
+            sampler_type=self.sampler_type,
+        )
+
+        self._input_fields: Optional[List[pa.Field]] = None
+        self._selected_input_names = set()
+        self._selected_input_names |= self._data_parser.feature_input_names
+        if self._mode == Mode.PREDICT:
+            self._selected_input_names |= set(self._reserved_columns) - {
+                "ALL_EFFECTIVE_COLUMNS"
+            }
+        else:
+            self._selected_input_names |= set(data_config.label_fields)
+            self._selected_input_names |= set(data_config.sample_weight_fields)
+        if data_config.HasField("sample_cost_field"):
+            self._selected_input_names.add(data_config.sample_cost_field)
+        self._sampler_item_id_field: Optional[str] = None
+        self._sampler_user_id_field: Optional[str] = None
+        if self._data_config.HasField("sampler") and self._mode != Mode.PREDICT:
+            sampler_type = self._data_config.WhichOneof("sampler")
+            sampler_config = getattr(self._data_config, sampler_type)
+            if hasattr(sampler_config, "item_id_field") and sampler_config.HasField(
+                "item_id_field"
+            ):
+                self._selected_input_names.add(sampler_config.item_id_field)
+                self._sampler_item_id_field = sampler_config.item_id_field
+            if hasattr(sampler_config, "user_id_field") and sampler_config.HasField(
+                "user_id_field"
+            ):
+                self._selected_input_names.add(sampler_config.user_id_field)
+                self._sampler_user_id_field = sampler_config.user_id_field
+        # if set selected_input_names to None,
+        # all columns will be reserved.
+        if (
+            len(self._reserved_columns) > 0
+            and self._reserved_columns[0] == "ALL_COLUMNS"
+        ):
+            self._selected_input_names = None
+
+        # Sequence state when item_id_field is a grouped sequence sub-feature.
+        self._sampler_seq_delim: str = ""
+        self._sampler_seq_prefix: str = ""
+        if self._sampler_item_id_field is not None:
+            for feature in features:
+                if self._sampler_item_id_field not in feature.sequence_input_names:
+                    continue
+                if not feature.is_grouped_sequence:
+                    raise ValueError(
+                        f"item_id_field '{self._sampler_item_id_field}' is a "
+                        "sequence input but its matching feature is not a "
+                        "grouped sequence; only grouped sequence sub-features "
+                        "are supported as item_id_field."
+                    )
+                self._sampler_seq_delim = feature.sequence_delim or ""
+                self._sampler_seq_prefix = feature.grouped_sequence_prefix or ""
+                break
+
+        self._fg_mode = data_config.fg_mode
+        self._fg_encoded_multival_sep = data_config.fg_encoded_multival_sep
+
+        if mode != Mode.TRAIN:
+            self._batch_size = config_util.get_inference_batch_size(data_config)
+        else:
+            self._batch_size = data_config.batch_size
+        # only training drops tail batches; eval and predict keep every row
+        if mode == Mode.TRAIN:
+            self._drop_remainder = data_config.drop_remainder
+            self._min_batch_size = data_config.min_batch_size
+            if self._min_batch_size > self._batch_size:
+                raise ValueError(
+                    f"data_config.min_batch_size[{self._min_batch_size}] must not "
+                    f"exceed the batch size[{self._batch_size}]."
+                )
+        else:
+            self._drop_remainder = False
+            self._min_batch_size = 0
+
+        self._sampler = None
+        self._sampler_inited = False
+
+        self._reader = None
+
+    def launch_sampler_cluster(
+        self,
+        num_client_per_rank: int = 1,
+        client_id_bias: int = 0,
+        cluster: Optional[Dict[str, Union[int, str]]] = None,
+    ) -> None:
+        """Launch sampler cluster and server."""
+        if self._data_config.HasField("sampler") and self._mode != Mode.PREDICT:
+            sampler_type = self._data_config.WhichOneof("sampler")
+            sampler_config = getattr(self._data_config, sampler_type)
+
+            # Rewrite bare attr_fields to flattened (`video_id` ->
+            # `cand_seq__video_id`); deep-copy so data_config isn't mutated.
+            if self._sampler_seq_prefix:
+                sampler_config = copy.deepcopy(sampler_config)
+                sampler_config.attr_fields[:] = [
+                    self._sampler_seq_prefix + a for a in sampler_config.attr_fields
+                ]
+
+            # Strip the per-row positive-grouping outer list on attr_fields
+            # columns so the sampler emits scalar negs.
+            sampler_fields = self.input_fields
+            if self._sampler_seq_delim:
+                sampler_attrs = set(sampler_config.attr_fields)
+                sampler_fields = [
+                    pa.field(f.name, f.type.value_type)
+                    if (
+                        f.name in sampler_attrs
+                        and (pa.types.is_list(f.type) or pa.types.is_large_list(f.type))
+                    )
+                    else f
+                    for f in self.input_fields
+                ]
+
+            # pyre-ignore [16]
+            self._sampler = BaseSampler.create_class(sampler_config.__class__.__name__)(
+                sampler_config,
+                sampler_fields,
+                self._batch_size,
+                is_training=self._mode == Mode.TRAIN,
+                multival_sep=self._fg_encoded_multival_sep
+                if self._fg_mode == data_pb2.FgMode.FG_NONE
+                else chr(29),
+            )
+            self._sampler.init_cluster(num_client_per_rank, client_id_bias, cluster)
+            if cluster is None:
+                self._sampler.launch_server()
+
+    def get_sampler_cluster(self) -> Optional[Dict[str, Union[int, str]]]:
+        """Get sampler cluster."""
+        if self._sampler:
+            return self._sampler._cluster
+
+    def _init_input_fields(self) -> None:
+        """Init input fields info."""
+        self._input_fields = []
+        for field in self._reader.schema:
+            field_type = remove_nullable(field.type)
+            if any(map(lambda x: x == field_type, AVAILABLE_PA_TYPES)):
+                self._input_fields.append(field)
+            else:
+                raise ValueError(
+                    f"column [{field.name}] with dtype {field.type} "
+                    "is not supported now."
+                )
+
+    @property
+    def input_fields(self) -> List[pa.Field]:
+        """Input fields info, overwrote by subclass for auto infer the info."""
+        if self._input_fields is None:
+            self._init_input_fields()
+        assert self._input_fields is not None
+        return self._input_fields
+
+    def get_worker_info(self) -> Tuple[int, int, int]:
+        """Get global dataloader worker id, worker number and world size."""
+        worker_info = get_worker_info()
+        if worker_info is None:
+            worker_id = 0
+            num_workers = 1
+        else:
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+        else:
+            rank = 0
+            world_size = 1
+
+        return rank * num_workers + worker_id, num_workers * world_size, world_size
+
+    def load_state_dict(self, state: Optional[Dict[str, Any]]) -> None:
+        """Set checkpoint state for resume.
+
+        Args:
+            state: dict mapping source_key to max consumed row index.
+        """
+        assert self._reader is not None
+        self._reader.load_state_dict(state)
+
+    def __iter__(self) -> Iterator[Batch]:
+        if self._sampler is not None and not self._sampler_inited:
+            self._sampler.init()
+            self._sampler_inited = True
+        worker_id, num_workers, world_size = self.get_worker_info()
+        for input_data in self._reader.to_batches(worker_id, num_workers, world_size):
+            yield self._build_batch(input_data)
+        # pass complete: clear the resume state so later epochs do full passes
+        self._reader.load_state_dict(None)
+
+    def _build_batch(self, input_data: Dict[str, pa.Array]) -> Batch:
+        """Process input data and build batch.
+
+        Args:
+            input_data (dict): raw input data.
+
+        Returns:
+            an instance of Batch.
+        """
+        # Extract checkpoint info if present
+        checkpoint_info = None
+        if CKPT_SOURCE_ID in input_data and CKPT_ROW_IDX in input_data:
+            source_ids = input_data.pop(CKPT_SOURCE_ID)
+            row_idxs = input_data.pop(CKPT_ROW_IDX)
+
+            # Use PyArrow group_by + max aggregation
+            table = pa.table({CKPT_SOURCE_ID: source_ids, CKPT_ROW_IDX: row_idxs})
+            grouped = table.group_by(CKPT_SOURCE_ID).aggregate([(CKPT_ROW_IDX, "max")])
+
+            # Convert to dict: {source_key: max_absolute_position}
+            checkpoint_info = dict(
+                zip(
+                    grouped[CKPT_SOURCE_ID].to_pylist(),
+                    grouped[f"{CKPT_ROW_IDX}_max"].to_pylist(),
+                )
+            )
+
+        # Pop the event-time column (so it's not parsed as a feature) and surface
+        # its max; the -1.0 sentinel sorts below real times, so max is correct.
+        data_timestamp = -1.0
+        ts_col = input_data.pop(DATA_TIMESTAMP, None)
+        if ts_col is not None and len(ts_col) > 0:
+            max_ts = pc.max(ts_col).as_py()
+            if max_ts is not None:
+                data_timestamp = max_ts
+
+        use_sample_mask = self._mode == Mode.TRAIN and (
+            self._data_config.negative_sample_mask_prob > 0
+            or self._data_config.sample_mask_prob > 0
+        )
+        if use_sample_mask:
+            input_data[C_SAMPLE_MASK] = pa.array(
+                np.random.random(len(list(input_data.values())[0]))
+                < self._data_config.sample_mask_prob
+            )
+        if self._sampler is not None:
+            if isinstance(self._sampler, TDMSampler):
+                input_data = self._apply_tdm_sampler(input_data, use_sample_mask)
+            else:
+                input_data = self._apply_negative_sampler(input_data, use_sample_mask)
+
+        # TODO(hongsheng.jhs): add additional field like hard_negative
+        output_data = self._data_parser.parse(input_data)
+        if self._mode == Mode.PREDICT:
+            batch = self._data_parser.to_batch(output_data, force_no_tile=True)
+            reserved_data = {}
+            if len(self._reserved_columns) > 0 and self._reserved_columns[0] in (
+                "ALL_COLUMNS",
+                "ALL_EFFECTIVE_COLUMNS",
+            ):
+                reserved_data = input_data
+            else:
+                for k in self._reserved_columns:
+                    reserved_data[k] = input_data[k]
+            if self._debug_level > 0:
+                reserved_data["__features__"] = self._data_parser.dump_parsed_inputs(
+                    output_data
+                )
+            if len(reserved_data) > 0:
+                batch.reserves = RecordBatchTensor(pa.record_batch(reserved_data))
+        else:
+            batch = self._data_parser.to_batch(output_data)
+
+        if self._prompt_assembler is not None:
+            streams = self._prompt_assembler(output_data)
+            batch.additional_infos.update({k: streams[k] for k in OUTPUT_KEYS})
+
+        # Set checkpoint info on batch
+        batch.checkpoint_info = checkpoint_info
+        batch.data_timestamp = data_timestamp
+        return batch
+
+    def _apply_negative_sampler(
+        self,
+        input_data: Dict[str, pa.Array],
+        use_sample_mask: bool,
+    ) -> Dict[str, pa.Array]:
+        """NegativeSampler / NegativeSamplerV2 / HardNegativeSampler[V2] path.
+
+        Build a shallow-copy sampler_input (item_id flattened, user_id
+        expanded), call the sampler, then merge results into input_data
+        in place.
+        """
+        sampler_input = build_sampler_input(
+            input_data,
+            self._sampler_item_id_field,
+            self._sampler_user_id_field,
+            self._sampler_seq_delim,
+        )
+        sampled = self._sampler.get(sampler_input)
+
+        hard_neg_indices = sampled.pop(HARD_NEG_INDICES, None)
+        pos_lengths = self._merge_sampled_features(input_data, sampled)
+
+        if pos_lengths is not None:
+            input_data[CAND_POS_LENGTHS] = pa.array(pos_lengths)
+        if hard_neg_indices is not None:
+            input_data[HARD_NEG_INDICES] = hard_neg_indices
+
+        if use_sample_mask:
+            num_sampled = len(next(iter(sampled.values())))
+            input_data[C_NEG_SAMPLE_MASK] = pa.concat_arrays(
+                [
+                    input_data[C_SAMPLE_MASK],
+                    pa.array(
+                        np.random.random(num_sampled)
+                        < self._data_config.negative_sample_mask_prob
+                    ),
+                ]
+            )
+        return input_data
+
+    def _apply_tdm_sampler(
+        self,
+        input_data: Dict[str, pa.Array],
+        use_sample_mask: bool,
+    ) -> Dict[str, pa.Array]:
+        """TDMSampler path.
+
+        Rebuilds C_SAMPLE_MASK over the [orig | pos | neg] layout that
+        expand_tdm_sample produces.
+        """
+        pos_sampled, neg_sampled = self._sampler.get(input_data)
+        input_data = expand_tdm_sample(
+            input_data, pos_sampled, neg_sampled, self._data_config
+        )
+        if use_sample_mask:
+            num_pos = len(next(iter(pos_sampled.values())))
+            num_neg = len(next(iter(neg_sampled.values())))
+            total = len(next(iter(input_data.values())))
+            batch_size = total - num_pos - num_neg
+            # Rows after expand_tdm_sample are laid out as
+            # [orig_targets | pos_sampled | neg_sampled]. Mask the positives
+            # (orig + pos_sampled) with sample_mask_prob and the negatives
+            # with negative_sample_mask_prob. TDM features are never is_neg,
+            # so only C_SAMPLE_MASK needs to be set.
+            input_data[C_SAMPLE_MASK] = pa.array(
+                np.concatenate(
+                    [
+                        np.random.random(batch_size + num_pos)
+                        < self._data_config.sample_mask_prob,
+                        np.random.random(num_neg)
+                        < self._data_config.negative_sample_mask_prob,
+                    ]
+                )
+            )
+        return input_data
+
+    def _merge_sampled_features(
+        self,
+        input_data: Dict[str, pa.Array],
+        sampled: Dict[str, pa.Array],
+    ) -> Optional[np.ndarray]:
+        """Merge sampler outputs into input_data in place; return per-row pos lengths.
+
+        Per sampled key: new keys assigned as-is; otherwise routed via
+        `pa.concat_arrays` (scalar item_id_field) or the block-suffix
+        combine (grouped-sequence item_id_field). `pos_lengths` returns
+        None when not in sequence mode.
+        """
+        # Prefer item_id_field; fall back to first-seen seq-field if absent.
+        prefer_key = self._sampler_item_id_field
+        prefer_pl: Optional[np.ndarray] = None
+        first_pl: Optional[np.ndarray] = None
+        for k, v in sampled.items():
+            if k not in input_data:
+                input_data[k] = v
+                continue
+            if not self._sampler_seq_delim:
+                input_data[k] = pa.concat_arrays([input_data[k], v])
+                continue
+            combined, pl = combine_negs_to_candidate_sequence(
+                input_data[k], v, self._sampler_seq_delim
+            )
+            input_data[k] = combined
+            if k == prefer_key:
+                prefer_pl = pl
+            elif first_pl is None:
+                first_pl = pl
+        return prefer_pl if prefer_pl is not None else first_pl
+
+    @property
+    def sampled_batch_size(self) -> int:
+        """Batch size with sampler."""
+        if self._sampler:
+            return self._batch_size + self._sampler.estimated_sample_num
+        else:
+            return self._batch_size
+
+
+class BaseReader(metaclass=_reader_meta_cls):
+    """Reader base class.
+
+    Args:
+        input_path (str): data input path.
+        batch_size (int): batch size.
+        selected_cols (list): selection column names.
+        drop_remainder (bool): drop last batch, same as min_batch_size=batch_size.
+        shuffle (bool): shuffle data or not.
+        shuffle_buffer_size (int): buffer size for shuffle.
+        sample_cost_field (str): sample cost field name.
+        batch_cost_size (int): batch cost limit size.
+        min_batch_size (int): drop a final batch with fewer rows, 0 disables.
+        equalize_rank_steps (bool): make every rank yield the same number of
+            batches; honored by readers that slice rows by count and not
+            guaranteed when batch_cost_size cuts batches by cost.
+    """
+
+    def __init__(
+        self,
+        input_path: str,
+        batch_size: int,
+        selected_cols: Optional[List[str]] = None,
+        drop_remainder: bool = False,
+        shuffle: bool = False,
+        shuffle_buffer_size: int = 32,
+        sample_cost_field: Optional[str] = None,
+        batch_cost_size: Optional[int] = None,
+        min_batch_size: int = 0,
+        equalize_rank_steps: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        self._input_path = input_path
+        self._batch_size = batch_size
+        self._selected_cols = selected_cols
+        self._drop_remainder = drop_remainder
+        self._min_batch_size = batch_size if drop_remainder else min_batch_size
+        self._equalize_rank_steps = equalize_rank_steps
+        self._shuffle = shuffle
+        self._shuffle_buffer_size = shuffle_buffer_size
+        self._sample_cost_field = sample_cost_field
+        self._batch_cost_size = batch_cost_size
+        self._use_sample_cost = False
+        self._checkpoint_state: Optional[Dict[str, Any]] = None
+        if self._batch_cost_size is not None and self._batch_cost_size > 0:
+            assert (
+                self._sample_cost_field is not None and len(self._sample_cost_field) > 0
+            ), "Should set data_config.sample_cost_field when use batch_cost_size"
+            self._use_sample_cost = True
+
+    def load_state_dict(self, state: Optional[Dict[str, Any]]) -> None:
+        """Set checkpoint state for resume.
+
+        Args:
+            state: dict mapping source_key to max consumed row index.
+        """
+        self._checkpoint_state = state
+
+    @property
+    def schema(self) -> pa.Schema:
+        """Table schema."""
+        raise NotImplementedError
+
+    def to_batches(
+        self, worker_id: int = 0, num_workers: int = 1, world_size: Optional[int] = None
+    ) -> Iterator[Dict[str, pa.Array]]:
+        """Get batch iterator of one of ``num_workers`` slices of the data.
+
+        Args:
+            worker_id (int): slice id.
+            num_workers (int): slice number; without ``world_size`` every slice
+                is an independent even share.
+            world_size (int, optional): set by the dataset when the slices are
+                the rank-major dataloader workers of ``world_size`` ranks.
+        """
+        raise NotImplementedError
+
+    def _slice_buff_data(
+        self, buff_data: pa.RecordBatch
+    ) -> Tuple[pa.RecordBatch, Optional[pa.RecordBatch]]:
+        if self._use_sample_cost:
+            # calculate slice point by cost
+            sample_cost = buff_data[self._sample_cost_field]
+            cumsum_sample_cost = pc.cumulative_sum(sample_cost)
+            slice_size = pc.sum(
+                pc.less_equal(cumsum_sample_cost, self._batch_cost_size)
+            ).as_py()
+        else:
+            slice_size = self._batch_size
+        if len(buff_data) <= slice_size:
+            data = buff_data
+            buff_data = None
+        else:
+            data = buff_data.slice(0, slice_size)
+            buff_data = buff_data.slice(slice_size)
+        return data, buff_data
+
+    def _arrow_reader_iter(
+        self, reader: Iterator[pa.RecordBatch]
+    ) -> Iterator[Dict[str, pa.Array]]:
+        shuffle_buffer = []
+        buff_data = None
+        while True:
+            data = None
+            if buff_data is None or len(buff_data) < self._batch_size:
+                try:
+                    read_data = next(reader)
+                    if buff_data is None:
+                        buff_data = pa.Table.from_batches([read_data])
+                    else:
+                        buff_data = pa.concat_tables(
+                            [buff_data, pa.Table.from_batches([read_data])]
+                        )
+                except StopIteration:
+                    if buff_data is None or len(buff_data) < self._min_batch_size:
+                        data = buff_data = None
+                    else:
+                        data, buff_data = self._slice_buff_data(buff_data)
+            else:
+                data, buff_data = self._slice_buff_data(buff_data)
+
+            if data is not None:
+                data_dict = {}
+                for name, column in zip(data.column_names, data.columns):
+                    if isinstance(column, pa.ChunkedArray):
+                        column = column.combine_chunks()
+                    data_dict[name] = column
+
+                if self._shuffle:
+                    shuffle_buffer.append(data_dict)
+                    if len(shuffle_buffer) < self._shuffle_buffer_size:
+                        continue
+                    else:
+                        idx = random.randrange(len(shuffle_buffer))
+                        data_dict = shuffle_buffer.pop(idx)
+
+                yield data_dict
+
+            if data is None and buff_data is None:
+                break
+
+        if len(shuffle_buffer) > 0:
+            random.shuffle(shuffle_buffer)
+            for data_dict in shuffle_buffer:
+                yield data_dict
+
+    def num_files(self) -> Optional[int]:
+        """Get number of files in the dataset."""
+        return None
+
+
+class BaseWriter(metaclass=_writer_meta_cls):
+    """Writer base class.
+
+    Args:
+        output_path (str): data output path.
+    """
+
+    def __init__(self, output_path: str, **kwargs: Any) -> None:
+        self._lazy_inited = False
+        self._output_path = output_path
+
+    def write(
+        self, output_dict: OrderedDict[str, Union[pa.Array, pa.ChunkedArray]]
+    ) -> None:
+        """Write a batch of data."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _flatten_chunked_arrays(
+        output_dict: OrderedDict[str, Union[pa.Array, pa.ChunkedArray]],
+    ) -> List[pa.Array]:
+        """Collapse ChunkedArray columns into contiguous Arrays.
+
+        ``pa.RecordBatch.from_arrays`` only accepts ``pa.Array``, so any
+        ``pa.ChunkedArray`` column must be combined into a single chunk before
+        constructing the batch.
+        """
+        output_arrays = []
+        for v in output_dict.values():
+            if isinstance(v, pa.ChunkedArray):
+                v = v.combine_chunks()
+            output_arrays.append(v)
+        return output_arrays
+
+    def close(self) -> None:
+        """Close and commit data."""
+        self._lazy_inited = False
+
+    def __del__(self) -> None:
+        if self._lazy_inited:
+            # pyre-ignore [16]
+            logger.warning(f"You should close {self.__class__.__name__} explicitly.")
+
+
+def create_reader(
+    input_path: str,
+    batch_size: int,
+    selected_cols: Optional[List[str]] = None,
+    reader_type: Optional[str] = None,
+    **kwargs: Any,
+) -> BaseReader:
+    """Create data reader.
+
+    Args:
+        input_path (str): data input path.
+        batch_size (int): batch size.
+        selected_cols (list): selection column names.
+        reader_type (str, optional): specify the input path reader type, if we cannot
+            infer from input_path.
+        **kwargs: additional params.
+
+    Returns:
+        reader: a data reader.
+    """
+    if input_path.startswith("odps://"):
+        reader_cls_name = "OdpsReader"
+    elif input_path.startswith("kafka://"):
+        reader_cls_name = "KafkaReader"
+    elif input_path.endswith(".csv"):
+        reader_cls_name = "CsvReader"
+    elif input_path.endswith(".parquet"):
+        reader_cls_name = "ParquetReader"
+    else:
+        assert reader_type is not None, "You should set reader_type."
+        reader_cls_name = reader_type
+
+    # pyre-ignore [16]
+    reader = BaseReader.create_class(reader_cls_name)(
+        input_path=input_path,
+        batch_size=batch_size,
+        selected_cols=selected_cols,
+        **kwargs,
+    )
+    return reader
+
+
+def create_writer(
+    output_path: str, writer_type: Optional[str] = None, **kwargs: Any
+) -> BaseWriter:
+    """Create data writer.
+
+    Args:
+        output_path (str): data output path.
+        writer_type (str, optional): specify the input path writer type, if we cannot
+            infer from input_path.
+        **kwargs: additional params.
+
+    Returns:
+        writer: a data writer.
+    """
+    if output_path.startswith("odps://"):
+        writer_cls_name = "OdpsWriter"
+    else:
+        assert writer_type is not None, "You should set writer_type."
+        writer_cls_name = writer_type
+    # pyre-ignore [16]
+    writer = BaseWriter.create_class(writer_cls_name)(output_path=output_path, **kwargs)
+    return writer
+
+
+def create_dataloader(
+    data_config: data_pb2.DataConfig,
+    features: List[BaseFeature],
+    input_path: str,
+    reserved_columns: Optional[List[str]] = None,
+    mode: Mode = Mode.TRAIN,
+    gl_cluster: Optional[Dict[str, Union[int, str]]] = None,
+    debug_level: int = 0,
+    checkpoint_state: Optional[Dict[str, Any]] = None,
+    compiled_prompt: Optional[CompiledPrompt] = None,
+) -> DataLoader:
+    """Build dataloader.
+
+    Args:
+        data_config (DataConfig): dataloader config.
+        features (list): list of feature.
+        input_path (str): input data path.
+        reserved_columns (list): reserved columns in predict mode.
+        mode (Mode): train or eval or predict.
+        gl_cluster (dict, bool): if set, reuse the graphlearn cluster.
+        debug_level (int): dataset debug level, when mode=predict and
+            debug_level > 0, will dump fg encoded data to debug_str
+        checkpoint_state (dict, optional): resume state, applied before the
+            eager ``iter()`` forks workers so it reaches them.
+        compiled_prompt (CompiledPrompt, optional): when set, each batch carries
+            the assembled prompt streams in ``additional_infos``.
+
+    Return:
+        dataloader (dataloader): a DataLoader.
+    """
+    dataset_name = data_pb2.DatasetType.Name(data_config.dataset_type)
+    # pyre-ignore [16]
+    dataset_cls = BaseDataset.create_class(dataset_name)
+    dataset = dataset_cls(
+        data_config=data_config,
+        features=features,
+        input_path=input_path,
+        reserved_columns=reserved_columns,
+        mode=mode,
+        debug_level=debug_level,
+        compiled_prompt=compiled_prompt,
+    )
+    if checkpoint_state:
+        dataset.load_state_dict(dict(checkpoint_state))
+
+    kwargs = {}
+    if data_config.num_workers < 1:
+        num_workers = 1
+    else:
+        num_workers = data_config.num_workers
+        # check number of files is valid or not for file based dataset.
+        num_files = dataset._reader.num_files()
+        if num_files is not None:
+            world_size = int(os.environ.get("WORLD_SIZE", 1))
+            if num_files >= world_size:
+                num_files_per_worker = num_files // world_size
+                if num_files_per_worker < num_workers:
+                    logger.info(
+                        f"data_config.num_workers reset to {num_files_per_worker}"
+                    )
+                    num_workers = num_files_per_worker
+            else:
+                raise ValueError(
+                    f"Number of files in the dataset[{input_path}] must greater "
+                    f"than world_size: {world_size}, but got {num_files}"
+                )
+
+        kwargs["num_workers"] = num_workers
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = data_config.prefetch_factor
+
+    if mode == Mode.TRAIN:
+        # When in train_and_eval mode, use 2x worker in gl cluster
+        # for train_dataloader and eval_dataloader
+        dataset.launch_sampler_cluster(num_client_per_rank=num_workers * 2)
+    else:
+        if gl_cluster:
+            # Reuse the gl cluster for eval_dataloader
+            dataset.launch_sampler_cluster(
+                num_client_per_rank=num_workers * 2,
+                client_id_bias=num_workers,
+                cluster=gl_cluster,
+            )
+        else:
+            dataset.launch_sampler_cluster(num_client_per_rank=num_workers)
+
+    dataloader = DataLoader(
+        dataset=dataset,
+        batch_size=None,
+        pin_memory=data_config.pin_memory if mode != Mode.PREDICT else False,
+        collate_fn=lambda x: x,
+        in_order=data_config.in_order,
+        **kwargs,
+    )
+    # For PyTorch versions 2.6 and above, we initialize the data iterator before
+    # beginning the training process to avoid potential CUDA-related issues following
+    # model saving.
+    first_iterator = iter(dataloader)
+
+    def get_iterator() -> Iterator[Batch]:
+        # return the eager iterator first (keeps its prefetch), then fresh ones
+        nonlocal first_iterator
+        if first_iterator is not None:
+            it, first_iterator = first_iterator, None
+            return it
+        return iter(dataloader)
+
+    dataloader.get_iterator = get_iterator  # pyre-ignore[16]
+    return dataloader

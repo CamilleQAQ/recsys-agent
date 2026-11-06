@@ -1,0 +1,227 @@
+# 训练
+
+## 训练命令
+
+```bash
+torchrun --master_addr=localhost --master_port=32555 \
+    --nnodes=1 --nproc-per-node=2 --node_rank=0 \
+    -m tzrec.train_eval \
+    --pipeline_config_path multi_tower_din_taobao_local.config \
+    --train_input_path data/taobao_data_train/\*.parquet \
+    --eval_input_path data/taobao_data_eval/\*.parquet \
+    --model_dir experiments/multi_tower_din_taobao_local
+```
+
+- --pipeline_config_path: 训练用的配置文件
+- --model_dir: 模型训练目录
+- --train_input_path: 训练数据的输入路径，可以支持MaxCompute表/Parquet/CSV等路径，详见[文档](../feature/data.md)
+- --eval_input_path: 评估数据的输入路径
+- --continue_train: 是否增量训练
+- --fine_tune_checkpoint: 增量训练的checkpoint路径，如experiments/multi_tower_din_taobao_local/model.ckpt-0，如果不设置，增量训练使用model_dir下最近的检查点
+- --edit_config_json: 命令行以json的方式动态修改配置文件，如{"model_dir":"experiments/","feature_configs[0].raw_feature.boundaries":[4,5,6,7]}
+- --ignore_restore_optimizer: 加载checkpoint参数时，忽略加载优化器的参数
+- --ignore_restore_lr_scheduler: 续训时不恢复学习率调度进度，从配置的调度起点重新开始。默认false，即`--continue_train`从`model_dir`恢复时接着checkpoint记录的进度继续调度，学习率配置仍以`pipeline.config`为准；调度器的类型/个数/顺序与checkpoint不一致会直接报错，换调度策略续训时需加上该参数。从`--fine_tune_checkpoint`恢复时不恢复调度进度。旧版本checkpoint没有调度状态时会打印warning并从头调度
+
+### 环境变量
+
+- ODPS_ENDPOINT: 在PAI-DLC/PAI-DSW环境，数据为MaxCompute表的情况下需设置，详见[文档](../feature/data.md)的OdpsDataset章节
+- ODPS_CONFIG_FILE_PATH: 在本地环境，数据为MaxCompute表的情况下需设置为odps_conf的路径，详见[文档](../feature/data.md)的OdpsDataset章节
+- CHECKPOINT_TAG: 给checkpoint打一个自定义标记，记录在`meta`中（见下面的checkpoint信息），便于外部调度识别是哪一次调度产出的checkpoint。默认为空，不做任何限制
+- ONLINE_LEARNING_SUCCESSOR_DIR: 在线学习中下一条流式链路的`model_dir`。设置后，本任务每隔`log_step_count_steps`步把已消费数据的事件时间（与checkpoint `meta`中`data_ts`的定义相同）写入`model_dir`下的`progress.json`，并读取下一条链路的`progress.json`；当下一条链路落后本任务不超过`ONLINE_LEARNING_HANDOVER_TOLERANCE_SECS`时，本任务正常结束训练且不保存最终checkpoint。需使用带timestamp的数据源（如KafkaDataset），详见[在线学习](../best_practices/online_learning.md)
+- ONLINE_LEARNING_HANDOVER_TOLERANCE_SECS: 交接时允许下一条链路落后的秒数，默认300。两条链路都追到Kafka最新数据后，各自的事件时间只在检查时更新，且不同分区的时间存在偏差，严格比较可能一直无法满足，因此需要容忍值
+
+## Checkpoint信息与完成标记
+
+checkpoint目录下的`meta`记录该checkpoint的信息：
+
+- `step`: 步数
+- `data_ts`: 已消费数据的事件时间（秒），数据源不带timestamp时（如ParquetDataset）不写该字段
+- `tag`: `CHECKPOINT_TAG`的值，未设置时不写该字段
+
+`_SUCCESS`是最后生成的空文件，外部调度看到它即表示该checkpoint的所有文件都已写完：
+
+```bash
+test -e ${MODEL_DIR}/model.ckpt-1000/_SUCCESS && cat ${MODEL_DIR}/model.ckpt-1000/meta
+# {"step": 1000, "data_ts": 1755000000.0, "tag": "20260828"}
+```
+
+## 训练配置
+
+训练配置是指配置文件中的train_config，详细参考[配置参考手册](../reference.md)
+
+- sparse_optimizer: 稀疏参数（Embedding）的优化器和LR策略设置
+
+```
+sparse_optimizer {
+    adagrad_optimizer {
+        lr: 0.001
+    }
+    constant_learning_rate {
+    }
+}
+```
+
+- dense_optimizer: 稠密参数的优化器LR策略设置
+
+```
+dense_optimizer {
+    adam_optimizer {
+        lr: 0.001
+    }
+    exponential_decay_learning_rate {
+        decay_size: 1
+        decay_factor: 0.7
+        by_epoch: true
+    }
+}
+```
+
+LR策略可以支持按epoch更新或者按step更新
+
+- num_steps: 训练的步数，不能跟num_epochs同时设置
+- num_epochs: 训练的epoch数
+- save_checkpoints_steps: 保存模型的步数间隔，保存模型后会做一次评估
+- save_checkpoints_epochs: 保存模型的Epoch数间隔，保存模型后会做一次评估，与save_checkpoints_steps不能同时设置
+- save_checkpoints_timestamp_interval: 按数据时间（如Kafka消息的timestamp）保存模型的间隔秒数，每当已消费数据的事件时间跨过一个间隔边界时保存一次。默认0表示关闭。仅对带timestamp的数据源（如KafkaDataset）生效
+- save_checkpoints_timestamps: 按数据时间保存模型的绝对时间点列表（单位为秒的 Unix 时间戳），已消费数据的事件时间每跨过一个时间点保存一次，默认为空表示关闭
+- save_checkpoints_timestamp_quorum: 分布式训练下各rank消费的分区不同，事件时间也不同；当至少该比例（取值(0,1\]，默认0.5）的rank已消费越过边界/时间点时才触发保存。1.0表示所有rank都越过才保存（最保守），越小越激进（最小可仅需一个rank）；默认值对单个异常/超前的timestamp具有鲁棒性
+- keep_checkpoint_max: 最多保留的最近checkpoint数量，超出后会异步删除最旧的checkpoint，默认0表示全部保留；当exporter_type为best时，会额外保留指标最优的checkpoint
+- fine_tune_checkpoint: 增量训练的checkpoint路径，也可以设置checkpoint目录，将会使用目录下最新的checkpoint
+- fine_tune_ckpt_var_map: 需要restore的参数列表文件路径，文件的每一行是{variable_name in current model}\\t{variable name in old model ckpt}
+  - 需要设置fine_tune_ckpt_var_map的情形:
+    - 现在的模型和原有模型参数名不完全匹配，但想迁移，如embedding的名字不一样
+      - 原有模型checkpoint的参数列表名可以通过如下命令获取
+      ```bash
+      python -m tzrec.tools.list_distcp_param --checkpoint_path experiments/multi_tower_din_taobao_local/model.ckpt-0
+      ```
+    - 现在的模型需要让模型加载一些预训练的Embedding参数
+      - 预训练的参数可以通过如下方式转成tzrec的检查点
+      ```python
+      # convert.py
+      import torch
+      from torch import distributed as dist
+      from torch.distributed.checkpoint import save
+      dist.init_process_group(backend='gloo')
+      state_local = torch.load('pretrain.pth')
+      state_dist = {'embedding.weight': state_local['embedding.weight']}
+      save(state_dist, checkpoint_id="pretrain/model.ckpt-0"))
+      ```
+      ```bash
+      torchrun --master_addr=localhost --master_port=32555 --nnodes=1 --nproc-per-node=1 --node_rank=0 convert.py
+      ```
+- log_step_count_steps: 打印log和summary的步数间隔（如果打印时间间隔小于1s，会跳过打印）
+- is_profiling: 是否做训练性能分析，设置为true，会在模型目录的train_eval_trace子目录下记录trace文件，文件名以`rank<N>_`开头
+- profiler_config: is_profiling为true时的性能分析配置，不设置时默认在训练开始后等待1步、预热1步、记录10步，并记录shape、显存和调用栈
+  - skip_first_steps: 开始分析前跳过的步数，默认为0。训练初期dynamic embedding和数据缓存尚未稳定，可设置较大的值采集稳定阶段的trace，如`skip_first_steps: 2000, wait_steps: 0, warmup_steps: 2, active_steps: 5`
+  - wait_steps / warmup_steps / active_steps: 每个周期内的等待、预热和记录步数，默认分别为1、1、10
+  - repeat: 采集周期数，默认为1，设置为0表示一直重复到训练结束
+  - record_shapes / profile_memory / with_stack: 是否记录算子输入shape、显存分配和Python调用栈，默认均为true。profile_memory和with_stack开销较大，分析分布式训练耗时时建议关闭
+  - ranks: 需要做性能分析的rank，不设置时所有rank都会分析
+- use_tensorboard: 是否使用tensorboard，默认为true
+- tensorboard_summaries: 设置需要在tensorboard中展示的数据， 只在use_tensorboard为true时生效。 可选值为["loss", "learning_rate", "parameter", "global_gradient_norm", "gradient_norm", "gradient"], 默认值是["loss", "learning_rate"]。 在训练数据量大， 训练时长较长时， 酌情开启"parameter"、 "gradient"、"gradient_norm", 避免出现性能问题。
+- cudnn_allow_tf32: cudnn是否打开tf32精度训练，默认为true
+- cuda_matmul_allow_tf32: cuda matmul 及 tzrec中的triton op是否打开tf32精度训练，默认为false，设置为true可加速训练
+- global_embedding_constraints: **全局Embedding分片约束**，限制planner可选的分片方式和计算内核，默认不配置，即planner自由寻优，详见[Embedding分片约束](#embedding-sharding-constraints)
+  - sharding_types: 允许的分片方式列表
+  - compute_kernels: 允许的计算内核列表
+- mixed_precision: **混合精度训练**，默认不开启，可以配置'BF16'或'FP16'
+- grad_scaler: 梯度动态缩放配置，使用FP16的情况下建议配置，参考[GradScaler](https://docs.pytorch.org/docs/stable/notes/amp_examples.html#typical-mixed-precision-training)
+
+```
+grad_scaler {
+    init_scale: 65536
+    growth_factor: 2
+    backoff_factor: 0.5
+    growth_interval: 2000
+}
+```
+
+- gradient_accumulation_steps: **梯度累计**，累计gradient_accumulation_steps步梯度更新参数，适用于batch_size小的情况，默认为0，不开启
+
+- grad_clipping: **稠密梯度裁剪**，用于防止稠密参数梯度爆炸，默认不开启
+
+  - clipping_type: 裁剪类型，可选值为"norm"（按梯度范数裁剪）、"value"（按梯度值裁剪）、"none"（不裁剪），默认为"none"
+  - max_gradient: 梯度裁剪阈值，默认为1.0
+  - norm_type: 范数类型，默认为2.0（L2范数），可以设置为inf（无穷范数）
+  - enable_global_grad_clip: 是否启用全局梯度裁剪（分布式训练），默认为false
+
+```
+grad_clipping {
+    clipping_type: "norm"
+    max_gradient: 1.0
+    norm_type: 2.0
+    enable_global_grad_clip: false
+}
+```
+
+**Note**: 稀疏参数（Embedding）的梯度裁剪通过sparse_optimizer中各优化器（如adagrad_optimizer）的`gradient_clipping`和`max_gradient`字段配置，例如：
+
+```
+sparse_optimizer {
+    adagrad_optimizer {
+        lr: 0.001
+        gradient_clipping: true
+        max_gradient: 1.0
+    }
+}
+```
+
+## 训练性能优化
+
+TorchEasyRec是以模型混合并行的方式进行训练的，会根据机间和卡间的通信拓扑环境的设置寻优最好的Embedding分片和并行计算的方式，在显存约束下最小化计算和通信开销
+
+默认的机间的通信环境为[RDMA](https://help.aliyun.com/zh/ecs/user-guide/erdma-overview)，卡间的通信环境为NVLINK，如任务所运行的环境没有RDMA和NVLINK，需对如下环境变量做一些调整
+
+对于使用的是不带NVLINK的机型，如`ecs.gn7i-c32g1.32xlarge(4 * NVIDIA A10)`，`ecs.gn6i-c24g1.24xlarge(4 * NVIDIA T4)`等，需调小卡间带宽的环境变量`INTRA_NODE_BANDWIDTH`
+
+```bash
+export INTRA_NODE_BANDWIDTH=$(awk 'BEGIN {printf("%f", 30 * 1024 * 1024 * 1024 / 1000)}')
+```
+
+对于使用的是不带RDMA的机型，如`ecs.gn7i-c32g1.32xlarge(4 * NVIDIA A10)`，`ecs.gn6i-c24g1.24xlarge(4 * NVIDIA T4)`，`ecs.gn6e-c12g1.24xlarge(8 * V100)`等，需调小机间带宽的环境变量`CROSS_NODE_BANDWIDTH`，具体可以参考各机型的[基础网络带宽文档](https://help.aliyun.com/zh/ecs/user-guide/gpu-accelerated-compute-optimized-and-vgpu-accelerated-instance-families-1)并减去读数据所需网络带宽设置
+
+```bash
+export CROSS_NODE_BANDWIDTH=$(awk 'BEGIN {printf("%f", 3 * 1024 * 1024 * 1024 / 1000)}')
+```
+
+对于GPU之间既没有NVLink也不经过PCIe Switch的机型（`nvidia-smi topo -m`中GPU之间均显示为`PHB`或`SYS`，如`ml.gn9gc.64xlarge-erdma`），NCCL默认不启用GPU间P2P，而是经主机内存中转。建议设置`NCCL_P2P_LEVEL=PHB`，让同一NUMA节点内的GPU直接P2P通信，单机alltoall带宽可提升约30%~50%，两机all_reduce大消息带宽可提升约30%~40%
+
+```bash
+export NCCL_P2P_LEVEL=PHB
+```
+
+如果遇到CUDA OOM（out of memory）的情况，可以调高`STORAGE_RESERVE_PERCENT`适当增加显存的预留比例，默认值为0.15。调高后TorchEasyRec会在新的显存限制下重新寻优最好的Embedding分片和并行计算的方式
+
+```bash
+export STORAGE_RESERVE_PERCENT=0.5
+```
+
+(embedding-sharding-constraints)=
+
+### Embedding分片约束
+
+如果需要人为收窄planner的寻优空间，可以配置`train_config.global_embedding_constraints`，它对所有Embedding表生效。不配置时planner在全部`sharding_type`和`compute_kernel`中自由寻优
+
+- sharding_types: 允许的分片方式列表，可选值为`data_parallel`、`table_wise`、`column_wise`、`row_wise`、`table_row_wise`、`table_column_wise`、`grid_shard`，为空表示不限制
+- compute_kernels: 允许的计算内核列表，可选值为`dense`、`fused`、`fused_uvm`、`fused_uvm_caching`、`key_value`，为空表示不限制
+
+```
+train_config {
+    global_embedding_constraints {
+        sharding_types: ['table_wise', 'row_wise']
+    }
+}
+```
+
+约束以表为单位生效，优先级从高到低为：
+
+1. 单个特征上配置的`embedding_constraints`，配置了dynamicemb的特征会自动带上`row_wise`约束
+1. checkpoint的plan中记录的分片方式：增量训练/续训时，plan中为`data_parallel`的表会被固定为`data_parallel`，因为`data_parallel`的优化器state在checkpoint中的key命名与`row_wise`、`table_wise`不同，无法直接切换；设置环境变量`FORCE_LOAD_SHARDING_PLAN=1`时，plan中所有表的分片方式都会被固定
+1. `global_embedding_constraints`
+1. 框架默认，即不限制
+
+**Note**: 分片为`data_parallel`的Embedding表只能使用`dense`计算内核，没有fused TBE，因此它不由sparse_optimizer管理
+
+- 该表由dense_optimizer更新，sparse_optimizer中配置的优化器类型和LR策略对它不生效，它跟随dense_optimizer的LR策略
+- 该表的参数会参与`dense_optimizer.part_optimizers`的`regex_pattern`匹配，也会被`dense_optimizer.ema`纳入
+- 如需让所有Embedding都由sparse_optimizer管理，可以在`sharding_types`中排除`data_parallel`

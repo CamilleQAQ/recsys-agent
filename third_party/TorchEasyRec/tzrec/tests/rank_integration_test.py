@@ -1,0 +1,1360 @@
+# Copyright (c) 2024, Alibaba Group;
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#    http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import glob
+import json
+import os
+import shutil
+import unittest
+
+import numpy as np
+import torch
+from pyarrow import dataset as ds
+
+from tzrec.acc import trt_utils
+from tzrec.constant import Mode
+from tzrec.datasets.dataset import create_dataloader
+from tzrec.main import _create_features
+from tzrec.optim.optimizer import has_fbgemm_ftrl
+from tzrec.tests import utils
+from tzrec.utils import checkpoint_util, config_util, dynamicemb_util
+from tzrec.utils.test_util import (
+    cutlass_hstu_unavailable,
+    dfs_are_close,
+    gpu_unavailable,
+    is_ci_nightly,
+    make_test_dir,
+    mark_ci_scope,
+    torch_fx_tool_unavailable,
+)
+
+# Full dtype matrix only in nightly; per-PR runs a fast subset.
+_QUANT_EMBS = (
+    ["FP32", "FP16", "INT8", "INT4", "INT2", "0"]
+    if is_ci_nightly()
+    else ["FP16", "INT8"]
+)
+
+
+class RankIntegrationTest(unittest.TestCase):
+    def setUp(self):
+        self.success = False
+        self.test_dir = make_test_dir()
+
+    def tearDown(self):
+        if self.success:
+            if os.path.exists(self.test_dir):
+                shutil.rmtree(self.test_dir)
+        os.environ.pop("INPUT_TILE", None)
+        os.environ.pop("USE_RTP", None)
+        os.environ.pop("INPUT_TILE_3_ONLINE", None)
+
+    def _test_rank_nofg(self, pipeline_config_path, reserved_columns, output_columns):
+        self.success = utils.test_train_eval(pipeline_config_path, self.test_dir)
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(self.test_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=os.path.join(self.test_dir, "predict_result"),
+                reserved_columns=reserved_columns,
+                output_columns=output_columns,
+                test_dir=self.test_dir,
+            )
+        self.assertTrue(self.success)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "train/eval_result.txt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/scripted_model.pt"))
+        )
+
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_fg_encoded_train_eval_export(self):
+        self._test_rank_nofg(
+            "tzrec/tests/configs/multi_tower_din_mock.config",
+            reserved_columns="clk",
+            output_columns="probs",
+        )
+
+    def test_multi_tower_din_fg_encoded_train_eval_export_frozen_emb(self):
+        self._test_rank_nofg(
+            "tzrec/tests/configs/multi_tower_din_mock_frozen.config",
+            reserved_columns="clk",
+            output_columns="probs",
+        )
+
+    def test_dbmtl_has_sequence_fg_encoded_train_eval_export(self):
+        self._test_rank_nofg(
+            "tzrec/tests/configs/dbmtl_has_sequence_mock.config",
+            reserved_columns="clk,buy",
+            output_columns="probs_ctr,probs_cvr",
+        )
+
+    def test_dbmtl_has_sequence_fg_encoded_focal_loss_train_eval_export(self):
+        self._test_rank_nofg(
+            "tzrec/tests/configs/dbmtl_has_sequence_mock_focal_loss.config",
+            reserved_columns="clk,buy",
+            output_columns="probs_ctr,probs_cvr",
+        )
+
+    def test_multi_tower_din_fg_encoded_finetune(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/multi_tower_din_mock.config",
+            os.path.join(self.test_dir, "1"),
+        )
+        if self.success:
+            self.success = utils.test_train_eval(
+                "tzrec/tests/configs/multi_tower_din_mock.config",
+                os.path.join(self.test_dir, "2"),
+                f"--fine_tune_checkpoint {os.path.join(self.test_dir, '1/train')}",
+            )
+        self.assertTrue(self.success)
+        _, steps = checkpoint_util.latest_checkpoint(
+            os.path.join(self.test_dir, "2/train")
+        )
+        self.assertGreater(steps, 5)
+
+    def _test_rank_with_fg(self, pipeline_config_path, comp_cpu_gpu_pred_result=False):
+        self.success = utils.test_train_eval(
+            pipeline_config_path,
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(self.test_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=os.path.join(self.test_dir, "predict_result"),
+                reserved_columns="user_id,item_id",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        self.assertTrue(self.success)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "train/eval_result.txt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/scripted_model.pt"))
+        )
+        if comp_cpu_gpu_pred_result and torch.cuda.is_available():
+            pipeline_config = config_util.load_pipeline_config(
+                os.path.join(self.test_dir, "pipeline.config")
+            )
+            features = _create_features(
+                pipeline_config.feature_configs, pipeline_config.data_config
+            )
+            dataloader = create_dataloader(
+                pipeline_config.data_config,
+                features,
+                pipeline_config.train_input_path,
+                mode=Mode.PREDICT,
+            )
+            iterator = iter(dataloader)
+            data = next(iterator)
+            device = "cpu"
+            model_cpu = torch.jit.load(
+                os.path.join(self.test_dir, "export/scripted_model.pt"),
+                map_location=device,
+            )
+            result_cpu = model_cpu(data.to_dict(sparse_dtype=torch.int64))
+            device = "cuda:0"
+            model_gpu = torch.jit.load(
+                os.path.join(self.test_dir, "export/scripted_model.pt"),
+                map_location=device,
+            )
+            result_gpu = model_gpu(data.to_dict(sparse_dtype=torch.int64), device)
+            for k, v in result_gpu.items():
+                torch.testing.assert_close(
+                    result_cpu[k].to(device), v, rtol=5e-3, atol=1e-5
+                )
+
+    def _test_rank_with_fg_quant(self, pipeline_config_path):
+        self.success = utils.test_train_eval(
+            pipeline_config_path,
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+        )
+        for quant_emb in _QUANT_EMBS:
+            test_dir = os.path.join(self.test_dir, f"quant_{quant_emb.lower()}")
+            if self.success:
+                self.success = utils.test_export(
+                    os.path.join(self.test_dir, "pipeline.config"),
+                    test_dir,
+                    env_str=f"QUANT_EMB={quant_emb} QUANT_EC_EMB={quant_emb}",
+                )
+            if self.success:
+                self.success = utils.test_predict(
+                    scripted_model_path=os.path.join(test_dir, "export"),
+                    predict_input_path=os.path.join(
+                        self.test_dir, r"eval_data/\*.parquet"
+                    ),
+                    predict_output_path=os.path.join(test_dir, "predict_result"),
+                    reserved_columns="user_id,item_id",
+                    output_columns="",
+                    test_dir=test_dir,
+                )
+            self.assertTrue(self.success)
+            self.assertTrue(
+                os.path.exists(os.path.join(test_dir, "export/scripted_model.pt"))
+            )
+
+    def _test_rank_with_fg_input_tile(
+        self,
+        pipeline_config_path,
+    ):
+        self.success = utils.test_train_eval(
+            pipeline_config_path,
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "train/eval_result.txt"))
+        )
+
+        no_quant_dir = os.path.join(self.test_dir, "no_quant")
+        input_tile_dir = os.path.join(self.test_dir, "input_tile")
+        input_tile_dir_emb = os.path.join(self.test_dir, "input_tile_emb")
+        pred_output = os.path.join(self.test_dir, "predict_result")
+        tile_pred_output = os.path.join(self.test_dir, "predict_result_tile")
+        tile_pred_output_emb = os.path.join(self.test_dir, "predict_result_tile_emb")
+
+        # export quant and no-input-tile
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(self.test_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="probs",
+                test_dir=self.test_dir,
+            )
+
+        # export no-quant and no-input-tile
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                no_quant_dir,
+                env_str="QUANT_EMB=0",
+            )
+
+        # export quant and input-tile
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                input_tile_dir,
+                env_str="QUANT_EMB=1 INPUT_TILE=2",
+            )
+
+        # predict quant and input-tile
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(input_tile_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=tile_pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="probs",
+                test_dir=input_tile_dir,
+            )
+            # compare INPUT_TILE and no INPUT_TILE result consistency
+            df = ds.dataset(pred_output, format="parquet").to_table().to_pandas()
+            df_t = ds.dataset(tile_pred_output, format="parquet").to_table().to_pandas()
+            df = df.sort_values(by=list(df.columns)).reset_index(drop=True)
+            df_t = df_t.sort_values(by=list(df_t.columns)).reset_index(drop=True)
+            self.assertTrue(df.equals(df_t))
+
+        # export quant and input-tile emb
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                input_tile_dir_emb,
+                env_str="QUANT_EMB=1 INPUT_TILE=3",
+            )
+
+        # predict quant and input-tile emb
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(input_tile_dir_emb, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=tile_pred_output_emb,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="probs",
+                test_dir=input_tile_dir_emb,
+            )
+            # compare INPUT_TILE and no INPUT_TILE result consistency
+            df = ds.dataset(pred_output, format="parquet").to_table().to_pandas()
+            df_t = (
+                ds.dataset(tile_pred_output_emb, format="parquet")
+                .to_table()
+                .to_pandas()
+            )
+            df = df.sort_values(by=list(df.columns)).reset_index(drop=True)
+            df_t = df_t.sort_values(by=list(df_t.columns)).reset_index(drop=True)
+            self.assertTrue(df.equals(df_t))
+
+        self.assertTrue(self.success)
+
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/scripted_model.pt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(no_quant_dir, "export/scripted_model.pt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(input_tile_dir, "export/scripted_model.pt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(input_tile_dir_emb, "export/scripted_model.pt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(input_tile_dir_emb, "export/model_acc.json"))
+        )
+        with open(os.path.join(input_tile_dir_emb, "export/model_acc.json")) as f:
+            acc_cfg = json.load(f)
+            self.assertEqual(acc_cfg["QUANT_EMB"], "1")
+            self.assertEqual(acc_cfg["INPUT_TILE"], "3")
+
+        if torch.cuda.is_available():
+            pipeline_config = config_util.load_pipeline_config(
+                os.path.join(self.test_dir, "pipeline.config")
+            )
+            features = _create_features(
+                pipeline_config.feature_configs, pipeline_config.data_config
+            )
+            utils.create_predict_data(
+                pipeline_config_path=os.path.join(self.test_dir, "pipeline.config"),
+                batch_size=512,
+                item_id="item_id",
+                output_dir=os.path.join(self.test_dir, "predict"),
+            )
+            dataloader = create_dataloader(
+                pipeline_config.data_config,
+                features,
+                os.path.join(self.test_dir, "predict", "*.parquet"),
+                mode=Mode.PREDICT,
+            )
+
+            os.environ["INPUT_TILE"] = "1"
+            iterator = iter(dataloader)
+            data = next(iterator)
+            device = "cpu"
+
+            # quant and no-input-tile
+            model_cpu = torch.jit.load(
+                os.path.join(self.test_dir, "export/scripted_model.pt"),
+                map_location=device,
+            )
+            result_cpu = model_cpu(data.to_dict(sparse_dtype=torch.int64))
+            device = "cuda:0"
+            model_gpu = torch.jit.load(
+                os.path.join(self.test_dir, "export/scripted_model.pt"),
+                map_location=device,
+            )
+            result_gpu = model_gpu(data.to_dict(sparse_dtype=torch.int64), device)
+            result_dict_json_path = os.path.join(self.test_dir, "result_gpu.json")
+            utils.save_predict_result_json(result_gpu, result_dict_json_path)
+            for k, v in result_gpu.items():
+                torch.testing.assert_close(
+                    result_cpu[k].to(device), v, rtol=5e-3, atol=1e-5
+                )
+
+            # no-quant and no-input-tile
+            model_gpu_no_quant = torch.jit.load(
+                os.path.join(self.test_dir, "no_quant/export/scripted_model.pt"),
+                map_location=device,
+            )
+            result_gpu_no_quant = model_gpu_no_quant(
+                data.to_dict(sparse_dtype=torch.int64), device
+            )
+            result_dict_json_path = os.path.join(
+                self.test_dir, "result_gpu_no_quant.json"
+            )
+            utils.save_predict_result_json(result_gpu_no_quant, result_dict_json_path)
+
+            # quant and input-tile
+            model_gpu_input_tile = torch.jit.load(
+                os.path.join(self.test_dir, "input_tile/export/scripted_model.pt"),
+                map_location=device,
+            )
+            os.environ["INPUT_TILE"] = "2"
+            dataloader = create_dataloader(
+                pipeline_config.data_config,
+                features,
+                os.path.join(self.test_dir, "predict", "*.parquet"),
+                mode=Mode.PREDICT,
+            )
+            iterator_input_tile = iter(dataloader)
+            data_input_tile = next(iterator_input_tile)
+            result_gpu_input_tile = model_gpu_input_tile(
+                data_input_tile.to(device=device).to_dict(sparse_dtype=torch.int64),
+                device,
+            )
+            result_dict_json_path = os.path.join(
+                self.test_dir, "result_gpu_input_tile.json"
+            )
+            utils.save_predict_result_json(result_gpu_input_tile, result_dict_json_path)
+
+            # quant and input-tile emb
+            model_gpu_input_tile_emb = torch.jit.load(
+                os.path.join(self.test_dir, "input_tile_emb/export/scripted_model.pt"),
+                map_location=device,
+            )
+            result_gpu_input_tile_emb = model_gpu_input_tile_emb(
+                data_input_tile.to(device=device).to_dict(sparse_dtype=torch.int64),
+                device,
+            )
+
+            # tile is all same sa no-tile
+            for k, v in result_gpu.items():
+                torch.testing.assert_close(result_gpu_input_tile[k].to(device), v)
+
+            # tile emb is all same sa no-tile
+            for k, v in result_gpu.items():
+                torch.testing.assert_close(result_gpu_input_tile_emb[k].to(device), v)
+
+            # tile is all same, the atol is because the quant
+            for k, v in result_gpu_no_quant.items():
+                torch.testing.assert_close(
+                    result_gpu_input_tile[k].to(device), v, rtol=1e-4, atol=1e-4
+                )
+
+    def _test_rank_with_fg_aot_input_tile(self, pipeline_config_path):
+        self.success = utils.test_train_eval(
+            pipeline_config_path, self.test_dir, user_id="user_id", item_id="item_id"
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+
+        input_tile_dir = os.path.join(self.test_dir, "input_tile")
+        input_tile_dir_emb = os.path.join(self.test_dir, "input_tile_emb")
+        pred_output = os.path.join(self.test_dir, "predict_result")
+        tile_pred_output = os.path.join(self.test_dir, "predict_result_tile")
+        tile_pred_output_emb = os.path.join(self.test_dir, "predict_result_tile_emb")
+
+        # export quant and no-input-tile
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="ENABLE_AOT=1",
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(self.test_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="probs",
+                test_dir=self.test_dir,
+            )
+
+        # export quant and input-tile
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                input_tile_dir,
+                env_str="QUANT_EC_EMB=1 INPUT_TILE=2 ENABLE_AOT=1",
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(input_tile_dir, "export"),
+                predict_input_path=os.path.join(
+                    self.test_dir, r"eval_data/part-0.parquet"
+                ),
+                predict_output_path=tile_pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="probs",
+                test_dir=input_tile_dir,
+            )
+
+        # export quant and input-tile emb
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                input_tile_dir_emb,
+                env_str="QUANT_EC_EMB=1 INPUT_TILE=3 ENABLE_AOT=1",
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(input_tile_dir_emb, "export"),
+                predict_input_path=os.path.join(
+                    self.test_dir, r"eval_data/part-0.parquet"
+                ),
+                predict_output_path=tile_pred_output_emb,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="probs",
+                test_dir=input_tile_dir_emb,
+            )
+
+        self.assertTrue(self.success)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/aoti/aoti_model.pt2"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(input_tile_dir, "export/aoti/aoti_model.pt2"))
+        )
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(input_tile_dir_emb, "export/aoti/aoti_model.pt2")
+            )
+        )
+
+    def _test_rank_with_fg_trt(self, pipeline_config_path, predict_columns):
+        # Random-label mock trains to logit~=0, where TRT's per-process reduction
+        # nondeterminism is kappa-amplified into a flaky ~1e-3 prob diff. A confident
+        # model (label encoded into raw_1 + a few epochs) removes the amplification.
+        self.success = utils.test_train_eval(
+            pipeline_config_path,
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+            learnable_label="raw_1",
+            num_epochs=3,
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "train/eval_result.txt"))
+        )
+
+        # disable tf32 so baseline and TRT engine both run strict fp32; export_config
+        # is the export/predict authority in allow_tf32_for_export
+        test_config_path = os.path.join(self.test_dir, "pipeline.config")
+        pipeline_config = config_util.load_pipeline_config(test_config_path)
+        pipeline_config.export_config.cudnn_allow_tf32 = False
+        pipeline_config.export_config.cuda_matmul_allow_tf32 = False
+        config_util.save_message(pipeline_config, test_config_path)
+
+        trt_dir = os.path.join(self.test_dir, "trt")
+        input_tile_trt_dir = os.path.join(self.test_dir, "input_tile_trt")
+        input_tile_emb_trt_dir = os.path.join(self.test_dir, "input_tile_emb_trt")
+
+        pred_output = os.path.join(self.test_dir, "predict_result")
+        trt_pred_output = os.path.join(self.test_dir, "predict_result_trt")
+        tile_trt_pred_output = os.path.join(self.test_dir, "predict_result_tile_trt")
+        tile_trt_pred_output_emb = os.path.join(
+            self.test_dir, "predict_result_tile_emb_trt"
+        )
+
+        output_columns = "probs"
+        # quant and no-input-tile
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(self.test_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns=output_columns,
+                test_dir=self.test_dir,
+            )
+
+        # quant and and trt
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                trt_dir,
+                env_str="ENABLE_TRT=1 DEBUG_TRT=1",
+            )
+
+        # predict quant and trt
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(trt_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=trt_pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns=output_columns,
+                test_dir=trt_dir,
+            )
+            # compare TRT and origin result consistency
+            df = ds.dataset(pred_output, format="parquet").to_table().to_pandas()
+            df_t = ds.dataset(trt_pred_output, format="parquet").to_table().to_pandas()
+            df = df.sort_values(by=predict_columns).reset_index(drop=True)
+            df_t = df_t.sort_values(by=predict_columns).reset_index(drop=True)
+            self.assertTrue(dfs_are_close(df, df_t, 2e-5))
+
+        # quant and input-tile and trt
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                input_tile_trt_dir,
+                env_str="ENABLE_TRT=1 DEBUG_TRT=1 INPUT_TILE=2",
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(input_tile_trt_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=tile_trt_pred_output,
+                reserved_columns="user_id,item_id,clk",
+                output_columns=output_columns,
+                test_dir=input_tile_trt_dir,
+            )
+            # compare INPUT_TILE+TRT and origin result consistency
+            df = ds.dataset(pred_output, format="parquet").to_table().to_pandas()
+            df_t = (
+                ds.dataset(tile_trt_pred_output, format="parquet")
+                .to_table()
+                .to_pandas()
+            )
+            df = df.sort_values(by=predict_columns).reset_index(drop=True)
+            df_t = df_t.sort_values(by=predict_columns).reset_index(drop=True)
+            self.assertTrue(dfs_are_close(df, df_t, 2e-5))
+
+        # quant and input-tile emb and trt
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                input_tile_emb_trt_dir,
+                env_str="ENABLE_TRT=1 DEBUG_TRT=1 INPUT_TILE=3",
+            )
+        if self.success:
+            self.success = utils.test_predict(
+                scripted_model_path=os.path.join(input_tile_emb_trt_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=tile_trt_pred_output_emb,
+                reserved_columns="user_id,item_id,clk",
+                output_columns=output_columns,
+                test_dir=input_tile_emb_trt_dir,
+            )
+            # compare INPUT_TILE_EMB+TRT and origin result consistency
+            df = ds.dataset(pred_output, format="parquet").to_table().to_pandas()
+            df_t = (
+                ds.dataset(tile_trt_pred_output_emb, format="parquet")
+                .to_table()
+                .to_pandas()
+            )
+            df = df.sort_values(by=predict_columns).reset_index(drop=True)
+            df_t = df_t.sort_values(by=predict_columns).reset_index(drop=True)
+            self.assertTrue(dfs_are_close(df, df_t, 2e-5))
+
+        self.assertTrue(self.success)
+
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/scripted_model.pt"))
+        )
+
+        self.assertTrue(
+            os.path.exists(os.path.join(input_tile_trt_dir, "export/scripted_model.pt"))
+        )
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(input_tile_emb_trt_dir, "export/scripted_model.pt")
+            )
+        )
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(input_tile_emb_trt_dir, "export/model_acc.json")
+            )
+        )
+        with open(os.path.join(input_tile_emb_trt_dir, "export/model_acc.json")) as f:
+            acc_cfg = json.load(f)
+            self.assertEqual(acc_cfg["ENABLE_TRT"], "1")
+            self.assertEqual(acc_cfg["INPUT_TILE"], "3")
+
+        pipeline_config = config_util.load_pipeline_config(
+            os.path.join(self.test_dir, "pipeline.config")
+        )
+        features = _create_features(
+            pipeline_config.feature_configs, pipeline_config.data_config
+        )
+        utils.create_predict_data(
+            pipeline_config_path=os.path.join(self.test_dir, "pipeline.config"),
+            batch_size=512,
+            item_id="item_id",
+            output_dir=os.path.join(self.test_dir, "predict"),
+        )
+        dataloader = create_dataloader(
+            pipeline_config.data_config,
+            features,
+            os.path.join(self.test_dir, "predict", "*.parquet"),
+            mode=Mode.PREDICT,
+        )
+
+        os.environ["INPUT_TILE"] = "1"
+        iterator = iter(dataloader)
+        data = next(iterator)
+
+        # quant and no-input-tile
+        device = "cuda:0"
+        model_gpu = torch.jit.load(
+            os.path.join(self.test_dir, "export/scripted_model.pt"), map_location=device
+        )
+        result_gpu = model_gpu(data.to_dict(sparse_dtype=torch.int64), device)
+        result_dict_json_path = os.path.join(self.test_dir, "result_gpu.json")
+        utils.save_predict_result_json(result_gpu, result_dict_json_path)
+
+        # quant and trt
+        model_gpu_trt = torch.jit.load(
+            os.path.join(self.test_dir, "trt/export/scripted_model.pt"),
+            map_location=device,
+        )
+        result_gpu_trt = model_gpu_trt(data.to_dict(sparse_dtype=torch.int64))
+        result_dict_json_path = os.path.join(self.test_dir, "result_gpu_trt.json")
+        utils.save_predict_result_json(result_gpu_trt, result_dict_json_path)
+
+        # quant and input-tile and trt
+        model_gpu_input_tile = torch.jit.load(
+            os.path.join(self.test_dir, "input_tile_trt/export/scripted_model.pt"),
+            map_location=device,
+        )
+        os.environ["INPUT_TILE"] = "2"
+        dataloader = create_dataloader(
+            pipeline_config.data_config,
+            features,
+            os.path.join(self.test_dir, "predict", "*.parquet"),
+            mode=Mode.PREDICT,
+        )
+        iterator_input_tile = iter(dataloader)
+        data_input_tile = next(iterator_input_tile)
+        result_gpu_input_tile = model_gpu_input_tile(
+            data_input_tile.to(device=device).to_dict(sparse_dtype=torch.int64)
+        )
+        result_dict_json_path = os.path.join(
+            self.test_dir, "result_gpu_input_tile.json"
+        )
+        utils.save_predict_result_json(result_gpu_input_tile, result_dict_json_path)
+
+        # quant and input-tile emb
+        model_gpu_input_tile_emb = torch.jit.load(
+            os.path.join(self.test_dir, "input_tile_emb_trt/export/scripted_model.pt"),
+            map_location=device,
+        )
+        result_gpu_input_tile_emb = model_gpu_input_tile_emb(
+            data_input_tile.to(device=device).to_dict(sparse_dtype=torch.int64)
+        )
+
+        # trt is all same sa no-trt
+        for k in output_columns.split(","):
+            torch.testing.assert_close(
+                result_gpu_trt[k], result_gpu[k], rtol=2e-5, atol=5e-5
+            )
+
+        # tile & trt is all same sa no-tile-trt
+        for k in output_columns.split(","):
+            torch.testing.assert_close(
+                result_gpu_input_tile[k], result_gpu[k], rtol=2e-5, atol=5e-5
+            )
+
+        # tile emb & trt is all same sa no-tile-trt
+        for k in output_columns.split(","):
+            torch.testing.assert_close(
+                result_gpu_input_tile_emb[k], result_gpu[k], rtol=2e-5, atol=5e-5
+            )
+
+    def test_multi_tower_din_with_fg_train_eval_export(self):
+        self._test_rank_with_fg(
+            "tzrec/tests/configs/multi_tower_din_fg_mock.config",
+            comp_cpu_gpu_pred_result=True,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_with_fg_fp16_ga_train_eval_export(self):
+        self._test_rank_with_fg(
+            "tzrec/tests/configs/multi_tower_din_fg_mock_fp16_ga.config",
+            comp_cpu_gpu_pred_result=True,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_with_fg_bf16_emb_fp16_train_eval_export(self):
+        self._test_rank_with_fg(
+            "tzrec/tests/configs/multi_tower_din_fg_mock_bf16_emb_fp16.config",
+            comp_cpu_gpu_pred_result=True,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_zch_with_fg_train_eval_export(self):
+        self._test_rank_with_fg(
+            "tzrec/tests/configs/multi_tower_din_zch_fg_mock.config",
+            comp_cpu_gpu_pred_result=True,
+        )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.device_count() < 2,
+        "needs >= 2 GPUs to exercise different world sizes",
+    )
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_zch_finetune_world_size_change(self):
+        # First train on 1 GPU, then finetune from that checkpoint on 2 GPUs.
+        # Regression test for the assertion in MCH validate_state caused by
+        # _output_segments_tensor being clobbered when the saved world size
+        # differs from the current world size.
+        prev_nproc = os.environ.get("TEST_NPROC_PER_NODE")
+        try:
+            os.environ["TEST_NPROC_PER_NODE"] = "1"
+            self.success = utils.test_train_eval(
+                "tzrec/tests/configs/multi_tower_din_zch_fg_mock.config",
+                os.path.join(self.test_dir, "1"),
+                user_id="user_id",
+                item_id="item_id",
+            )
+            self.assertTrue(self.success)
+
+            os.environ["TEST_NPROC_PER_NODE"] = "2"
+            self.success = utils.test_train_eval(
+                "tzrec/tests/configs/multi_tower_din_zch_fg_mock.config",
+                os.path.join(self.test_dir, "2"),
+                user_id="user_id",
+                item_id="item_id",
+                args_str=(
+                    f"--fine_tune_checkpoint {os.path.join(self.test_dir, '1/train')}"
+                ),
+            )
+            self.assertTrue(self.success)
+            _, steps = checkpoint_util.latest_checkpoint(
+                os.path.join(self.test_dir, "2/train")
+            )
+            self.assertGreater(steps, 0)
+        finally:
+            if prev_nproc is None:
+                os.environ.pop("TEST_NPROC_PER_NODE", None)
+            else:
+                os.environ["TEST_NPROC_PER_NODE"] = prev_nproc
+
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_with_fg_export_quant(self):
+        self._test_rank_with_fg_quant(
+            "tzrec/tests/configs/multi_tower_din_fg_mock.config"
+        )
+
+    def test_multi_tower_din_with_fg_adagrad_init_acc_train_eval_export(self):
+        self._test_rank_with_fg(
+            "tzrec/tests/configs/multi_tower_din_fg_mock_adagrad_init_acc.config"
+        )
+
+    def test_multi_tower_din_with_fg_gradient_clipping_train_eval_export(self):
+        self._test_rank_with_fg(
+            "tzrec/tests/configs/multi_tower_din_fg_mock_gradient_clipping.config"
+        )
+
+    def test_multi_tower_din_with_fg_train_eval_export_input_tile(self):
+        self._test_rank_with_fg_input_tile(
+            "tzrec/tests/configs/multi_tower_din_fg_mock.config"
+        )
+
+    def test_multi_tower_din_with_fg_train_eval_export_input_tile_3_online(self):
+        """Test INPUT_TILE=3 with INPUT_TILE_3_ONLINE=1 (jagged tensor mode)."""
+        pipeline_config_path = "tzrec/tests/configs/multi_tower_din_fg_mock.config"
+
+        self.success = utils.test_train_eval(
+            pipeline_config_path,
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+        )
+
+        # export with INPUT_TILE=3 and INPUT_TILE_3_ONLINE=1
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="QUANT_EMB=1 INPUT_TILE=3 INPUT_TILE_3_ONLINE=1",
+            )
+
+        self.assertTrue(self.success)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/scripted_model.pt"))
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_zch_with_fg_train_eval_export_input_tile(self):
+        self._test_rank_with_fg_input_tile(
+            "tzrec/tests/configs/multi_tower_din_zch_fg_mock.config"
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_with_fg_train_eval_aot_export_input_tile(self):
+        self._test_rank_with_fg_aot_input_tile(
+            "tzrec/tests/configs/multi_tower_din_fg_mock.config"
+        )
+
+    def test_dbmtl_has_sequence_variational_dropout_train_eval_export(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/dbmtl_has_sequence_variational_dropout_mock.config",
+            self.test_dir,
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_feature_selection(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "train/eval_result.txt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/scripted_model.pt"))
+        )
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "output_dir/pipeline.config"))
+        )
+
+    def test_multi_tower_din_predict_checkpoint(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/multi_tower_din_fg_mock.config",
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+            num_rows=8192 * 16 + 1,
+        )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="QUANT_EMB=FP32",
+            )
+        predict_output_path = os.path.join(self.test_dir, "predict_result")
+        predict_ckpt_path = os.path.join(self.test_dir, "predict_ckpt_result")
+        if self.success:
+            self.success = utils.test_predict(
+                os.path.join(self.test_dir, "export"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=predict_output_path,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        if self.success:
+            self.success = utils.test_predict_checkpoint(
+                os.path.join(self.test_dir, "pipeline.config"),
+                predict_input_path=os.path.join(self.test_dir, r"eval_data/\*.parquet"),
+                predict_output_path=predict_ckpt_path,
+                reserved_columns="user_id,item_id,clk",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        self.assertTrue(self.success)
+        predict_columns = ["user_id", "item_id", "clk", "probs"]
+        df1 = ds.dataset(predict_output_path, format="parquet").to_table().to_pandas()
+        df2 = ds.dataset(predict_ckpt_path, format="parquet").to_table().to_pandas()
+        self.assertEqual(len(df2), 8192 * 16 + 1)
+        df1 = df1.sort_values(by=predict_columns).reset_index(drop=True)
+        df2 = df2.sort_values(by=predict_columns).reset_index(drop=True)
+        self.assertTrue(dfs_are_close(df1, df2, 1e-6))
+
+    def _test_rank_dlrm_hstu_train_eval_export(self, export_env_str: str):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/dlrm_hstu_kuairand_1k.config",
+            self.test_dir,
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str=export_env_str,
+                additional_export_config='{"cand_seq_pk": "cand_seq"}',
+            )
+        predict_output_path = os.path.join(self.test_dir, "predict_result")
+        predict_ckpt_path = os.path.join(self.test_dir, "predict_ckpt_result")
+        if self.success:
+            self.success = utils.test_predict(
+                os.path.join(self.test_dir, "export"),
+                predict_input_path="data/test/kuairand-1k-eval-c4096-s100.parquet",
+                predict_output_path=predict_output_path,
+                reserved_columns="user_id,cand_seq__video_id",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        if self.success:
+            self.success = utils.test_predict_checkpoint(
+                os.path.join(self.test_dir, "pipeline.config"),
+                predict_input_path="data/test/kuairand-1k-eval-c4096-s100.parquet",
+                predict_output_path=predict_ckpt_path,
+                reserved_columns="user_id,cand_seq__video_id",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        self.assertTrue(self.success)
+        self.assertTrue(
+            os.path.exists(os.path.join(self.test_dir, "export/aoti/aoti_model.pt2"))
+        )
+        # Verify model_acc.json contains HSTU-related fields
+        model_acc_path = os.path.join(self.test_dir, "export/model_acc.json")
+        self.assertTrue(os.path.exists(model_acc_path))
+        with open(model_acc_path) as f:
+            acc_cfg = json.load(f)
+            self.assertEqual(acc_cfg["cand_seq_pk"], "cand_seq")
+
+    @mark_ci_scope("h20", "gpu")
+    @unittest.skipIf(*gpu_unavailable)
+    def test_rank_dlrm_hstu_train_eval_export(self):
+        # Default path: legacy two-stage export (sparse JIT + dense AOTI).
+        self._test_rank_dlrm_hstu_train_eval_export(export_env_str="ENABLE_AOT=1")
+        # Two-stage export must produce both the JIT sparse model and the
+        # AOTI dense model.
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(self.test_dir, "export/scripted_sparse_model.pt")
+            )
+        )
+        with open(os.path.join(self.test_dir, "export/model_acc.json")) as f:
+            self.assertEqual(json.load(f).get("ENABLE_AOT"), "1")
+
+    @mark_ci_scope("h20", "gpu")
+    @unittest.skipIf(*gpu_unavailable)
+    def test_rank_dlrm_hstu_train_eval_export_unified_aot(self):
+        # Unified AOTI export (ENABLE_AOT=2): fused sparse+dense single .pt2.
+        self._test_rank_dlrm_hstu_train_eval_export(export_env_str="ENABLE_AOT=2")
+        # Unified export must NOT produce the legacy JIT sparse model file.
+        self.assertFalse(
+            os.path.exists(
+                os.path.join(self.test_dir, "export/scripted_sparse_model.pt")
+            )
+        )
+        # model_acc.json must explicitly record ENABLE_AOT=2.
+        with open(os.path.join(self.test_dir, "export/model_acc.json")) as f:
+            acc_cfg = json.load(f)
+            self.assertEqual(acc_cfg.get("ENABLE_AOT"), "2")
+
+    @mark_ci_scope("h20", "gpu")
+    @unittest.skipIf(*gpu_unavailable)
+    def test_rank_dlrm_hstu_train_eval_export_autotune_with_sample_inputs(self):
+        # Exercise the AOTI_AUTOTUNE_WITH_SAMPLE_INPUTS path with a small
+        # MAX_EXPORT_BATCH_SIZE so the FX-Interpreter bench walk stays light.
+        self._test_rank_dlrm_hstu_train_eval_export(
+            export_env_str=(
+                "ENABLE_AOT=1 AOTI_AUTOTUNE_WITH_SAMPLE_INPUTS=1 "
+                "MAX_EXPORT_BATCH_SIZE=2"
+            )
+        )
+        with open(os.path.join(self.test_dir, "export/model_acc.json")) as f:
+            acc_cfg = json.load(f)
+            self.assertEqual(acc_cfg.get("AOTI_AUTOTUNE_WITH_SAMPLE_INPUTS"), "1")
+            self.assertEqual(acc_cfg.get("MAX_EXPORT_BATCH_SIZE"), "2")
+
+    @mark_ci_scope("h20", "gpu")
+    @unittest.skipIf(*cutlass_hstu_unavailable)
+    @unittest.skipIf(*gpu_unavailable)
+    def test_rank_dlrm_hstu_cutlass_train_eval_export(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/dlrm_hstu_cutlass_kuairand_1k.config", self.test_dir
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="ENABLE_AOT=1",
+                additional_export_config='{"cand_seq_pk": "cand_seq"}',
+            )
+        predict_output_path = os.path.join(self.test_dir, "predict_result")
+        if self.success:
+            self.success = utils.test_predict(
+                os.path.join(self.test_dir, "export"),
+                predict_input_path="data/test/kuairand-1k-eval-c4096-s100.parquet",
+                predict_output_path=predict_output_path,
+                reserved_columns="user_id,cand_seq__video_id",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        self.assertTrue(self.success)
+
+    @mark_ci_scope("h20", "gpu")
+    @unittest.skipIf(*cutlass_hstu_unavailable)
+    @unittest.skipIf(*gpu_unavailable)
+    def test_rank_ultra_hstu_cutlass_train_eval_export(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/ultra_hstu_cutlass_kuairand_1k.config",
+            self.test_dir,
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="ENABLE_AOT=1",
+                additional_export_config='{"cand_seq_pk": "cand_seq"}',
+            )
+        predict_output_path = os.path.join(self.test_dir, "predict_result")
+        if self.success:
+            self.success = utils.test_predict(
+                os.path.join(self.test_dir, "export"),
+                predict_input_path="data/test/kuairand-mot-1k-eval-c4096-s100.parquet",
+                predict_output_path=predict_output_path,
+                reserved_columns="user_id,cand_seq__video_id",
+                output_columns="",
+                test_dir=self.test_dir,
+            )
+        self.assertTrue(self.success)
+
+    @unittest.skipIf(
+        gpu_unavailable[0] or not dynamicemb_util.has_dynamicemb,
+        "dynamicemb not available.",
+    )
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_with_dynamicemb_train_eval_export_predict(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/multi_tower_din_fg_dynamicemb_mock.config",
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="USE_DISTRIBUTED_EMBEDDING=1",
+            )
+        self.assertTrue(self.success)
+        self.success = False
+        export_dir = os.path.join(self.test_dir, "export")
+        torch.jit.load(os.path.join(export_dir, "scripted_model.pt"))
+        sparse_dir = os.path.join(export_dir, "sparse")
+        with open(os.path.join(sparse_dir, "sparse_embedding.json")) as f:
+            metadata = json.load(f)
+        dynamic_tables = [info for info in metadata.values() if info["is_dynamic"]]
+        self.assertTrue(dynamic_tables)
+        checkpoint_path, _ = checkpoint_util.latest_checkpoint(
+            os.path.join(self.test_dir, "train")
+        )
+        assert checkpoint_path is not None
+        key_files = glob.glob(
+            os.path.join(checkpoint_path, "dynamicemb", "*", "*_emb_keys.rank_*")
+        )
+        checkpoint_rows = sum(os.path.getsize(path) // 8 for path in key_files)
+        self.assertGreater(checkpoint_rows, 0)
+        self.assertEqual(
+            sum(info["shape"][0] for info in dynamic_tables), checkpoint_rows
+        )
+        dynamic_npz_files = sorted(
+            glob.glob(os.path.join(sparse_dir, "sparse_dynamic_embedding-*.npz"))
+        )
+        self.assertEqual(
+            [os.path.basename(p) for p in dynamic_npz_files],
+            [
+                "sparse_dynamic_embedding-00-of-02.npz",
+                "sparse_dynamic_embedding-01-of-02.npz",
+            ],
+        )
+        part_arrays = [np.load(p) for p in dynamic_npz_files]
+        try:
+            for info in dynamic_tables:
+                keys = np.concatenate(
+                    [arrays[info["key_name"]] for arrays in part_arrays], axis=0
+                )
+                values = np.concatenate(
+                    [arrays[info["value_name"]] for arrays in part_arrays], axis=0
+                )
+                scores = np.concatenate(
+                    [arrays[info["score_name"]] for arrays in part_arrays], axis=0
+                )
+                self.assertEqual(len(keys), info["shape"][0])
+                self.assertEqual(values.shape, tuple(info["shape"]))
+                self.assertEqual(len(scores), len(keys))
+        finally:
+            for arrays in part_arrays:
+                arrays.close()
+        predict_input_path = os.path.join(self.test_dir, r"eval_data/\*.parquet")
+        predict_ckpt_path = os.path.join(self.test_dir, "predict_ckpt_result")
+        self.success = utils.test_predict_checkpoint(
+            os.path.join(self.test_dir, "pipeline.config"),
+            predict_input_path=predict_input_path,
+            predict_output_path=predict_ckpt_path,
+            reserved_columns="user_id,item_id,clk",
+            output_columns="probs",
+            test_dir=self.test_dir,
+        )
+        # INT8 rows dequantize to fp16, hence the looser tolerance.
+        for name, env_str, abs_tol in [
+            ("export", None, 1e-5),
+            ("export_int8", "USE_DISTRIBUTED_EMBEDDING=1 DIST_QUANT=INT8", 2e-2),
+        ]:
+            export_dir = os.path.join(self.test_dir, name)
+            predict_output_path = os.path.join(self.test_dir, f"predict_{name}")
+            if self.success and env_str is not None:
+                self.success = utils.test_export(
+                    os.path.join(self.test_dir, "pipeline.config"),
+                    self.test_dir,
+                    export_dir=export_dir,
+                    env_str=env_str,
+                )
+            if self.success:
+                self.success = utils.test_predict(
+                    scripted_model_path=export_dir,
+                    predict_input_path=predict_input_path,
+                    predict_output_path=predict_output_path,
+                    reserved_columns="user_id,item_id,clk",
+                    output_columns="probs",
+                    test_dir=self.test_dir,
+                )
+            self.assertTrue(self.success)
+            predict_columns = ["user_id", "item_id", "clk"]
+            df = ds.dataset(predict_output_path, format="parquet").to_table()
+            df_ckpt = ds.dataset(predict_ckpt_path, format="parquet").to_table()
+            df = df.to_pandas().sort_values(by=predict_columns, ignore_index=True)
+            df_ckpt = df_ckpt.to_pandas().sort_values(
+                by=predict_columns, ignore_index=True
+            )
+            self.success = dfs_are_close(df, df_ckpt, abs_tol)
+            self.assertTrue(self.success, name)
+
+    # id_1 is a regular embedding table, the rest are dynamicemb, so one run
+    # covers FTRL on both the fused TBE kernel and the dynamicemb path.
+    @unittest.skipIf(
+        gpu_unavailable[0]
+        or not dynamicemb_util.has_dynamicemb
+        or not has_fbgemm_ftrl(),
+        "dynamicemb or the fbgemm_gpu / torchrec FTRL embedding kernel is not "
+        "available.",
+    )
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_with_dynamicemb_ftrl_train_eval(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/multi_tower_din_dynamicemb_ftrl_mock.config",
+            self.test_dir,
+        )
+        if self.success:
+            self.success = utils.test_eval(
+                os.path.join(self.test_dir, "pipeline.config"), self.test_dir
+            )
+        self.assertTrue(self.success)
+
+    @unittest.skipIf(
+        gpu_unavailable[0] or not trt_utils.has_tensorrt, "tensorrt not available."
+    )
+    @mark_ci_scope("gpu")
+    def test_multi_tower_with_fg_train_eval_export_trt(self):
+        self._test_rank_with_fg_trt(
+            "tzrec/tests/configs/multi_tower_din_fg_mock.config",
+            predict_columns=["user_id", "item_id", "clk", "probs"],
+        )
+
+    @unittest.skipIf(
+        gpu_unavailable[0] or not trt_utils.has_tensorrt, "tensorrt not available."
+    )
+    @mark_ci_scope("gpu")
+    def test_multi_tower_zch_with_fg_train_eval_export_trt(self):
+        self._test_rank_with_fg_trt(
+            "tzrec/tests/configs/multi_tower_din_zch_fg_mock_nodice.config",
+            predict_columns=["user_id", "item_id", "clk", "probs"],
+        )
+
+    @unittest.skipIf(*torch_fx_tool_unavailable)
+    @unittest.skipIf(
+        not dynamicemb_util.has_dynamicemb,
+        "dynamicemb not available (config sets `dynamicemb { }` on features).",
+    )
+    @unittest.skipIf(*gpu_unavailable)
+    @mark_ci_scope("gpu")
+    def test_multi_tower_din_rtp_train_export(self):
+        # set USE_RTP env here for gen correct rtp style train/eval data
+        os.environ["USE_RTP"] = "1"
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/multi_tower_din_fg_rtp_mock.config",
+            self.test_dir,
+            user_id="user_id",
+            item_id="item_id",
+            env_str="USE_FARM_HASH_TO_BUCKETIZE=true USE_RTP=1",
+        )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="USE_FARM_HASH_TO_BUCKETIZE=true USE_RTP=1",
+            )
+        self.assertTrue(self.success)
+        export_dir = os.path.join(self.test_dir, "export")
+        with open(os.path.join(export_dir, "model-000000-of-000002.json")) as f:
+            weight_json = json.load(f)
+        with open(os.path.join(export_dir, "model-000001-of-000002.json")) as f:
+            weight_json.update(json.load(f))
+        self.assertTrue(
+            "model.model.embedding_group.emb_impls.__BASE__.ebc.user_id_emb.values/part_0_2"
+            in weight_json
+        )
+        self.assertTrue(
+            "model.model.embedding_group.emb_impls.__BASE__.ebc.user_id_emb.values/part_1_2"
+            in weight_json
+        )
+
+    @mark_ci_scope("h20", "gpu")
+    @unittest.skipIf(*torch_fx_tool_unavailable)
+    @unittest.skipIf(*gpu_unavailable)
+    def test_dlrm_hstu_rtp_train_export(self):
+        self.success = utils.test_train_eval(
+            "tzrec/tests/configs/dlrm_hstu_rtp_kuairand_1k.config",
+            self.test_dir,
+            env_str="USE_FARM_HASH_TO_BUCKETIZE=true USE_RTP=1",
+        )
+        if self.success:
+            self.success = utils.test_export(
+                os.path.join(self.test_dir, "pipeline.config"),
+                self.test_dir,
+                env_str="MAX_EXPORT_BATCH_SIZE=1 USE_FARM_HASH_TO_BUCKETIZE=true USE_RTP=1",  # NOQA
+                additional_export_config='{"cand_seq_pk": "cand_seq"}',
+            )
+        self.assertTrue(self.success)
+
+
+if __name__ == "__main__":
+    unittest.main()

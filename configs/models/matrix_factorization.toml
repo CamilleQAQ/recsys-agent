@@ -1,0 +1,15 @@
+# BPR-MF 基线默认值（与 recsys.training.train_mf.MFTrainConfig 对齐）
+
+[model]
+id = "matrix_factorization"
+entry = "recsys.training.train_mf"
+evaluator = "recsys.evaluation.evaluator"
+checkpoint = "artifacts/{dataset}/matrix_factorization.pt"
+
+[defaults]
+epochs = 5
+batch_size = 1024
+learning_rate = 0.01
+embedding_dim = 64
+seed = 42
+device = "auto"

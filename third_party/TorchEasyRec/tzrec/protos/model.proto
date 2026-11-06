@@ -1,0 +1,112 @@
+syntax = "proto2";
+package tzrec.protos;
+
+import "google/protobuf/any.proto";
+import "tzrec/protos/models/rank_model.proto";
+import "tzrec/protos/models/multi_task_rank.proto";
+import "tzrec/protos/models/match_model.proto";
+import "tzrec/protos/models/general_rank_model.proto";
+import "tzrec/protos/models/genrec_model.proto";
+import "tzrec/protos/models/sid_model.proto";
+import "tzrec/protos/loss.proto";
+import "tzrec/protos/metric.proto";
+import "tzrec/protos/seq_encoder.proto";
+import "tzrec/protos/module.proto";
+
+enum FeatureGroupType {
+    DEEP = 0;
+    WIDE = 1;
+    SEQUENCE = 2;
+    JAGGED_SEQUENCE = 3;
+}
+
+message SeqGroupConfig {
+    optional string group_name = 1;
+    repeated string feature_names = 2;
+    // Suffix appended to each feature's embedding_name; same semantics as
+    // FeatureGroupConfig.embedding_name_suffix. Empty == disabled.
+    optional string embedding_name_suffix = 3;
+}
+
+message FeatureGroupConfig {
+    required string group_name = 1;
+    repeated string feature_names = 2;
+    required FeatureGroupType group_type = 3 [default = DEEP];
+    repeated SeqGroupConfig sequence_groups = 4;
+    repeated SeqEncoderConfig sequence_encoders = 5;
+    // Suffix appended to each feature's embedding_name so groups with
+    // different suffixes use independent embedding tables. Empty == disabled.
+    optional string embedding_name_suffix = 6;
+}
+
+enum Kernel {
+    TRITON = 0;
+    PYTORCH = 1;
+    CUTLASS = 2;
+}
+
+message CustomModel {
+    required string class_path = 1;
+    optional google.protobuf.Any config = 2;
+}
+
+message ModelConfig {
+
+    repeated FeatureGroupConfig feature_groups = 1;
+
+    oneof model {
+	    DLRM dlrm = 100;
+	    DeepFM deepfm = 101;
+        MultiTower multi_tower = 102;
+        MultiTowerDIN multi_tower_din = 103;
+        MaskNet mask_net = 104;
+        WideAndDeep wide_and_deep = 105;
+        DCNV1 dcn_v1 = 106;
+        DCNV2 dcn_v2 = 107;
+        xDeepFM xdeepfm = 108;
+        WuKong wukong = 109;
+
+        SimpleMultiTask simple_multi_task = 200;
+        MMoE mmoe = 201;
+        DBMTL dbmtl = 202;
+        PLE ple = 203;
+        DC2VR dc2vr = 204;
+        DlrmHSTU dlrm_hstu = 205;
+        PEPNet pepnet = 206;
+        UltraHSTU ultra_hstu = 207;
+        DlrmHSTUOneRank dlrm_hstu_onerank = 208;
+
+        DSSM dssm = 301;
+        DSSMV2 dssm_v2 = 302;
+        DAT dat = 303;
+        HSTUMatch hstu_match = 304;
+        MIND mind = 305;
+
+        TDM tdm = 400;
+
+        RocketLaunching rocket_launching = 500;
+
+        // SID generation models
+        SidRqvae sid_rqvae = 600;
+        SidRqkmeans sid_rqkmeans = 601;
+
+        GenRecCausalLMModel genrec_causal_lm_model = 701;
+        CustomModel custom_model = 1000;
+    }
+
+    optional uint32 num_class = 2 [default = 1];
+
+    repeated LossConfig losses = 3;
+
+    repeated MetricConfig metrics = 4;
+
+    repeated TrainMetricConfig train_metrics = 5;
+
+    optional VariationalDropout variational_dropout = 11;
+
+    optional Kernel kernel = 12 [default = PYTORCH];
+
+    // whether use pareto loss weight
+    optional bool use_pareto_loss_weight = 13 [default = false];
+
+}
