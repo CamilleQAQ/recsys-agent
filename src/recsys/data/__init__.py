@@ -1,4 +1,4 @@
-"""Dataset-independent schema plus MovieLens and KuaiRec adapters."""
+"""Dataset-independent schema plus the KuaiRec adapter (KuaiSAR joins in Phase 1.3)."""
 
 from recsys.data.schema import IdMappings, Interaction, InteractionDataset, PreparedData
 

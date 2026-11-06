@@ -62,7 +62,7 @@ data/kuairec/
 - **下载校验**：`KUAIREC_ARCHIVE_MD5` 不匹配会直接抛错，别手工跳过——半截 zip 会解析出静默错误的数据；
 - **内存**：`iter_matrix_rows` 是流式读取，但 `prepare_kuairec` 会把正反馈整体放进内存。
   KuaiSAR 解压后规模更大，必须换成分块/数组化（见 roadmap 第 7 节）；
-- **时间戳单位不一**：KuaiRec 是毫秒级 float，MovieLens 是秒级整数；统一走 `Interaction.timestamp`（float）；
+- **时间戳单位不一**：KuaiRec 是毫秒级 float，接入新数据集时要确认是秒还是毫秒；统一走 `Interaction.timestamp`（float）；
 - **交互太少的用户**不参与评测（< 3 条正反馈），统计用户数时别用原始用户数；
 - **阈值必须训练前定死**：改了阈值，用户/物品词表变化，所有 checkpoint 与已发布指标失效。
 

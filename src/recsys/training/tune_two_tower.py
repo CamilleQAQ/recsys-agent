@@ -11,7 +11,8 @@ from pathlib import Path
 import torch
 
 from recsys.config import SPLIT_STRATEGY
-from recsys.data.movielens import MovieLensDataset, prepare_movielens
+from recsys.data.loader import SUPPORTED_DATASETS, prepare_dataset
+from recsys.data.schema import InteractionDataset
 from recsys.evaluation.evaluator import evaluate_embedding_model
 from recsys.models.two_tower import TwoTowerModel
 from recsys.training.trainer import (
@@ -27,6 +28,7 @@ from recsys.utils.seed import set_random_seed
 @dataclass(frozen=True)
 class ExperimentConfig:
     name: str
+    dataset: str = "kuairec"
     data_dir: Path = Path("data")
     output_dir: Path = Path("artifacts/experiments")
     max_epochs: int = 5
@@ -48,9 +50,9 @@ def run_experiment(config: ExperimentConfig) -> dict:
     """只用训练集训练，并依据验证集 Recall@20 选择要保存的 checkpoint。"""
     set_random_seed(config.seed)
     device = resolve_device(config.device)
-    prepared_data = prepare_movielens(config.data_dir)
+    prepared_data = prepare_dataset(config.dataset, config.data_dir)
     train_loader = create_dataloader(
-        MovieLensDataset(prepared_data.train_interactions),
+        InteractionDataset(prepared_data.train_interactions),
         config.batch_size,
         config.seed,
         shuffle=True,
@@ -177,6 +179,7 @@ def run_experiment(config: ExperimentConfig) -> dict:
 def parse_args() -> ExperimentConfig:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", required=True)
+    parser.add_argument("--dataset", choices=SUPPORTED_DATASETS, default="kuairec")
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument(
         "--output-dir", type=Path, default=Path("artifacts/experiments")

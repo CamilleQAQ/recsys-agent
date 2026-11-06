@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from recsys.data.movielens import Interaction
+from recsys.data.schema import Interaction
 
 
 def rank_items_by_popularity(

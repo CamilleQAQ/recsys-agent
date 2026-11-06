@@ -15,7 +15,7 @@ def main() -> None:
     parser.add_argument(
         "--positive-threshold",
         type=float,
-        help="rating threshold for MovieLens or watch_ratio threshold for KuaiRec",
+        help="positive threshold for the selected dataset (KuaiRec: watch_ratio)",
     )
     args = parser.parse_args()
     from pathlib import Path

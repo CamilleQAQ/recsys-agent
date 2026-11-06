@@ -370,7 +370,7 @@
 - **推理入口**：basemodel.predict
 - **数据格式**：特征字典 + 标签
 - **保存/加载**：save_model/load_model
-- **代码完整度**：上游可用，未接入（upstream_ready）—— 上游样例自带 criteo/movielens 小样本
+- **代码完整度**：上游可用，未接入（upstream_ready）—— 上游样例自带 criteo 小样本，可直接跑 demo
 - **适配层**：尚未接入
 
 ### MMoE / PLE（多任务）

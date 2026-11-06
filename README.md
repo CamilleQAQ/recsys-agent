@@ -20,7 +20,7 @@
 | 第三方仓库 | 13 个，来源见 [third_party/SOURCES.toml](third_party/SOURCES.toml) |
 | 纳入索引的模型 | 24 个：12 召回 / 9 排序 / 3 基础设施 |
 | 已接入统一接口 | 4 个召回模型（popularity、MF、Two-Tower、SASRec）+ FAISS 索引封装 |
-| 数据主线 | **KuaiSAR（待接入）**；KuaiRec / MovieLens 为流程模板与辅助数据线 |
+| 数据主线 | **KuaiSAR 2.0**（已下载并完成全量画像，Phase 1.3 接入 `prepare_kuasar`）；KuaiRec 仅为流程模板/辅助线 |
 | 累计清理 | 400.7 MB → 108.8 MB（第三方部分），详见 [docs/cleanup-report.md](docs/cleanup-report.md) |
 
 模型清单见 [docs/model-zoo.md](docs/model-zoo.md)（由 [models/zoo.toml](models/zoo.toml) 生成）。
@@ -34,7 +34,7 @@ recsys-agent/
 ├── README.md                  本文件：现状、快速开始、约定
 ├── pyproject.toml             包定义（src 布局，Python ≥3.11）
 ├── configs/                   数据集与模型配置（TOML，可被脚本校验）
-│   ├── datasets/              kuairec.toml / movielens.toml
+│   ├── datasets/              kuasar.toml / kuairec.toml
 │   └── models/                已交付实验的默认超参
 ├── data/                      运行时数据（不入库）
 ├── artifacts/                 训练产物：checkpoint、指标（不入库）
@@ -60,19 +60,19 @@ python -m venv .venv
 pip install -e .
 pip install -r requirements/optional-faiss.txt
 
-# 2. 准备数据（当前可用：MovieLens / KuaiRec；KuaiSAR 待 Phase 1）
-python -m recsys.data.prepare --dataset movielens
+# 2. 准备数据（KuaiSAR 的 prepare 在 Phase 1.3 接入；当前用 KuaiRec 验证管线，
+#    KuaiSAR 原始数据可用 python -m recsys.data.kuasar 下载）
 python -m recsys.data.prepare --dataset kuairec
 
 # 3. 训练
-python -m recsys.training.train_mf      --dataset movielens --epochs 2
-python -m recsys.training.trainer       --dataset movielens --epochs 2
-python -m recsys.training.train_sasrec  --dataset movielens --max-epochs 2
+python -m recsys.training.train_mf      --dataset kuairec --epochs 2
+python -m recsys.training.trainer       --dataset kuairec --epochs 2
+python -m recsys.training.train_sasrec  --dataset kuairec --max-epochs 2
 
 # 4. 统一接口评测（自动读回 checkpoint 的数据集、阈值与溯源信息）
 python -m recsys.adapters list
 python -m recsys.adapters evaluate --model matrix_factorization `
-    --checkpoint artifacts/movielens/matrix_factorization.pt --split test
+    --checkpoint artifacts/kuairec/matrix_factorization.pt --split test
 ```
 
 不装包时用 `$env:PYTHONPATH = "src"` 也能直接运行。校验与冒烟测试（不需要真实数据）：

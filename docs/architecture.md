@@ -4,7 +4,7 @@
 
 ```
 原始数据 (CSV/zip)
-      │  recsys.data.kuairec / kuasar / movielens      ← 只负责「读 + 清洗 + 编码」
+      │  recsys.data.kuasar / kuairec                   ← 只负责「读 + 清洗 + 编码」
       ▼
 PreparedData（train/val/test + IdMappings + 曝光 mask）
       │  recsys.data.dataset                            ← 只负责「按模型需要切样本」
@@ -31,7 +31,7 @@ Top-K 推荐 / 候选分数 → recsys.evaluation.metrics → 指标 JSON / 实�
 
 | 逻辑模块 | 仓库里的位置 | 状态 |
 | --- | --- | --- |
-| 数据层 | `src/recsys/data/` | 已有 KuaiRec/MovieLens；KuaiSAR 待 Phase 1 |
+| 数据层 | `src/recsys/data/` | KuaiRec 已接入（模板）；KuaiSAR 已下载并完成画像，`prepare_kuasar` 待 Phase 1.3 |
 | 召回层 | `src/recsys/models/` + `third_party/` | 4 个模型已接入，另有 8 个 vendor 候选 |
 | 候选融合层 | — | 未实现；适配层的 `retrieve()` 已按「通道」语义预留 |
 | 排序层 | `LightGBMRankerAdapter` + FuxiCTR | 接口就绪，缺特征通道 |

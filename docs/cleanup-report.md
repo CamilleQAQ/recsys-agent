@@ -10,7 +10,7 @@
 | 第三方仓库层级 | `third_party/recommender_repos/<repo>` | `third_party/<repo>` |
 | 每个仓库的 .git | 11 个浅克隆 | 全部移除，commit 记入 `third_party/SOURCES.toml` |
 
-> 另含不入库的运行时数据（`data/` 约 45 MB 的 MovieLens 下载与 `artifacts/` 的小 checkpoint），
+> 另含不入库的运行时数据（`data/kuasar` 约 3.5 GB、`data/kuairec` 约 1 GB 与 `artifacts/` 下的产物），
 > 由 `.gitignore` 排除，不属于交付内容。
 
 回收 **296.7 MB / 26 个条目**，构成如下。

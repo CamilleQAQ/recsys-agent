@@ -2,7 +2,7 @@
 
     python -m recsys.adapters list
     python -m recsys.adapters evaluate --model two_tower \\
-        --checkpoint artifacts/movielens/two_tower.pt --data-dir data --split test
+        --checkpoint artifacts/kuairec/two_tower.pt --data-dir data --split test
 
 ``evaluate`` 与 ``recsys.evaluation.*`` 里的模型专用脚本共用同一套数据准备和指标实现，
 区别只在于「换模型」时不再需要记不同的脚本名和参数。

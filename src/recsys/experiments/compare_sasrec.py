@@ -67,17 +67,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--two-tower-checkpoint",
         type=Path,
-        default=Path("artifacts/movielens/two_tower.pt"),
+        default=Path("artifacts/kuairec/two_tower.pt"),
     )
     parser.add_argument(
         "--mf-checkpoint",
         type=Path,
-        default=Path("artifacts/movielens/matrix_factorization.pt"),
+        default=Path("artifacts/kuairec/matrix_factorization.pt"),
     )
     parser.add_argument(
         "--sasrec-checkpoint",
         type=Path,
-        default=Path("artifacts/movielens/sasrec.pt"),
+        default=Path("artifacts/kuairec/sasrec.pt"),
     )
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--device", default="auto")

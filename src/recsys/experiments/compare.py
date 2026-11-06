@@ -79,8 +79,8 @@ def compare_models(
 ) -> dict[str, dict[str, float]]:
     """对三个模型跑同一套「先过滤、再全量排序」的评测。
 
-    数据集与正反馈阈值从 Two-Tower checkpoint 里读回来，所以 MovieLens 和
-    KuaiRec 走的是同一条评测路径，只有数据源不同。
+    数据集与正反馈阈值从 Two-Tower checkpoint 里读回来，所以任何数据集
+    走的是同一条评测路径，只有数据源不同。
     """
     device = resolve_device(device_name)
     two_tower_model, two_tower_checkpoint_data = load_model(
@@ -152,12 +152,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--two-tower-checkpoint",
         type=Path,
-        default=Path("artifacts/movielens/two_tower.pt"),
+        default=Path("artifacts/kuairec/two_tower.pt"),
     )
     parser.add_argument(
         "--mf-checkpoint",
         type=Path,
-        default=Path("artifacts/movielens/matrix_factorization.pt"),
+        default=Path("artifacts/kuairec/matrix_factorization.pt"),
     )
     parser.add_argument("--split", choices=["validation", "test"], default="test")
     parser.add_argument("--user-batch-size", type=int, default=512)

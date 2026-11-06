@@ -57,7 +57,6 @@ def check_toml_parsing() -> list[str]:
 def check_dataset_configs() -> list[str]:
     """数据集配置里的阈值/切分/去重必须与代码常量一致。"""
     from recsys.config import (
-        DEFAULT_MOVIELENS_POSITIVE_THRESHOLD,
         KUAIREC_DEDUPLICATE_USER_ITEM_PAIRS,
         KUAIREC_WATCH_RATIO_THRESHOLD,
         SPLIT_STRATEGY,
@@ -72,7 +71,6 @@ def check_dataset_configs() -> list[str]:
 
     errors: list[str] = []
     kuairec = load_toml(PROJECT_ROOT / "configs" / "datasets" / "kuairec.toml")
-    movielens = load_toml(PROJECT_ROOT / "configs" / "datasets" / "movielens.toml")
     kuasar = load_toml(PROJECT_ROOT / "configs" / "datasets" / "kuasar.toml")
 
     pairs = [
@@ -85,8 +83,6 @@ def check_dataset_configs() -> list[str]:
         ("kuasar 压缩包 md5", kuasar["dataset"]["archive_md5"], KUASAR_ARCHIVE_MD5),
         ("kuasar small 下载地址", kuasar["dataset"]["small_source_url"], KUASAR_SMALL_ARCHIVE_URL),
         ("kuasar small 压缩包 md5", kuasar["dataset"]["small_archive_md5"], KUASAR_SMALL_ARCHIVE_MD5),
-        ("movielens 正反馈阈值", movielens["labels"]["positive_threshold"], DEFAULT_MOVIELENS_POSITIVE_THRESHOLD),
-        ("movielens 切分协议", movielens["split"]["strategy"], SPLIT_STRATEGY),
     ]
     for label, config_value, code_value in pairs:
         if config_value != code_value:

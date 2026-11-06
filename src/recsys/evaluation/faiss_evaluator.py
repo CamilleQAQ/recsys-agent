@@ -11,7 +11,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from recsys.data.movielens import prepare_movielens
+from recsys.data.loader import (
+    prepare_dataset,
+    resolve_checkpoint_dataset,
+    resolve_positive_threshold,
+)
 from recsys.data.schema import seen_items_for_split
 from recsys.evaluation.evaluator import (
     brute_force_top_k,
@@ -69,8 +73,15 @@ def run_faiss_evaluation(
     if benchmark_repeats <= 0:
         raise ValueError("benchmark_repeats must be positive")
     device = resolve_device(device_name)
-    prepared_data = prepare_movielens(data_dir)
+    # 先读 checkpoint，才知道该准备哪份数据、用什么阈值（避免拿错词表评错数据）
     model, checkpoint = load_model(checkpoint_path, device)
+    dataset = resolve_checkpoint_dataset(checkpoint)
+    positive_threshold = resolve_positive_threshold(
+        dataset, checkpoint.get("positive_threshold")
+    )
+    prepared_data = prepare_dataset(
+        dataset, data_dir, positive_threshold=positive_threshold
+    )
     model_config = checkpoint["model_config"]
     if model_config["num_users"] != prepared_data.num_users:
         raise ValueError("Checkpoint user vocabulary does not match the data")
@@ -94,7 +105,7 @@ def run_faiss_evaluation(
     item_index = build_faiss_index(
         item_embeddings=item_embeddings,
         position_to_item_idx=list(range(prepared_data.num_items)),
-        index_to_original_movie_id=prepared_data.mappings.index_to_item,
+        index_to_original_item_id=prepared_data.mappings.index_to_item,
     )
     index_build_seconds = time.perf_counter() - build_start
 
@@ -180,7 +191,7 @@ def run_faiss_evaluation(
 
     sample_user = sampled_users[0]
     sample_internal_items = faiss_recommendations[sample_user][:5]
-    sample_original_movie_ids = item_index.to_original_movie_ids(
+    sample_original_item_ids = item_index.to_original_item_ids(
         sample_internal_items
     )
     print("FAISS index: IndexFlatIP (exact inner-product search, not ANN)")
@@ -190,7 +201,7 @@ def run_faiss_evaluation(
     )
     print(
         f"Mapping example: internal item_idx {sample_internal_items} -> "
-        f"original movie_id {sample_original_movie_ids}"
+        f"original item id {sample_original_item_ids}"
     )
     print(
         f"Top-{max(ks)} agreement on {len(sampled_users)} sampled users: "
@@ -230,7 +241,7 @@ def run_faiss_evaluation(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--checkpoint", type=Path, default=Path("artifacts/movielens/two_tower.pt")
+        "--checkpoint", type=Path, default=Path("artifacts/kuairec/two_tower.pt")
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--split", choices=["validation", "test"], default="test")

@@ -41,12 +41,12 @@ class FaissItemIndex:
     """FAISS 索引，外加两套显式的位置到物品 ID 的映射。
 
     FAISS 只认「插入顺序的下标」，所以需要自己记录每个下标对应哪个
-    内部 item_idx，以及进一步对应哪个原始 movie_id。
+    内部 item_idx，以及进一步对应哪个原始 item id。
     """
 
     index: faiss.IndexFlatIP
     position_to_item_idx: np.ndarray
-    index_to_original_movie_id: list[int]
+    index_to_original_item_id: list[int]
 
     @property
     def num_items(self) -> int:
@@ -73,15 +73,15 @@ class FaissItemIndex:
         # internal_item_indices: [num_queries, k]
         return scores, internal_item_indices
 
-    def to_original_movie_ids(self, item_indices: Sequence[int]) -> list[int]:
-        """把内部 item_idx 还原成 MovieLens 的原始 movie_id。"""
-        return [self.index_to_original_movie_id[item_idx] for item_idx in item_indices]
+    def to_original_item_ids(self, item_indices: Sequence[int]) -> list[int]:
+        """把内部 item_idx 还原成原始 item id。"""
+        return [self.index_to_original_item_id[item_idx] for item_idx in item_indices]
 
 
 def build_faiss_index(
     item_embeddings: torch.Tensor | np.ndarray,
     position_to_item_idx: Sequence[int],
-    index_to_original_movie_id: Sequence[int],
+    index_to_original_item_id: Sequence[int],
 ) -> FaissItemIndex:
     """在归一化后的物品向量上构建精确的 IndexFlatIP 索引。"""
     vectors = as_float32_numpy(item_embeddings)
@@ -93,15 +93,15 @@ def build_faiss_index(
         raise ValueError(
             "position_to_item_idx must contain every internal item index once"
         )
-    if len(index_to_original_movie_id) != len(vectors):
-        raise ValueError("original movie ID mapping must cover every indexed item")
+    if len(index_to_original_item_id) != len(vectors):
+        raise ValueError("original item ID mapping must cover every indexed item")
 
     index = faiss.IndexFlatIP(vectors.shape[1])
     index.add(vectors)
     return FaissItemIndex(
         index=index,
         position_to_item_idx=item_indices,
-        index_to_original_movie_id=list(index_to_original_movie_id),
+        index_to_original_item_id=list(index_to_original_item_id),
     )
 
 

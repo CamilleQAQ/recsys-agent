@@ -19,7 +19,6 @@ env/
 data/raw/
 data/processed/
 data/kuairec/
-data/movielens/
 data/kuasar/
 artifacts/*
 !artifacts/README.md

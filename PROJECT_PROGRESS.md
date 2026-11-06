@@ -39,9 +39,10 @@
 
 | 能力 | 命令 / 入口 | 状态 |
 | --- | --- | --- |
-| 数据准备（KuaiRec / MovieLens） | `python -m recsys.data.prepare --dataset movielens` | 可用（KuaiSAR 待 Phase 1） |
-| 训练召回基线 | `python -m recsys.training.train_mf\|trainer --dataset movielens` | 可用 |
-| 训练序列模型 | `python -m recsys.training.train_sasrec --dataset movielens` | 可用 |
+| 数据准备（KuaiRec，流程模板） | `python -m recsys.data.prepare --dataset kuairec` | 可用（KuaiSAR 的 `prepare` 待 1.3） |
+| 训练召回基线 | `python -m recsys.training.train_mf\|trainer --dataset kuairec` | 可用 |
+| 训练序列模型 | `python -m recsys.training.train_sasrec --dataset kuairec` | 可用 |
+| KuaiSAR 数据获取与画像 | `python -m recsys.data.kuasar` / `python -m recsys.experiments.analyze_kuasar` | 可用（1.1/1.2 完成） |
 | 统一评测（多模型同一入口） | `python -m recsys.adapters evaluate --model <id> --checkpoint <path>` | 可用（4 个召回模型） |
 | 向量导出 | `adapter.encode_users / encode_items` | 可用（embedding 类模型） |
 | FAISS 检索与一致性校验 | `python -m recsys.evaluation.faiss_evaluator` | 可用 |
@@ -84,12 +85,13 @@
 - [x] `provenance`：数据指纹（三切分行数 + 内容哈希 + mask 哈希）、ID 映射摘要、代码指纹、依赖版本、创建时间
 - [x] 三个训练入口（Two-Tower / MF / SASRec）写入 `provenance`；评测时打印 `provenance: data=… code=…`
 - [x] 指标补齐：`Precision@K`、`Coverage`、`AUC`、`LogLoss`（不依赖 sklearn），并有手算用例
-- [x] 端到端验证：MovieLens 上 MF 训练 → 统一接口评测（指标仅证明管线通，不作为实验结论）
+- [x] 端到端验证：曾在 MovieLens 快速线上跑通 MF 训练 → 统一接口评测（该数据线已于 2026-11-06 移除，见 2.9）
 - 证据：[src/recsys/utils/provenance.py](src/recsys/utils/provenance.py)、[src/recsys/evaluation/metrics.py](src/recsys/evaluation/metrics.py)
 
 ### 2.5 Phase 0-E：配置、校验与文档体系（2026-11-04 ~ 11-05）
 
-- [x] `configs/datasets/`（kuairec、movielens）+ `configs/models/`（two_tower、sasrec、matrix_factorization），TOML 格式
+- [x] `configs/datasets/`（kuairec、kuasar）+ `configs/models/`（two_tower、sasrec、matrix_factorization），TOML 格式
+  （movielens.toml 已随数据线移除，见 2.9）
 - [x] `scripts/check_project.py`：配置与代码常量一致性、Markdown 链接、生成物是否过期、残留缓存、third_party 来源与许可证
 - [x] `scripts/smoke_adapters.py`：4 个适配器 + 向量出口 + `retrieve` 一致性 + 指标手算 + provenance 往返 + 排序适配器
 - [x] 文档：架构、数据契约、依赖、KuaiRec 流程模板、KuaiSAR 差距、清理报告
@@ -129,7 +131,36 @@
 - [x] 覆盖率：交互物品中 **99.9999%** 能在 `item_features` 找到特征
 - [x] 数据质量清单：`duration_ms==0` 52.9 万行、`playing_time>duration` 317 万行、`upload_time` 含 1970 哨兵、搜索来源 2 个脏枚举
 - [x] 结论写入 `docs/kuasar.md`（全量统计取代之前的 30 万行样本结论）
-- 影响：物品词表 4M 级 → 全量打分 1.05e11 次点积、64 维 embedding 约 1 GB，Phase 2 必须定「精确评测 vs FAISS」策略
+- 影响：物品词表 4M 级 → 全量打分 1.05e11 次点积、64 维 embedding 约 1 GB，Phase 2 必须定「精确评测 vs FAISS 评测」策略
+
+---
+
+### 2.9 移除 MovieLens 数据线（2026-11-06）
+
+**原因**：`PROJECT_MASTER.md` §2 只定义 KuaiSAR（主）+ KuaiRand（补充），从未要求 MovieLens。
+MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属于工程便利，不是项目协议。
+
+**保留 KuaiRec 的理由**：也非协议数据，但它是显式决定保留的「流程模板/辅助线」（2026-11-05 决策），
+用于在没有 KuaiSAR 训练集时验证数据管线；MovieLens 没有这个作用。
+
+**删除内容**
+
+- `src/recsys/data/movielens.py`（下载/解析/编码，201 行）
+- `configs/datasets/movielens.toml` 与 `check_project.py` 里对应的两条校验
+- `recsys.config.DEFAULT_MOVIELENS_POSITIVE_THRESHOLD`
+- 运行时数据 `data/raw`、`data/processed` 与 `artifacts/movielens/`
+- 文档与注释中的 MovieLens 表述
+
+**代码调整（不是简单删除）**
+
+- `MovieLensDataset` 实为 `schema.InteractionDataset` 的别名 → 全部改用 `InteractionDataset`
+- `popularity.py` / `trainer.py` / `train_mf.py` 改为从 `schema` 导入 `Interaction`
+- `SUPPORTED_DATASETS` 只剩 `("kuairec",)`；`resolve_checkpoint_dataset` 缺 `dataset` 字段时改为**报错**（不再默认 MovieLens）
+- `tune_two_tower.py` 增加 `--dataset`；`finalize_experiment.py` 泛化为 `--dataset <name>`（artifacts 子目录随数据集命名）
+- `faiss_evaluator.py` 改为先从 checkpoint 读数据集再准备数据（与 `evaluator.py` 一致）
+- `faiss_index.py` 的 `index_to_original_movie_id` / `to_original_movie_ids` 改名去掉 movie 语义
+
+**验证**：44 个模块全部可导入；适配层冒烟测试通过；`check_project.py` 0 错误。
 
 ---
 
@@ -234,11 +265,11 @@ python scripts/smoke_adapters.py     # 适配层 + 指标 + 溯源（合成数�
 # 文档重生成（改完 models/zoo.toml 后必跑）
 python scripts/zoo.py render
 
-# 当前可跑的数据线（KuaiRec / MovieLens 作模板）
-python -m recsys.data.prepare --dataset movielens
-python -m recsys.training.train_mf --dataset movielens --epochs 2
+# 当前可跑的数据线（KuaiRec 作流程模板；KuaiSAR 的 prepare 待 1.3）
+python -m recsys.data.prepare --dataset kuairec
+python -m recsys.training.train_mf --dataset kuairec --epochs 2
 python -m recsys.adapters evaluate --model matrix_factorization `
-    --checkpoint artifacts/movielens/matrix_factorization.pt --split test
+    --checkpoint artifacts/kuairec/matrix_factorization.pt --split test
 ```
 
 ---
@@ -252,6 +283,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | Phase 0 | 接入版本控制：`git init -b main` + 首次提交 `0bef337`（6,941 文件 / 压缩后 47.9 MB）推到 `CamilleQAQ/recsys-agent`；新增 `.gitattributes` 固定二进制判定；`data/`、`artifacts/` 未入库 | `.gitattributes`、`.gitignore`、本文件 |
 | 2026-11-06 | **Phase 1.1** | KuaiSAR 下载与结构勘查：新增 `kuasar.py`（下载/md5/安全解压/勘查）与 `kuasar.toml`；实测 805.9 MB、解压 3.5 GB；核对 5 个 CSV 字段并写入 `docs/kuasar.md`；发现 48.9% 行为纯曝光记录 | `src/recsys/data/kuasar.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 | 2026-11-06 | **Phase 1.2** | 全量画像：新增 `analyze_kuasar.py`（流式，3.5 GB）；14.6M 行 / 25.9k 用户 / 4.05M 物品、61.4% 物品只出现 1 次、交互物品特征覆盖 99.9999%、含数据质量清单；更新 `kuasar.toml` 与台账 | `src/recsys/experiments/analyze_kuasar.py`、`docs/kuasar.md`、`configs/datasets/kuasar.toml` |
+| 2026-11-06 | **Phase 0 收尾** | 移除 MovieLens 数据线（不在 PROJECT_MASTER §2 内）：删模块/配置/数据/checkpoint，`MovieLensDataset` → `InteractionDataset`，三个训练入口与评测脚本改为数据集无关；`SUPPORTED_DATASETS` 仅剩 kuairec | `src/recsys/data/`、`src/recsys/evaluation/`、`src/recsys/experiments/`、`scripts/check_project.py` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

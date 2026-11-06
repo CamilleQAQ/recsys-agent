@@ -14,7 +14,7 @@ import torch
 from recsys.experiments.compare import compare_models, print_comparison_table
 from recsys.experiments.compare_sasrec import compare_with_sasrec
 from recsys.config import SPLIT_STRATEGY
-from recsys.data.movielens import prepare_movielens
+from recsys.data.loader import SUPPORTED_DATASETS, prepare_dataset
 from recsys.evaluation.sasrec_evaluator import evaluate_sasrec_model, load_sasrec_model
 from recsys.training.trainer import resolve_device
 
@@ -68,6 +68,7 @@ def save_json(path: Path, payload: dict) -> None:
 def finalize_experiment(
     data_dir: Path,
     artifacts_dir: Path,
+    dataset: str = "kuairec",
     device_name: str = "auto",
 ) -> dict:
     """全程不训练，只做评测，并把指标与 checkpoint 元信息保存下来。"""
@@ -76,13 +77,12 @@ def finalize_experiment(
     seed = 42
     ks = (10, 20)
     device = resolve_device(device_name)
-    # 每个数据集的 checkpoint 有自己的子目录（kuairec / movielens），
-    # 这样在 KuaiRec 上重训不会覆盖已经公布的 MovieLens 交付物。
-    movielens_artifacts_dir = artifacts_dir / "movielens"
-    two_tower_path = movielens_artifacts_dir / "two_tower.pt"
-    mf_path = movielens_artifacts_dir / "matrix_factorization.pt"
-    sasrec_path = movielens_artifacts_dir / "sasrec.pt"
-    prepared_data = prepare_movielens(data_dir)
+    # 每份数据集有自己的 checkpoint 子目录（artifacts/<dataset>/），互不覆盖。
+    dataset_artifacts_dir = artifacts_dir / dataset
+    two_tower_path = dataset_artifacts_dir / "two_tower.pt"
+    mf_path = dataset_artifacts_dir / "matrix_factorization.pt"
+    sasrec_path = dataset_artifacts_dir / "sasrec.pt"
+    prepared_data = prepare_dataset(dataset, data_dir)
 
     validation_results = compare_models(
         data_dir=data_dir,
@@ -183,8 +183,8 @@ def finalize_experiment(
         "selection_note": "selected by validation Recall@20",
     }
 
-    # MovieLens 的时间戳只精确到秒，这里统计有多少用户的验证集与测试集交互
-    # 落在同一秒内 —— 这类用户先后顺序无法从数据本身判定。
+    # 时间戳精度有限（KuaiRec 到毫秒、部分数据只到秒），这里统计有多少用户的
+    # 验证集与测试集交互落在同一时刻 —— 这类用户先后顺序无法从数据本身判定。
     validation_by_user = {
         interaction.user_idx: interaction
         for interaction in prepared_data.validation_interactions
@@ -220,8 +220,8 @@ def finalize_experiment(
         },
         "random_seed": seed,
         "dataset": {
-            "name": "MovieLens-1M",
-            "positive_rating_threshold": 4,
+            "name": dataset,
+            "positive_threshold": two_tower_checkpoint.get("positive_threshold"),
             "num_users": prepared_data.num_users,
             "num_items": prepared_data.num_items,
             "positive_interactions": (
@@ -303,9 +303,9 @@ def finalize_experiment(
         },
         "faiss_index_flat_ip": faiss_results,
     }
-    save_json(movielens_artifacts_dir / "two_tower_config.json", two_tower_config)
-    save_json(movielens_artifacts_dir / "mf_config.json", mf_config)
-    save_json(movielens_artifacts_dir / "sasrec_config.json", sasrec_config)
+    save_json(dataset_artifacts_dir / "two_tower_config.json", two_tower_config)
+    save_json(dataset_artifacts_dir / "mf_config.json", mf_config)
+    save_json(dataset_artifacts_dir / "sasrec_config.json", sasrec_config)
     save_json(artifacts_dir / "results.json", results)
     print(f"Saved final results to {artifacts_dir / 'results.json'}")
     return results
@@ -315,10 +315,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--artifacts-dir", type=Path, default=Path("artifacts"))
+    parser.add_argument("--dataset", choices=SUPPORTED_DATASETS, default="kuairec")
     parser.add_argument("--device", default="auto")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    finalize_experiment(args.data_dir, args.artifacts_dir, args.device)
+    finalize_experiment(args.data_dir, args.artifacts_dir, args.dataset, args.device)

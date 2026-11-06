@@ -202,7 +202,7 @@ def evaluate_checkpoint(
     device = resolve_device(device_name)
     model, checkpoint = load_model(checkpoint_path, device)
     train_config = checkpoint.get("train_config", {})
-    # 数据集与正反馈阈值必须从 checkpoint 里读回来，不能默认用 MovieLens：
+    # 数据集与正反馈阈值必须从 checkpoint 里读回来，不能默认用某个数据集：
     # 换了数据集或阈值，用户/物品词表就对不上，评测结果没有意义。
     dataset = resolve_checkpoint_dataset(checkpoint)
     positive_threshold = resolve_positive_threshold(
@@ -252,7 +252,7 @@ def evaluate_checkpoint(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--checkpoint", type=Path, default=Path("artifacts/movielens/two_tower.pt")
+        "--checkpoint", type=Path, default=Path("artifacts/kuairec/two_tower.pt")
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--ks", type=int, nargs="+", default=[10, 20])

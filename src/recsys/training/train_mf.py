@@ -17,7 +17,7 @@ from recsys.data.loader import (
     prepare_dataset,
     resolve_positive_threshold,
 )
-from recsys.data.movielens import MovieLensDataset
+from recsys.data.schema import InteractionDataset
 from recsys.evaluation.evaluator import group_items_by_user
 from recsys.models.matrix_factorization import MatrixFactorization
 from recsys.training.samplers import sample_negative_items
@@ -114,7 +114,7 @@ def train_mf(config: MFTrainConfig) -> tuple[MatrixFactorization, list[float]]:
         positive_threshold=positive_threshold,
     )
     train_items_by_user = group_items_by_user(prepared_data.train_interactions)
-    train_dataset = MovieLensDataset(prepared_data.train_interactions)
+    train_dataset = InteractionDataset(prepared_data.train_interactions)
     train_loader = create_dataloader(
         train_dataset, config.batch_size, config.seed, shuffle=True
     )

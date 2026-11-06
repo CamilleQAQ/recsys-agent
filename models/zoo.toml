@@ -447,7 +447,7 @@ infer_entry = "basemodel.predict"
 data_format = "特征字典 + 标签"
 checkpoint = "save_model/load_model"
 completeness = "upstream_ready"
-completeness_note = "上游样例自带 criteo/movielens 小样本"
+completeness_note = "上游样例自带 criteo 小样本，可直接跑 demo"
 adapter = ""
 
 [[models]]

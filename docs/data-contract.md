@@ -15,7 +15,7 @@ PreparedData(train/validation/test_interactions, mappings,
 要点：
 
 - `user_idx` / `item_idx` 是**连续整数**，从 0 开始；原始 ID 与索引的映射必须可逆（评测要能还原成业务 ID）；
-- `timestamp` 用 float：KuaiRec 带毫秒，MovieLens 是秒级整数，统一成 float 才能比较先后；
+- `timestamp` 用 float：不同数据集的精度不同（KuaiSAR/KuaiRec 是毫秒级），统一成 float 才能比较先后；
 - 只保留**正反馈**进 `PreparedData`；负反馈不丢，进入 `*_seen_mask`；
 - `seen_mask` 是 `[num_users, num_items]` 的 bool 矩阵，语义是「该时间点之前**真实曝光过**的物品」，
   包含没看完/没点击的曝光。它决定 Top-K 时过滤掉什么，比「只过滤正反馈」更严格，也更接近线上；

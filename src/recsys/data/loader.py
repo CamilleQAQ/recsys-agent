@@ -1,19 +1,18 @@
-"""各命令行入口共用的数据集选择逻辑。"""
+"""各命令行入口共用的数据集选择逻辑。
+
+当前只维护 KuaiRec（流程模板/辅助线）；KuaiSAR 的 `prepare_kuasar` 在 Phase 1.3 接入，
+届时在 `SUPPORTED_DATASETS` 与 `prepare_dataset` 里登记即可。
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from recsys.config import (
-    DEFAULT_MOVIELENS_POSITIVE_THRESHOLD,
-    KUAIREC_WATCH_RATIO_THRESHOLD,
-)
+from recsys.config import KUAIREC_WATCH_RATIO_THRESHOLD
 from recsys.data.kuairec import prepare_kuairec
-from recsys.data.movielens import prepare_movielens
 from recsys.data.schema import PreparedData
 
-
-SUPPORTED_DATASETS = ("kuairec", "movielens")
+SUPPORTED_DATASETS = ("kuairec",)
 
 
 def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -> float:
@@ -21,8 +20,6 @@ def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -
     if positive_threshold is not None:
         return float(positive_threshold)
     normalized_name = dataset.lower()
-    if normalized_name == "movielens":
-        return float(DEFAULT_MOVIELENS_POSITIVE_THRESHOLD)
     if normalized_name == "kuairec":
         return float(KUAIREC_WATCH_RATIO_THRESHOLD)
     raise ValueError(
@@ -31,17 +28,14 @@ def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -
 
 
 def resolve_checkpoint_dataset(checkpoint: dict) -> str:
-    """读回 checkpoint 训练时用的数据集。
-
-    在加 ``--dataset`` 之前保存的 checkpoint 里没有这个字段——那时候只有
-    MovieLens 一条数据线，所以按 MovieLens 处理。这些旧 checkpoint 仍然要能
-    被评出来，否则已经公布的数字就不可复现了。
-    """
+    """读回 checkpoint 训练时用的数据集名。"""
     dataset = checkpoint.get("dataset")
     if dataset is None:
         dataset = checkpoint.get("train_config", {}).get("dataset")
     if dataset is None:
-        return "movielens"
+        raise ValueError(
+            "Checkpoint 没有记录 dataset 字段，无法确定该用哪份数据评测；请重新训练。"
+        )
     normalized_name = str(dataset).lower()
     if normalized_name not in SUPPORTED_DATASETS:
         raise ValueError(f"Checkpoint names an unsupported dataset: {dataset!r}")
@@ -49,16 +43,8 @@ def resolve_checkpoint_dataset(checkpoint: dict) -> str:
 
 
 def resolve_dataset_data_dir(dataset: str, data_dir: Path) -> Path:
-    """返回该数据集自己的目录。
-
-    MovieLens 是仓库里最早的一条数据线，处理结果一直在 ``data/`` 根下
-    （``data/processed/``、``data/raw/``），所以这里保持不动；后来的数据集
-    各自住进 ``data/<name>/``。这样 ``prepare_dataset`` 和
-    ``prepare_movielens`` 指向同一份文件，不会出现两份互不相干的处理结果。
-    """
+    """返回该数据集自己的目录：每个数据集住进 ``data/<name>/``。"""
     normalized_name = dataset.lower()
-    if normalized_name == "movielens":
-        return data_dir
     if normalized_name == "kuairec":
         return data_dir / "kuairec"
     raise ValueError(
@@ -75,6 +61,4 @@ def prepare_dataset(
     normalized_name = dataset.lower()
     threshold = resolve_positive_threshold(normalized_name, positive_threshold)
     dataset_dir = resolve_dataset_data_dir(normalized_name, data_dir)
-    if normalized_name == "movielens":
-        return prepare_movielens(dataset_dir, positive_threshold=threshold)
     return prepare_kuairec(dataset_dir, watch_ratio_threshold=float(threshold))

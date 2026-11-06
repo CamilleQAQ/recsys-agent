@@ -122,7 +122,7 @@ def evaluate_sasrec_checkpoint(
     """评测一个已经固定的 SASRec checkpoint，不训练也不调参。"""
     device = resolve_device(device_name)
     model, checkpoint = load_sasrec_model(checkpoint_path, device)
-    # 数据集与阈值从 checkpoint 读回来，避免拿 MovieLens 的词表去评 KuaiRec。
+    # 数据集与阈值从 checkpoint 读回来，避免拿错词表评错数据。
     dataset = resolve_checkpoint_dataset(checkpoint)
     positive_threshold = resolve_positive_threshold(
         dataset, checkpoint.get("positive_threshold")
@@ -161,7 +161,7 @@ def evaluate_sasrec_checkpoint(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--checkpoint", type=Path, default=Path("artifacts/movielens/sasrec.pt")
+        "--checkpoint", type=Path, default=Path("artifacts/kuairec/sasrec.pt")
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--split", choices=["validation", "test"], default="test")

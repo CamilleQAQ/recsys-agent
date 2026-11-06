@@ -1,11 +1,15 @@
-"""项目级配置常量。"""
+"""项目级配置常量。
+
+数据主线是 KuaiSAR（Phase 1 接入中）；KuaiRec 作为流程模板/辅助线保留常量。
+只记录当前在用数据线的常量：数据集增删时同步改这里与 configs/datasets/。
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 # 数据切分策略。会写进 checkpoint，并在评测时校验「数据是否按同一套规则切分」。
-# 具体做法见 recsys.data.movielens.split_interactions_per_user：
+# 具体做法见 recsys.data.schema.temporal_train_validation_test_split：
 # 每个用户的最后两次交互依次作为验证集与测试集。
 SPLIT_STRATEGY = "per_user_last_two_strict_timestamp_v2"
 
@@ -13,16 +17,10 @@ SPLIT_STRATEGY = "per_user_last_two_strict_timestamp_v2"
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_ARTIFACTS_DIR = Path("artifacts")
 
-# 新入口默认使用 KuaiRec：它是最终实验的数据集。
-# MovieLens 仍保留为快速上手的第二条数据线，已交付的 MovieLens checkpoint
-# 会显式带上 dataset 字段，评测时不受这个默认值影响。
+# 默认数据集。KuaiSAR 的 `prepare_kuasar` 接入后改这里（Phase 1.3）。
 DEFAULT_DATASET = "kuairec"
 
-# MovieLens 的正反馈阈值：评分 >= 4 记为「喜欢」。
-DEFAULT_MOVIELENS_POSITIVE_THRESHOLD = 4
-
 # KuaiRec 的正反馈阈值：watch_ratio >= 1.0（完整播放）记为「喜欢」。
-# 定案依据见 artifacts/kuairec_data_stats.json 与 docs/04-kuairec/01。
 # 这个值必须在训练之前定死：正样本集合决定用户/物品词表，
 # 之后换阈值会让所有已交付的 checkpoint 和指标失效。
 KUAIREC_WATCH_RATIO_THRESHOLD = 1.0

@@ -56,5 +56,5 @@ experiments/
 
 ## 当前状态
 
-仓库里没有正式实验记录（`artifacts/` 里只有一次 MovieLens 冒烟训练，用来验证管线与工件溯源）。
+仓库里没有正式实验记录（`artifacts/` 目前只有 KuaiSAR 的勘查与画像 JSON，以及少量冒烟产物）。
 第一次正式实验请按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。

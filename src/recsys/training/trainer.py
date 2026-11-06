@@ -1,4 +1,4 @@
-"""训练 Two-Tower 召回基线（MovieLens / KuaiRec 二选一）。"""
+"""训练 Two-Tower 召回基线（KuaiRec 流程模板；KuaiSAR 接入后切主数据线）。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from recsys.data.loader import (
     prepare_dataset,
     resolve_positive_threshold,
 )
-from recsys.data.movielens import Interaction, MovieLensDataset
+from recsys.data.schema import Interaction, InteractionDataset
 from recsys.models.two_tower import TwoTowerModel
 from recsys.training.losses import in_batch_cross_entropy_loss
 from recsys.utils.checkpoint import json_ready_config
@@ -54,7 +54,7 @@ def resolve_device(device: str) -> torch.device:
 
 
 def create_dataloader(
-    dataset: MovieLensDataset, batch_size: int, seed: int, shuffle: bool = True
+    dataset: InteractionDataset, batch_size: int, seed: int, shuffle: bool = True
 ) -> DataLoader:
     """创建 DataLoader，并用固定种子的生成器保证打乱顺序可复现。"""
     generator = torch.Generator()
@@ -118,7 +118,7 @@ def build_train_positive_matrix(
     num_items: int,
     device: torch.device,
 ) -> torch.Tensor:
-    """构建整张 MovieLens 规模的真值表，用于屏蔽误判的负样本。
+    """构建整张用户×物品的真值表，用于屏蔽误判的负样本。
 
     当 ``[user_idx, item_idx]`` 这对组合确实出现在训练集里时，该位置为 True。
     有了它，训练时就能忽略「批内偶然出现的假负样本」。
@@ -154,7 +154,7 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
         data_dir=config.data_dir,
         positive_threshold=positive_threshold,
     )
-    train_dataset = MovieLensDataset(prepared_data.train_interactions)
+    train_dataset = InteractionDataset(prepared_data.train_interactions)
     train_loader = create_dataloader(
         train_dataset, config.batch_size, config.seed, shuffle=True
     )
@@ -299,7 +299,7 @@ def parse_args() -> TrainConfig:
         "--positive-threshold",
         type=float,
         default=None,
-        help="rating threshold for MovieLens or watch_ratio threshold for KuaiRec; "
+        help="positive threshold for the selected dataset (KuaiRec: watch_ratio); "
         "defaults to the audited value in recsys.config",
     )
     parser.add_argument("--weight-decay", type=float, default=0.0)

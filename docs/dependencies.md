@@ -37,7 +37,7 @@
 ## 本机实测（2026-11-05）
 
 - Python 3.14.3 + torch 2.14.0+cpu + numpy 2.5.3 + faiss-cpu：可 import，
-  适配层冒烟测试全过，MovieLens 上 MF 训练 + 统一评测跑通（含 provenance 输出）；
+  适配层冒烟测试全过；KuaiSAR 下载 + md5 校验 + 全量画像（3.5 GB）跑通；
 - 未安装：lightgbm、tensorflow、fuxictr、recbole、tzrec、genrec、verl/vllm
   （对应模型在 `zoo.toml` 中标为 `upstream_ready` 或 `blocked`）；
 - 结论：主环境声明 `requires-python = ">=3.11"`，实测在 3.14 工作正常；上游更窄的限制只在各自环境里成立。
