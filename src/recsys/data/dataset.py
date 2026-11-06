@@ -6,6 +6,7 @@ import random
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import chain
 
 import torch
 from torch.utils.data import Dataset
@@ -136,11 +137,15 @@ def build_observed_histories(
     include_validation_in_test_history: bool = True,
 ) -> dict[int, list[int]]:
     """返回指定切分下模型「允许看到」的物品历史。"""
-    observed_interactions = list(prepared_data.train_interactions)
+    # 用 chain 而不是 list()：KuaiSAR 的训练序列是数组视图，复制一次就是 7M 个对象
     if split == "test" and include_validation_in_test_history:
         # 测试目标发生的时刻，验证集交互早已被观测到，
         # 因此它属于测试阶段的历史。
-        observed_interactions += list(prepared_data.validation_interactions)
+        observed_interactions = chain(
+            prepared_data.train_interactions, prepared_data.validation_interactions
+        )
+    else:
+        observed_interactions = prepared_data.train_interactions
     return build_user_sequences(observed_interactions)
 
 
@@ -172,9 +177,12 @@ def build_evaluation_examples(
     filtered_items = seen_items_for_split(prepared_data, split)
 
     examples = []
-    visible_rows = list(prepared_data.train_interactions)
     if split == "test" and include_validation_in_test_history:
-        visible_rows.extend(prepared_data.validation_interactions)
+        visible_rows = chain(
+            prepared_data.train_interactions, prepared_data.validation_interactions
+        )
+    else:
+        visible_rows = prepared_data.train_interactions
     latest_visible_time: dict[int, float] = {}
     for row in visible_rows:
         latest_visible_time[row.user_idx] = max(

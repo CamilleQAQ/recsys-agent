@@ -216,11 +216,15 @@ data/kuasar/processed/          （gitignore，可由 --force 重建）
 
 - [x] 口径决定：正样本 `click == 1`；广告物品保留；搜索侧不纳入 Phase 1（2026-11-06）
 - [x] **processed 存储**：`kuasar_store.py` 产出 npy + CSR 曝光 + `protocol.json`（253 MB，24,128 可评测用户）
-- [ ] `PreparedData` 数组后端：把 npy 视图接进 `loader`，让现有训练/评测入口能读 KuaiSAR
-- [ ] 切分策略参数化：checkpoint 的 `split_strategy` 目前只有 KuaiRec 的点击级常量，
-      KuaiSAR 需要按数据集写 `per_user_last_two_requests`
-- [ ] 序列样本与候选+特征样本
+- [x] `PreparedData` 数组后端：`ArrayInteractions` + `SparseExposure` + `SortedIndexLookup`，
+      `prepare_dataset("kuasar")` 已可用（`prepare_kuasar`）
+- [x] 切分策略按数据集参数化：`split_strategy_for()`，checkpoint 写 `prepared_data.split_strategy`
+- [x] 召回样本（交互对）与序列样本可在数组后端上构造（`InteractionDataset` / `SASRecTrainDataset`）
+- [ ] 排序候选 + 特征样本（依赖 1.5 特征通道）
+- [ ] 全量训练的资源规划：4.05M 物品 × 64 维 embedding ≈ 1 GB，Adam 状态再 2 GB，
+      16 GB/CPU 机器上先做小维度试跑（Phase 2 正式定）
 - [ ] 特征通道（类目/作者/活跃度、`is_ad`）
+
 - [ ] 数据版本校验：`load_processed` 比对 `protocol.json` 指纹，防止用了旧缓存
 
 

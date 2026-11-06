@@ -82,23 +82,32 @@ def data_fingerprint(data: PreparedData) -> dict[str, Any]:
 
 
 def id_mapping_summary(data: PreparedData, sample_size: int = 5) -> dict[str, Any]:
-    """映射的可核对摘要；完整映射请引用 processed/id_mappings.json。"""
-    payload = json.dumps(
-        {
-            "user": data.mappings.index_to_user,
-            "item": data.mappings.index_to_item,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    """映射的可核对摘要；完整映射引用 `processed/` 下的 npy / id_mappings.json。
+
+    KuaiSAR 的映射是 405 万元素的 numpy 数组，**不能**转成 JSON（几 GB 字符串）：
+    数组直接对字节做哈希，样例只取前几个元素。
+    """
+    digest = hashlib.sha256()
+    samples: dict[str, list[int]] = {}
+    for name, sequence in (
+        ("user", data.mappings.index_to_user),
+        ("item", data.mappings.index_to_item),
+    ):
+        if isinstance(sequence, np.ndarray):
+            digest.update(np.ascontiguousarray(sequence).tobytes())
+            samples[f"{name}_index_to_original"] = [
+                int(value) for value in sequence[:sample_size]
+            ]
+        else:
+            digest.update(
+                json.dumps(list(sequence), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            )
+            samples[f"{name}_index_to_original"] = [int(value) for value in sequence[:sample_size]]
     return {
-        "sha256": hashlib.sha256(payload).hexdigest(),
+        "sha256": digest.hexdigest(),
         "num_users": data.num_users,
         "num_items": data.num_items,
-        "sample": {
-            "user_index_to_original": data.mappings.index_to_user[:sample_size],
-            "item_index_to_original": data.mappings.index_to_item[:sample_size],
-        },
+        "sample": samples,
     }
 
 
@@ -144,7 +153,7 @@ def build_provenance(
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "dataset": dataset,
         "positive_threshold": positive_threshold,
-        "split_strategy": SPLIT_STRATEGY,
+        "split_strategy": data.split_strategy,
         "data": data_fingerprint(data),
         "id_mapping": id_mapping_summary(data),
         "code": code_fingerprint(),

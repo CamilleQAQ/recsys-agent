@@ -10,7 +10,6 @@ from pathlib import Path
 
 import torch
 
-from recsys.config import SPLIT_STRATEGY
 from recsys.data.loader import SUPPORTED_DATASETS, prepare_dataset
 from recsys.data.schema import InteractionDataset
 from recsys.evaluation.evaluator import evaluate_embedding_model
@@ -142,7 +141,7 @@ def run_experiment(config: ExperimentConfig) -> dict:
     # 这组实验沿用 experiment_config 这个键名保存训练配置。
     checkpoint = {
         "model_state_dict": best_state_dict,
-        "split_strategy": SPLIT_STRATEGY,
+        "split_strategy": prepared_data.split_strategy,
         "model_config": {
             "num_users": prepared_data.num_users,
             "num_items": prepared_data.num_items,

@@ -1,18 +1,26 @@
 """各命令行入口共用的数据集选择逻辑。
 
-当前只维护 KuaiRec（流程模板/辅助线）；KuaiSAR 的 `prepare_kuasar` 在 Phase 1.3 接入，
-届时在 `SUPPORTED_DATASETS` 与 `prepare_dataset` 里登记即可。
+- `kuasar`：主数据线，读 `data/kuasar/processed/` 的 npy 存储（先跑 `kuasar_store`）；
+- `kuairec`：流程模板/辅助线，直接解析原始 CSV。
+
+两个数据集的切分协议不同（KuaiSAR 按请求、KuaiRec 按点击），
+`split_strategy_for()` 给出「该数据集应该用哪个协议」，checkpoint / 评测都用它校验。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from recsys.config import KUAIREC_WATCH_RATIO_THRESHOLD
+from recsys.config import KUAIREC_WATCH_RATIO_THRESHOLD, SPLIT_STRATEGY
 from recsys.data.kuairec import prepare_kuairec
+from recsys.data.kuasar_store import prepare_kuasar
 from recsys.data.schema import PreparedData
 
-SUPPORTED_DATASETS = ("kuairec",)
+SUPPORTED_DATASETS = ("kuairec", "kuasar")
+
+#: KuaiSAR 的正样本就是 click == 1，没有阈值概念；这里给一个统一接口需要的数值。
+KUASAR_POSITIVE_CLICK = 1.0
+KUASAR_SPLIT_STRATEGY = "per_user_last_two_requests"
 
 
 def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -> float:
@@ -22,6 +30,20 @@ def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -
     normalized_name = dataset.lower()
     if normalized_name == "kuairec":
         return float(KUAIREC_WATCH_RATIO_THRESHOLD)
+    if normalized_name == "kuasar":
+        return KUASAR_POSITIVE_CLICK
+    raise ValueError(
+        f"Unsupported dataset {dataset!r}; choose one of {SUPPORTED_DATASETS}"
+    )
+
+
+def split_strategy_for(dataset: str) -> str:
+    """该数据集应使用的切分协议（写进 checkpoint，评测时据此校验）。"""
+    normalized_name = dataset.lower()
+    if normalized_name == "kuairec":
+        return SPLIT_STRATEGY
+    if normalized_name == "kuasar":
+        return KUASAR_SPLIT_STRATEGY
     raise ValueError(
         f"Unsupported dataset {dataset!r}; choose one of {SUPPORTED_DATASETS}"
     )
@@ -45,8 +67,8 @@ def resolve_checkpoint_dataset(checkpoint: dict) -> str:
 def resolve_dataset_data_dir(dataset: str, data_dir: Path) -> Path:
     """返回该数据集自己的目录：每个数据集住进 ``data/<name>/``。"""
     normalized_name = dataset.lower()
-    if normalized_name == "kuairec":
-        return data_dir / "kuairec"
+    if normalized_name in SUPPORTED_DATASETS:
+        return data_dir / normalized_name
     raise ValueError(
         f"Unsupported dataset {dataset!r}; choose one of {SUPPORTED_DATASETS}"
     )
@@ -61,4 +83,6 @@ def prepare_dataset(
     normalized_name = dataset.lower()
     threshold = resolve_positive_threshold(normalized_name, positive_threshold)
     dataset_dir = resolve_dataset_data_dir(normalized_name, data_dir)
+    if normalized_name == "kuasar":
+        return prepare_kuasar(dataset_dir)
     return prepare_kuairec(dataset_dir, watch_ratio_threshold=float(threshold))

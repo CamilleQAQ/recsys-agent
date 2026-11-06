@@ -20,7 +20,7 @@ import torch
 from torch import nn
 
 from recsys.adapters.base import AdapterError, RecommenderAdapter, evaluation_users
-from recsys.config import SPLIT_STRATEGY
+from recsys.data.loader import resolve_checkpoint_dataset, split_strategy_for
 from recsys.data.schema import PreparedData, seen_items_for_split
 from recsys.evaluation.evaluator import (
     generate_recommendations as generate_embedding_recommendations,
@@ -55,9 +55,11 @@ def _load_checkpoint(path: Path, device: torch.device) -> dict:
             f"找不到 checkpoint: {path}。先运行对应的训练入口，或确认 --checkpoint 路径。"
         )
     checkpoint = torch.load(path, map_location=device, weights_only=True)
-    if checkpoint.get("split_strategy") != SPLIT_STRATEGY:
+    expected_strategy = split_strategy_for(resolve_checkpoint_dataset(checkpoint))
+    if checkpoint.get("split_strategy") != expected_strategy:
         raise AdapterError(
-            "checkpoint 使用的数据切分协议与当前 SPLIT_STRATEGY 不一致，需要重新训练"
+            f"checkpoint 的切分协议（{checkpoint.get('split_strategy')}）与数据集要求的"
+            f"（{expected_strategy}）不一致，需要重新训练"
         )
     return checkpoint
 

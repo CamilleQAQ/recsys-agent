@@ -11,7 +11,7 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
-from recsys.config import DEFAULT_DATASET, SPLIT_STRATEGY
+from recsys.config import DEFAULT_DATASET
 from recsys.data.loader import (
     SUPPORTED_DATASETS,
     prepare_dataset,
@@ -172,7 +172,7 @@ def train_mf(config: MFTrainConfig) -> tuple[MatrixFactorization, list[float]]:
     torch.save(
         {
             "model_state_dict": model.state_dict(),
-            "split_strategy": SPLIT_STRATEGY,
+            "split_strategy": prepared_data.split_strategy,
             "dataset": config.dataset,
             "positive_threshold": positive_threshold,
             "model_config": {

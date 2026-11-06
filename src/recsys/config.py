@@ -17,8 +17,8 @@ SPLIT_STRATEGY = "per_user_last_two_strict_timestamp_v2"
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_ARTIFACTS_DIR = Path("artifacts")
 
-# 默认数据集。KuaiSAR 的 `prepare_kuasar` 接入后改这里（Phase 1.3）。
-DEFAULT_DATASET = "kuairec"
+# 默认数据集：KuaiSAR 是主数据线（需先跑 python -m recsys.data.kuasar_store 构建 processed）。
+DEFAULT_DATASET = "kuasar"
 
 # KuaiRec 的正反馈阈值：watch_ratio >= 1.0（完整播放）记为「喜欢」。
 # 这个值必须在训练之前定死：正样本集合决定用户/物品词表，

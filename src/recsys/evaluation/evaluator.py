@@ -10,11 +10,11 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from recsys.config import SPLIT_STRATEGY
 from recsys.data.loader import (
     prepare_dataset,
     resolve_checkpoint_dataset,
     resolve_positive_threshold,
+    split_strategy_for,
 )
 from recsys.data.schema import Interaction, PreparedData, seen_items_for_split
 from recsys.evaluation.metrics import compute_ranking_metrics
@@ -129,10 +129,11 @@ def load_model(
             "Run python -m recsys.training.trainer --dataset <name> first."
         )
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    if checkpoint.get("split_strategy") != SPLIT_STRATEGY:
+    expected_strategy = split_strategy_for(resolve_checkpoint_dataset(checkpoint))
+    if checkpoint.get("split_strategy") != expected_strategy:
         raise ValueError(
-            "Checkpoint uses the old data split. "
-            "Retrain it with python -m recsys.training.trainer."
+            f"Checkpoint 的切分协议（{checkpoint.get('split_strategy')}）与数据集 "
+            f"要求的（{expected_strategy}）不一致，需要重新训练。"
         )
     model = TwoTowerModel(**checkpoint["model_config"]).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])

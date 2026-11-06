@@ -11,7 +11,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from recsys.config import DEFAULT_DATASET, SPLIT_STRATEGY
+from recsys.config import DEFAULT_DATASET
 from recsys.data.loader import (
     SUPPORTED_DATASETS,
     prepare_dataset,
@@ -117,12 +117,24 @@ def build_train_positive_matrix(
     num_users: int,
     num_items: int,
     device: torch.device,
+    *,
+    max_entries: int = 20_000_000,
 ) -> torch.Tensor:
     """构建整张用户×物品的真值表，用于屏蔽误判的负样本。
 
     当 ``[user_idx, item_idx]`` 这对组合确实出现在训练集里时，该位置为 True。
     有了它，训练时就能忽略「批内偶然出现的假负样本」。
+
+    表是稠密的：KuaiSAR（25,877 × 4,046,367）需要约 105 GB，必须在调用前
+    用 ``mask_false_negatives=False`` 关掉；物品词表 4M 时批内假负例概率约 1e-5，
+    关掉几乎不影响训练。
     """
+    entries = num_users * num_items
+    if entries > max_entries:
+        raise ValueError(
+            f"真值表过大：{num_users:,} × {num_items:,} ≈ {entries / 1e9:.1f}e9 项，"
+            "请关闭 mask_false_negatives（--no-mask-false-negatives）"
+        )
     positive_matrix = torch.zeros(
         (num_users, num_items), dtype=torch.bool, device=device
     )
@@ -237,7 +249,7 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
     torch.save(
         {
             "model_state_dict": model.state_dict(),
-            "split_strategy": SPLIT_STRATEGY,
+            "split_strategy": prepared_data.split_strategy,
             "dataset": config.dataset,
             "positive_threshold": positive_threshold,
             "model_config": {

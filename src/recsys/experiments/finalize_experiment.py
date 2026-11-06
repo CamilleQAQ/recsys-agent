@@ -13,8 +13,7 @@ import torch
 
 from recsys.experiments.compare import compare_models, print_comparison_table
 from recsys.experiments.compare_sasrec import compare_with_sasrec
-from recsys.config import SPLIT_STRATEGY
-from recsys.data.loader import SUPPORTED_DATASETS, prepare_dataset
+from recsys.data.loader import SUPPORTED_DATASETS, prepare_dataset, split_strategy_for
 from recsys.evaluation.sasrec_evaluator import evaluate_sasrec_model, load_sasrec_model
 from recsys.training.trainer import resolve_device
 
@@ -243,7 +242,7 @@ def finalize_experiment(
             ),
         },
         "evaluation_protocol": {
-            "split_strategy": SPLIT_STRATEGY,
+            "split_strategy": split_strategy_for(dataset),
             "ordering": "strict train < validation < test timestamps; ambiguous users remain in train",
             "catalog_definition": "all positive-interaction item IDs before splitting",
             "validation_use": "hyperparameter selection and checkpoint selection only",

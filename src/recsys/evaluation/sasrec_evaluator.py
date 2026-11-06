@@ -8,11 +8,11 @@ from pathlib import Path
 
 import torch
 
-from recsys.config import SPLIT_STRATEGY
 from recsys.data.loader import (
     prepare_dataset,
     resolve_checkpoint_dataset,
     resolve_positive_threshold,
+    split_strategy_for,
 )
 from recsys.data.schema import PreparedData
 from recsys.evaluation.evaluator import evaluate_recommendations
@@ -103,8 +103,11 @@ def load_sasrec_model(
             "Run python -m recsys.training.train_sasrec first."
         )
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-    if checkpoint.get("split_strategy") != SPLIT_STRATEGY:
-        raise ValueError("SASRec checkpoint uses an incompatible data split")
+    expected_strategy = split_strategy_for(resolve_checkpoint_dataset(checkpoint))
+    if checkpoint.get("split_strategy") != expected_strategy:
+        raise ValueError(
+            f"SASRec checkpoint 的切分协议与数据集要求不一致（{expected_strategy}）"
+        )
     model = SASRec(**checkpoint["model_config"]).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     return model, checkpoint

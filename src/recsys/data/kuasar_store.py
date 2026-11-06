@@ -37,6 +37,13 @@ import numpy as np
 
 from recsys.config import DEFAULT_DATA_DIR
 from recsys.data.kuasar import KUASAR_ARCHIVE_MD5, KUASAR_DATASET_DIRNAME
+from recsys.data.schema import (
+    ArrayInteractions,
+    IdMappings,
+    PreparedData,
+    SparseExposure,
+    SortedIndexLookup,
+)
 
 REC_INTER = "KuaiSAR_v2/rec_inter.csv"
 POSITIVE_FIELD = "click"
@@ -47,12 +54,18 @@ EXPOSURE_POLICY = "all_rows_before_target_timestamp"
 _READ_CHUNK = 1_000_000
 
 
-def processed_dir(data_dir: Path) -> Path:
-    return data_dir / KUASAR_DATASET_DIRNAME / "processed"
+def dataset_dir(data_dir: Path) -> Path:
+    """`data/kuasar`（与 KuaiRec 的 `data/kuairec` 同构）。"""
+    return data_dir / KUASAR_DATASET_DIRNAME
 
 
-def _rec_inter_path(data_dir: Path) -> Path:
-    return data_dir / KUASAR_DATASET_DIRNAME / "raw" / REC_INTER
+def processed_dir(dataset_root: Path) -> Path:
+    """`dataset_root` 是 `data/kuasar` 这一层，不是 `data`。"""
+    return dataset_root / "processed"
+
+
+def _rec_inter_path(dataset_root: Path) -> Path:
+    return dataset_root / "raw" / REC_INTER
 
 
 def _read_columns(path: Path, max_rows: int | None = None) -> dict[str, np.ndarray]:
@@ -272,7 +285,9 @@ def _save(
 def build_processed_store(
     data_dir: Path = DEFAULT_DATA_DIR, *, max_rows: int | None = None
 ) -> dict[str, Any]:
-    source = _rec_inter_path(data_dir)
+    """`data_dir` 是仓库根下的 `data/`（里面是 `kuasar/`）。"""
+    dataset_root = dataset_dir(data_dir)
+    source = _rec_inter_path(dataset_root)
     if not source.exists():
         raise FileNotFoundError(
             f"找不到 {source}；先运行 python -m recsys.data.kuasar 下载并解压。"
@@ -306,7 +321,7 @@ def build_processed_store(
     }
 
     print("[5/5] 保存 npy 与元信息 …", flush=True)
-    target = processed_dir(data_dir)
+    target = processed_dir(dataset_root)
     fingerprints = _save(target, mapped, positives, exposure)
 
     split_counts = {
@@ -352,11 +367,17 @@ def build_processed_store(
     return {"stats": stats, "protocol": protocol, "output_dir": target}
 
 
-def load_processed(data_dir: Path = DEFAULT_DATA_DIR, mmap: bool = True) -> dict[str, Any]:
-    """读取 processed 存储；默认 mmap，常驻内存接近 0。"""
-    base = processed_dir(data_dir)
+def load_processed(dataset_root: Path | None = None, mmap: bool = True) -> dict[str, Any]:
+    """读取 processed 存储；默认 mmap，常驻内存接近 0。
+
+    `dataset_root` 是 `data/kuasar`；不传时用 `data/kuasar` 的默认位置。
+    """
+    dataset_root = dataset_root or dataset_dir(DEFAULT_DATA_DIR)
+    base = processed_dir(dataset_root)
     if not (base / "protocol.json").exists():
-        raise FileNotFoundError(f"{base} 还没有构建；先运行 python -m recsys.data.kuasar_store。")
+        raise FileNotFoundError(
+            f"{base} 还没有构建；先运行 python -m recsys.data.kuasar_store。"
+        )
     mode = "r" if mmap else None
     return {
         "protocol": json.loads((base / "protocol.json").read_text(encoding="utf-8")),
@@ -379,6 +400,65 @@ def load_processed(data_dir: Path = DEFAULT_DATA_DIR, mmap: bool = True) -> dict
             for name in ("validation", "test")
         },
     }
+
+
+def prepare_kuasar(dataset_root: Path | None = None) -> PreparedData:
+    """把 processed 存储包装成统一的 `PreparedData`（数组后端 + 稀疏曝光）。
+
+    `dataset_root` 是 `data/kuasar`（loader 传进来的就是这一层）。
+
+    与 KuaiRec 的差别：
+
+    * 交互是 `ArrayInteractions`（mmap 视图），不是 `list[Interaction]`；
+    * 曝光是 `SparseExposure`（CSR），不是稠密 mask；
+    * `split_strategy` 取协议里的 `per_user_last_two_requests`。
+    """
+    store = load_processed(dataset_root)
+    stats = store["stats"]
+    split_data = store["split"]
+
+    mappings = IdMappings(
+        user_to_index=SortedIndexLookup(store["user_ids"]),
+        index_to_user=store["user_ids"],
+        item_to_index=SortedIndexLookup(store["item_ids"]),
+        index_to_item=store["item_ids"],
+    )
+
+    def interactions(name: str) -> ArrayInteractions:
+        payload = split_data[name]
+        return ArrayInteractions(payload["users"], payload["items"], payload["timestamps"])
+
+    prepared = PreparedData(
+        train_interactions=interactions("train"),
+        validation_interactions=interactions("validation"),
+        test_interactions=interactions("test"),
+        mappings=mappings,
+        validation_seen=SparseExposure(
+            store["exposure"]["validation"]["indptr"], store["exposure"]["validation"]["items"]
+        ),
+        test_seen=SparseExposure(
+            store["exposure"]["test"]["indptr"], store["exposure"]["test"]["items"]
+        ),
+        split_strategy=str(store["protocol"].get("split_strategy", "per_user_last_two_requests")),
+    )
+
+    # 与统计对账：切分文件被手工改动或缓存过期时，早失败好过静默评错。
+    expected = stats["split_counts"]
+    actual = {
+        "train": len(prepared.train_interactions),
+        "validation": len(prepared.validation_interactions),
+        "test": len(prepared.test_interactions),
+    }
+    mismatched = {
+        name: (expected.get(name), actual[name])
+        for name in actual
+        if expected.get(name) != actual[name]
+    }
+    if mismatched:
+        raise ValueError(
+            f"processed 存储与 stats.json 不一致（expected, actual）：{mismatched}"
+        )
+    return prepared
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

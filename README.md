@@ -20,7 +20,7 @@
 | 第三方仓库 | 13 个，来源见 [third_party/SOURCES.toml](third_party/SOURCES.toml) |
 | 纳入索引的模型 | 24 个：12 召回 / 9 排序 / 3 基础设施 |
 | 已接入统一接口 | 4 个召回模型（popularity、MF、Two-Tower、SASRec）+ FAISS 索引封装 |
-| 数据主线 | **KuaiSAR 2.0**（已下载并完成全量画像，Phase 1.3 接入 `prepare_kuasar`）；KuaiRec 仅为流程模板/辅助线 |
+| 数据主线 | **KuaiSAR 2.0**：下载 → 全量画像 → processed npy 存储 → `PreparedData` 接入（Phase 1.1–1.4 完成）；KuaiRec 为流程模板/辅助线 |
 | 累计清理 | 400.7 MB → 108.8 MB（第三方部分），详见 [docs/cleanup-report.md](docs/cleanup-report.md) |
 
 模型清单见 [docs/model-zoo.md](docs/model-zoo.md)（由 [models/zoo.toml](models/zoo.toml) 生成）。
@@ -60,19 +60,21 @@ python -m venv .venv
 pip install -e .
 pip install -r requirements/optional-faiss.txt
 
-# 2. 准备数据（KuaiSAR 的 prepare 在 Phase 1.3 接入；当前用 KuaiRec 验证管线，
-#    KuaiSAR 原始数据可用 python -m recsys.data.kuasar 下载）
-python -m recsys.data.prepare --dataset kuairec
+# 2. 数据主线：下载 KuaiSAR → 构建 processed 存储
+python -m recsys.data.kuasar          # 805.9 MB，带 md5 校验，解压 3.5 GB
+python -m recsys.data.kuasar_store    # 约 36 秒，产出 data/kuasar/processed（253 MB，24,128 可评测用户）
+#   流程模板（辅助线）：python -m recsys.data.prepare --dataset kuairec
 
-# 3. 训练
-python -m recsys.training.train_mf      --dataset kuairec --epochs 2
-python -m recsys.training.trainer       --dataset kuairec --epochs 2
-python -m recsys.training.train_sasrec  --dataset kuairec --max-epochs 2
+# 3. 训练（默认数据集已是 kuasar；4M 物品词表在 CPU/16GB 机器上很吃资源，
+#    先用小维度 + 限制 batch 数验证通路，正式训练留到 Phase 2）
+python -m recsys.training.train_mf --dataset kuasar --embedding-dim 16 --epochs 1 --max-batches-per-epoch 200
+python -m recsys.training.trainer  --dataset kuasar --embedding-dim 32 --output-dim 16 --epochs 1 --max-batches-per-epoch 200
+#   SASRec 需要按用户构造序列，KuaiSAR 上建议先加 --max-batches-per-epoch 试跑
 
 # 4. 统一接口评测（自动读回 checkpoint 的数据集、阈值与溯源信息）
 python -m recsys.adapters list
 python -m recsys.adapters evaluate --model matrix_factorization `
-    --checkpoint artifacts/kuairec/matrix_factorization.pt --split test
+    --checkpoint artifacts/kuasar/matrix_factorization.pt --split test
 ```
 
 不装包时用 `$env:PYTHONPATH = "src"` 也能直接运行。校验与冒烟测试（不需要真实数据）：

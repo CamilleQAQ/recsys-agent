@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import csv
 import json
-import numpy as np
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
+
 from recsys.config import SPLIT_STRATEGY
 
 
@@ -25,28 +26,146 @@ class Interaction:
     timestamp: float
 
 
+class ArrayInteractions(Sequence[Interaction]):
+    """数组后端的交互序列（KuaiSAR 用）。
+
+    7M+ 条交互如果物化成 `list[Interaction]` 要 1 GB 以上；这里只持有三列 numpy
+    数组（通常是 mmap），按下标惰性构造 `Interaction`。`len()` / 索引 / 迭代都可用，
+    但**不要**对它调用 `list()`——那会把内存开销一次性付清。
+    """
+
+    def __init__(
+        self,
+        users: np.ndarray,
+        items: np.ndarray,
+        timestamps: np.ndarray,
+    ) -> None:
+        if not (len(users) == len(items) == len(timestamps)):
+            raise ValueError("users / items / timestamps 长度必须一致")
+        self._users = users
+        self._items = items
+        self._timestamps = timestamps
+
+    def __len__(self) -> int:
+        return len(self._users)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [
+                Interaction(int(self._users[i]), int(self._items[i]), float(self._timestamps[i]))
+                for i in range(*index.indices(len(self)))
+            ]
+        return Interaction(
+            int(self._users[index]),
+            int(self._items[index]),
+            float(self._timestamps[index]),
+        )
+
+    def __iter__(self) -> Iterator[Interaction]:
+        for user, item, timestamp in zip(self._users, self._items, self._timestamps):
+            yield Interaction(int(user), int(item), float(timestamp))
+
+
+class SparseExposure:
+    """按用户的曝光历史（CSR）：`indptr[u]:indptr[u+1]` 是用户 u 曝光过的物品。
+
+    取代稠密 `[num_users, num_items]` mask —— KuaiSAR 上后者需要约 97.5 GiB。
+    """
+
+    def __init__(self, indptr: np.ndarray, items: np.ndarray) -> None:
+        if indptr.size == 0:
+            raise ValueError("indptr 不能为空")
+        if int(indptr[-1]) != len(items):
+            raise ValueError("indptr 末尾必须等于 items 长度")
+        self.indptr = indptr
+        self.items = items
+
+    @property
+    def num_users(self) -> int:
+        return int(self.indptr.size) - 1
+
+    def __len__(self) -> int:
+        return int(self.items.size)
+
+    def items_for(self, user_idx: int) -> np.ndarray:
+        start = int(self.indptr[user_idx])
+        end = int(self.indptr[user_idx + 1])
+        return self.items[start:end]
+
+    def as_set(self, user_idx: int) -> set[int]:
+        return set(self.items_for(user_idx).tolist())
+
+
+class SortedIndexLookup(Mapping[int, int]):
+    """原始 ID → 连续索引，基于已排序数组的二分查找。
+
+    不物化 `dict[int, int]`：KuaiSAR 有 405 万物品，字典约占 400–600 MB。
+    """
+
+    def __init__(self, original_ids: np.ndarray) -> None:
+        self._ids = original_ids
+
+    def __getitem__(self, key: int) -> int:
+        position = int(np.searchsorted(self._ids, key))
+        if position >= self._ids.size or int(self._ids[position]) != int(key):
+            raise KeyError(key)
+        return position
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self._ids)
+
+    def __len__(self) -> int:
+        return int(self._ids.size)
+
+
+class SeenItemsView(Mapping[int, set[int]]):
+    """把稀疏曝光包装成 `{user: set(items)}` 的只读视图，取哪个用户才构造哪个集合。"""
+
+    def __init__(self, exposure: SparseExposure, users: Sequence[int]) -> None:
+        self._exposure = exposure
+        self._users = tuple(int(user) for user in users)
+
+    def __getitem__(self, user_idx: int) -> set[int]:
+        return self._exposure.as_set(int(user_idx))
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self._users)
+
+    def __len__(self) -> int:
+        return len(self._users)
+
+
 @dataclass(frozen=True)
 class IdMappings:
-    """Bidirectional mappings between source IDs and contiguous model indices."""
+    """Bidirectional mappings between source IDs and contiguous model indices.
 
-    user_to_index: dict[int, int]
-    index_to_user: list[int]
-    item_to_index: dict[int, int]
-    index_to_item: list[int]
+    `index_to_*` 可以是 numpy 数组（KuaiSAR），`*_to_index` 可以是
+    `SortedIndexLookup`；只有需要写文件时才要求可枚举的 dict。
+    """
+
+    user_to_index: Mapping[int, int]
+    index_to_user: Sequence[int]
+    item_to_index: Mapping[int, int]
+    index_to_item: Sequence[int]
 
 
 @dataclass(frozen=True)
 class PreparedData:
     """The common data object consumed by every recommendation model."""
 
-    train_interactions: list[Interaction]
-    validation_interactions: list[Interaction]
-    test_interactions: list[Interaction]
+    train_interactions: Sequence[Interaction]
+    validation_interactions: Sequence[Interaction]
+    test_interactions: Sequence[Interaction]
     mappings: IdMappings
     # Optional exact pre-target exposure masks, including non-positive watches.
     # Shape: [num_users, num_items]. Synthetic tests may omit these.
     validation_seen_mask: np.ndarray | None = None
     test_seen_mask: np.ndarray | None = None
+    # 稀疏曝光历史（KuaiSAR）：与 mask 二选一，优先使用。
+    validation_seen: SparseExposure | None = None
+    test_seen: SparseExposure | None = None
+    # 数据集自己的切分协议；写进 checkpoint，评测时据此校验。
+    split_strategy: str = SPLIT_STRATEGY
 
     @property
     def num_users(self) -> int:
@@ -61,7 +180,8 @@ class InteractionDataset(Dataset):
     """PyTorch dataset exposing the same tensors for every source dataset."""
 
     def __init__(self, interactions: Sequence[Interaction]) -> None:
-        self.interactions = list(interactions)
+        # 不再复制成 list：KuaiSAR 的序列是数组视图，复制会白付一次内存。
+        self.interactions = interactions
 
     def __len__(self) -> int:
         return len(self.interactions)
@@ -77,17 +197,25 @@ class InteractionDataset(Dataset):
 
 def seen_items_for_split(
     data: PreparedData, split: str, include_validation_in_test: bool = True
-) -> dict[int, set[int]]:
+) -> Mapping[int, set[int]]:
     """Items actually observed before the target, never at or after its time."""
     if split not in {"validation", "test"}:
         raise ValueError("split must be 'validation' or 'test'")
+    sparse = (
+        data.validation_seen
+        if split == "validation" or not include_validation_in_test
+        else data.test_seen
+    )
+    targets = data.validation_interactions if split == "validation" else data.test_interactions
+    users = {row.user_idx for row in targets}
+    if sparse is not None:
+        # 只按需构造每个用户的集合，避免 2400 万条曝光一次性进 Python 对象
+        return SeenItemsView(sparse, sorted(users))
     mask = (
         data.validation_seen_mask
         if split == "validation" or not include_validation_in_test
         else data.test_seen_mask
     )
-    targets = data.validation_interactions if split == "validation" else data.test_interactions
-    users = {row.user_idx for row in targets}
     if mask is not None:
         return {user: set(np.flatnonzero(mask[user]).tolist()) for user in users}
     # Backwards-compatible fallback for hand-built small PreparedData objects.

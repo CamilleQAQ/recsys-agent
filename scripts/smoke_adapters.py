@@ -81,13 +81,15 @@ def build_synthetic_data() -> PreparedData:
 
 
 def checkpoint_payload(model_config: dict, state_dict: dict) -> dict:
+    # 夹具借用 kuairec 这个「已登记数据集」的名字，只为让切分协议校验能走通；
+    # 数据本身是合成的小样本，词表不一致时适配器会自己报错。
     return {
         "model_state_dict": state_dict,
         "split_strategy": SPLIT_STRATEGY,
-        "dataset": "synthetic",
+        "dataset": "kuairec",
         "positive_threshold": 1.0,
         "model_config": model_config,
-        "train_config": {"dataset": "synthetic"},
+        "train_config": {"dataset": "kuairec"},
     }
 
 

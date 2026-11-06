@@ -11,7 +11,7 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
-from recsys.config import DEFAULT_DATASET, SPLIT_STRATEGY
+from recsys.config import DEFAULT_DATASET
 from recsys.data.loader import (
     SUPPORTED_DATASETS,
     prepare_dataset,
@@ -186,7 +186,7 @@ def train_sasrec(config: SASRecTrainConfig) -> tuple[SASRec, dict]:
     # checkpoint 同时保存权重、能重建模型的结构配置，以及选轮依据和完整训练历史。
     checkpoint = {
         "model_state_dict": best_state_dict,
-        "split_strategy": SPLIT_STRATEGY,
+        "split_strategy": prepared_data.split_strategy,
         "dataset": config.dataset,
         "positive_threshold": positive_threshold,
         "model_config": {
