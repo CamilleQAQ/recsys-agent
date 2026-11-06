@@ -1,10 +1,8 @@
 # KuaiSAR 2.0（短视频搜索 + 推荐联合行为，主数据线）
 #
-# 状态：Phase 1.1 完成（下载 + md5 校验 + 解压 + 结构勘查）；
-#       Phase 1.2 进行中（字段已核对，全量画像未跑）。
-# 字段与统计结论见 docs/kuasar.md；勘查原始结果见 artifacts/kuasar_archive_survey.json。
-#
-# 来源与许可已核实（Zenodo 8181109），对应代码常量在 src/recsys/data/kuasar.py，
+# 状态：Phase 1.1 完成（下载 + md5 + 解压 + 勘查）；Phase 1.2 完成（全量画像）。
+# 字段与全量统计见 docs/kuasar.md；机器可读结果见 [profile].source。
+# 来源与许可已核实（Zenodo 8181109），代码常量在 src/recsys/data/kuasar.py，
 # 由 scripts/check_project.py 校验两边一致。数据不入库：.gitignore 已忽略 data/kuasar/。
 
 [dataset]
@@ -17,17 +15,17 @@ small_source_url = "https://zenodo.org/records/8181109/files/KuaiSAR.zip"
 small_archive_md5 = "daea8cbf605db6bd5841740f0e4a12d9"
 license = "CC BY-NC-SA 4.0（非商业 + 相同方式共享）"
 paper = "https://arxiv.org/abs/2306.07705"
-status = "phase-1.2-in-progress"
+status = "phase-1.2-done"
 
 [layout]
 root = "data/kuasar"
 raw = "data/kuasar/raw"
 extracted = "data/kuasar/raw/KuaiSAR_v2"
 survey = "artifacts/kuasar_archive_survey.json"
-rec_inter = "KuaiSAR_v2/rec_inter.csv"          # 1102.6 MB
-src_inter = "KuaiSAR_v2/src_inter.csv"          # 527.8 MB
-item_features = "KuaiSAR_v2/item_features.csv"  # 1915.5 MB（caption 为 token 列表）
-user_features = "KuaiSAR_v2/user_features.csv"  # 0.4 MB
+rec_inter = "KuaiSAR_v2/rec_inter.csv"          # 1102.6 MB / 14,605,716 行
+src_inter = "KuaiSAR_v2/src_inter.csv"          # 527.8 MB / 5,059,169 行
+item_features = "KuaiSAR_v2/item_features.csv"  # 1915.5 MB / 6,949,990 行（caption 为 token 列表）
+user_features = "KuaiSAR_v2/user_features.csv"  # 25,877 用户
 social_network = "KuaiSAR_v2/social_network.csv"
 
 [columns]
@@ -36,14 +34,27 @@ src_inter = "user_id,search_session_id,search_session_timestamp,search_session_s
 item_features = "item_id,一级~四级类目 id/name(含英文),caption,author_id,item_type,upload_time,upload_type"
 user_features = "user_id,onehot_feat1,onehot_feat2,search_active_level,rec_active_level"
 
+[profile]
+# 由 python -m recsys.experiments.analyze_kuasar 生成；本表只摘录决策相关字段，
+# 完整统计以 source 指向的 JSON 为准（不要在这里手改数字）。
+source = "artifacts/kuasar_profile.json"
+rows = 14605716
+users = 25877
+items = 4046367
+click_rate = 0.496031
+exposure_only_rate = 0.490751
+duplicate_pair_rate = 0.002111
+span_days = 18.78
+items_with_features = 6949990
+
 [labels]
 # 草案（Phase 1.3 定稿）：MVP 用单击；like/follow/forward 留作多任务标签。
 positive_field = "click"
 positive_threshold = 1
 positive_definition = "rec_inter 中 click == 1"
-exposure_definition = "rec_inter 的全部行（含 click == 0 的曝光未点击）——数据集保留曝光，可比 KuaiRec 更严格地构造 seen_mask"
+exposure_definition = "rec_inter 的全部行（含 click == 0 的曝光未点击）——数据集保留曝光，可构造真实 seen_mask"
 channel_field = "search"
-note = "样本(30 万行)行为占比：click 49.6% / like 3.5% / follow 0.5% / forward 0.3%；48.9% 行全 0（纯曝光）"
+note = "全量：click 49.60% / like 3.15% / follow 0.45% / forward 0.31%；纯曝光 49.08%；search_photo_related 仅 2 次"
 
 [split]
 strategy = "per_user_last_two_strict_timestamp_v2"
