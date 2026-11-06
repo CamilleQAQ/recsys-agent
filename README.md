@@ -64,6 +64,7 @@ pip install -r requirements/optional-faiss.txt
 python -m recsys.data.kuasar          # 805.9 MB，带 md5 校验，解压 3.5 GB
 python -m recsys.data.kuasar_store    # 约 36 秒，产出 processed（253 MB，24,128 可评测用户）
 python -m recsys.data.kuasar_features # 约 46 秒，12 列物品特征（139 MB，含 is_ad）
+python -m recsys.data.kuasar_ranking  # 约 54 秒，排序候选样本（约 250 MB，14.35M train 候选）
 #   流程模板（辅助线）：python -m recsys.data.prepare --dataset kuairec
 
 # 3. 训练（默认数据集已是 kuasar；4M 物品词表在 CPU/16GB 机器上很吃资源，
@@ -88,6 +89,7 @@ python scripts/smoke_adapters.py      # 适配层 + 指标 + 工件溯源 + 排�
 # 数据缓存校验（1–2 秒；不一致会提示 --force 重建）
 python -m recsys.data.kuasar_store --check
 python -m recsys.data.kuasar_features --check
+python -m recsys.data.kuasar_ranking --check
 ```
 
 ## 三条约定

@@ -115,7 +115,7 @@ PreparedData(train/validation/test_interactions, mappings,
 | SASRec（本项目） | 右补齐 item 序列，token 0 = padding，正/负样本序列对齐 | `recsys.data.dataset.SASRecTrainDataset` |
 | RecBole（LightGCN 等） | atomic 文件：`.inter`（user_id/item_id/timestamp 带类型表头）+ `.user`/`.item` | 待实现（`PreparedData → atomic`） |
 | FuxiCTR / DeepCTR-Torch（DIN/DCNv2/…） | 特征表（CSV/Parquet 或特征名→数组字典）+ label + 序列字段 | 待实现（KuaiSAR 特征 > 本项目当前字段） |
-| LightGBM Ranker | 特征矩阵 X + label + 连续 `group`（一个用户/请求一个 group） | `LightGBMRankerAdapter.fit(groups=...)` 已定义接口，特征仍待实现 |
+| LightGBM Ranker | 特征矩阵 X + label + 连续 `group`（一个请求一个 group） | `kuasar_ranking.iter_candidate_batches` 产出 `(X, y, groups)`；`LightGBMRankerAdapter.fit(groups=...)` 直接可用 |
 | TorchEasyRec / genrec | CSV/Parquet + protobuf 或 gin 配置；genrec 另需物品 embedding → 语义 ID | 上游自有，未接入 |
 | FAISS | L2 归一化 float32 向量（用户/物品同维） | `recsys.retrieval.faiss_index.encode_users_and_items` |
 

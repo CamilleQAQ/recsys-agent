@@ -88,3 +88,19 @@ unit = "request=(user_id, timestamp)"
 holdout = "最后两个请求 = test / validation；早于验证请求的正样本 = train"
 note = "介于验证与测试请求之间的正样本丢弃（实测 0 行）；用户请求数 < 3 不参与评测"
 
+[ranking]
+# 由 python -m recsys.data.kuasar_ranking 生成（约 250 MB）
+# 一次请求的曝光物品 = 候选集；click 为标签；groups = 每个请求的候选数（LightGBM 的 group）
+root = "data/kuasar/processed/ranking"
+label = "click == 1"
+candidates = { train = 14353430, validation = 113902, test = 88417 }
+requests = { train = 3104325, validation = 24128, test = 24128 }
+click_rate = { train = 0.4965, validation = 0.5932, test = 0.5729 }
+item_features = [
+  "category_first_code", "category_second_code", "author_freq",
+  "item_type_code", "upload_type_code",
+  "upload_days", "upload_valid", "caption_tokens", "is_ad",
+]
+user_features = ["search_active_level", "rec_active_level"]
+caveat = "留出请求的点击率（59%/57%）高于训练集（50%），是选择偏差；不要当线上先验"
+

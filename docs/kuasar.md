@@ -246,6 +246,64 @@ codes = feats.column("category_first_code")
 实测：把 `ids/user_ids.npy` 追加一个字节后，`verify_store` 返回「哈希不一致」；
 删除文件返回「缺少文件」；正常状态下 `--check` 输出 `data_version`。
 
+## 4.9 排序候选与特征样本（Phase 1.4 收尾）
+
+召回用「正样本对」，排序用「一次请求的曝光候选 + 点击标签」。`rec_inter` 的一行就是一次曝光，
+同一 `(user_id, timestamp)` 的所有行构成该请求的候选集：
+
+```powershell
+python -m recsys.data.kuasar_ranking            # 约 54 秒，产出 ranking/（约 250 MB）
+python -m recsys.data.kuasar_ranking --check
+```
+
+| 切分 | 候选数 | 请求数 | 点击率 | 每请求候选（均值/中位/最大） |
+| --- | --- | --- | --- | --- |
+| train | 14,353,430 | 3,104,325 | 49.65% | 4.62 / 5 / 12 |
+| validation | 113,902 | 24,128 | 59.32% | 4.72 / 5 / 10 |
+| test | 88,417 | 24,128 | 57.29% | 3.66 / 4 / 10 |
+| 丢弃（验证与测试之间） | 49,967 | — | — | — |
+
+> 行数对账：14,353,430 + 113,902 + 88,417 + 49,967 = 14,605,716（一行不多、一行不少）。
+
+**已知偏差**：验证/测试请求的点击率（59%/57%）明显高于训练集（50%）。原因是留出请求
+本身就是「包含用户最后点击的那次请求」，天然点击更密；做 CTR 校准类分析时要记住这一点，
+不要直接把验证集点击率当成线上先验。
+
+数据布局：
+
+```
+data/kuasar/processed/ranking/
+├── {train,validation,test}_items.npy    候选 item_idx（int32，按请求连续）
+├── {train,validation,test}_labels.npy   点击标签（int8）
+├── {train,validation,test}_users.npy    候选所属用户（int32）
+├── {train,validation,test}_groups.npy   每个请求的候选数（int32，LightGBM 的 group）
+├── user_levels.npy                      用户活跃度（num_users × 2，int8）
+└── schema.json                          口径、计数、每文件 sha256
+```
+
+特征**不落盘**：候选矩阵在训练时按批 join 物品/用户特征（14M × 11 列 float32 ≈ 630 MB，
+整表物化不划算）：
+
+```python
+import numpy as np
+from pathlib import Path
+from recsys.data.loader import prepare_dataset
+from recsys.data.kuasar_ranking import load_ranking_samples, iter_candidate_batches
+from recsys.data.kuasar_store import dataset_dir
+
+root = dataset_dir(Path("data"))
+data = prepare_dataset("kuasar", Path("data"))          # 物品特征挂在 data.item_features
+samples = load_ranking_samples(root, "train")
+user_levels = np.load(root / "processed" / "ranking" / "user_levels.npy", mmap_mode="r")
+
+for X, y, groups in iter_candidate_batches(samples, data.item_features, user_levels=user_levels):
+    ...   # X: [rows, 11]，y: [rows]，groups: 本批每请求的候选数
+```
+
+特征列：物品侧 9 列（类目×2、作者频次、item_type、upload_type、上传日期/有效性、caption token 数、`is_ad`）
++ 用户侧 2 列（搜索活跃度、推荐活跃度）。
+
+
 
 ## 5. 对设计的影响
 
@@ -276,7 +334,8 @@ codes = feats.column("category_first_code")
       `PreparedData.item_features` 已接通，指纹写进 provenance
 - [x] **数据版本与缓存校验**：每个 npy 的 sha256 + `data_version`，读取时默认校验，
       构建可复用（`[reuse]`），`--check` / `--force` 两个入口（见 §4.8）
-- [ ] 排序候选 + 特征样本（特征表已就位，候选集构造待做）
+- [x] **排序候选 + 特征样本**：`kuasar_ranking.py` 按请求聚合曝光候选（train 14.35M / val 113.9k / test 88.4k），
+      11 列特征按批 join，`groups` 直接可用作 LightGBM 分组（见 §4.9）
 - [ ] 全量训练的资源规划：4.05M 物品 × 64 维 embedding ≈ 1 GB，Adam 状态再 2 GB，
       16 GB/CPU 机器上先做小维度试跑（Phase 2 正式定）
 

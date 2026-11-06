@@ -264,6 +264,25 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ---
 
+### 2.15 Phase 1.4 收尾：排序候选与特征样本（2026-11-06）
+
+- [x] `src/recsys/data/kuasar_ranking.py`：把 `rec_inter` 按 `(user_id, timestamp)` 聚成请求，
+      一次请求的曝光物品即候选、`click` 为标签，切分与 processed 完全一致
+- [x] 规模：train **14,353,430 候选 / 3,104,325 请求**（点击率 49.65%）、
+      validation 113,902 / 24,128（59.32%）、test 88,417 / 24,128（57.29%）
+- [x] 行数对账：train + val + test + 丢弃 49,967 = **14,605,716**（与原始行数一致，构建里有断言）
+- [x] 产出约 250 MB：`items / labels / users / groups` 四类数组 + `user_levels.npy` + `schema.json`
+- [x] 特征不落盘：`iter_candidate_batches()` 按请求分批 join 9 列物品特征 + 2 列用户活跃度，
+      直接给出 `X / y / groups`（LightGBM 的 group 参数），避免 14M × 11 列 ≈ 630 MB 常驻
+- [x] 缓存校验：`--check` / `--force`，schema 里记录每个文件 sha256
+- [x] 验证：`--check` 通过；validation 批次实跑 `X (23644, 11)`，groups 求和等于行数
+- 已知偏差（写进文档）：留出请求点击率 59%/57% 高于训练集 50%，属「留出请求天然含点击」的选择偏差
+
+**Phase 1 至此全部完成**：1.1 下载 → 1.2 画像 → 1.3 口径/存储 → 1.4 数组后端+排序样本 →
+1.5 特征 → 1.6 数据版本。下一步进 Phase 2，但需要先定训练资源策略。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -283,7 +302,7 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
       caption token/`is_ad`），139 MB，指纹进 provenance；排序候选样本依赖它，下一步做
 - [x] **1.6 数据版本与缓存**：17 个 npy 全部有文件级 sha256 + `data_version`；
       读取默认校验、构建可复用、`--check` / `--force` 入口齐备（见 2.14）
-- [ ] **Phase 1 收尾项**：排序候选+特征样本（1.5 已备好特征，候选集构造待做）
+- [x] **Phase 1 收尾**：排序候选+特征样本（train 14.35M 候选 / 3.10M 请求，11 列特征按批 join，见 2.15）
 
 ### 3.2 Phase 2：Two-Tower + FAISS 在 KuaiSAR 上跑通
 
@@ -393,6 +412,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | **Phase 1.4** | `PreparedData` 数组后端（ArrayInteractions / SparseExposure / SortedIndexLookup）、`prepare_dataset("kuasar")` 打通、`split_strategy` 按数据集、稠密真值表护栏、去掉隐式 `list()` 复制；默认数据集改为 kuasar | `src/recsys/data/{schema,loader,dataset}.py`、`src/recsys/data/kuasar_store.py`、`src/recsys/training/*`、`src/recsys/evaluation/*` |
 | 2026-11-06 | **Phase 1.5** | 物品特征通道：`kuasar_features.py` 把 695 万行宽表压成 12 列 npy（139 MB，覆盖 99.9999% 交互物品）；`ItemFeatures` 接入 `PreparedData`，指纹进 provenance；`is_ad` 覆盖交互词表内 10,265 个广告物品 | `src/recsys/data/kuasar_features.py`、`src/recsys/data/schema.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 | 2026-11-06 | **Phase 1.6** | 数据版本与缓存校验：17 个 npy 的文件级 sha256 + `data_version`；`load_processed`/`load_item_features` 默认校验；构建可复用（`[reuse]`）；`--check`/`--force`；篡改测试通过 | `src/recsys/data/kuasar_store.py`、`src/recsys/data/kuasar_features.py`、`docs/kuasar.md` |
+| 2026-11-06 | **Phase 1 收尾** | 排序候选与特征样本：`kuasar_ranking.py` 按请求聚合曝光候选（train 14.35M/3.10M 请求），产出 items/labels/users/groups + 用户活跃度；`iter_candidate_batches` 按批 join 11 列特征；行数对账 14,605,716 全平 | `src/recsys/data/kuasar_ranking.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。
