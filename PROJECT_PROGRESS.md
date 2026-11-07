@@ -392,6 +392,39 @@ Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入
 
 ---
 
+### 2.20 Phase 3（部分）：MIND 多兴趣召回接入（2026-11-07）
+
+**背景**：MIND 的参考实现只在 TorchEasyRec 里，而它的依赖 `fbgemm-gpu` / `torchrec`
+只有 `manylinux` 的 cp310–312 wheel，Windows + Python 3.14 装不上（本轮已再次核实）。
+
+**方案**：改用 `torch-rechub`（MIT，纯 PyTorch，30+ 模型），只借模型本体，
+数据/训练/评测仍走本项目契约：
+
+- 新增 `src/recsys/models/mind.py`（torch-rechub MIND 封装 + 打分/编码工具）
+- 新增 `src/recsys/data/dataset.py::MindTrainDataset`（每「用户+位置」一条样本，746,674 条/epoch）
+- 新增 `src/recsys/training/train_mind.py`（in-batch softmax，验证集选模，checkpoint 带 provenance）
+- 新增 `src/recsys/adapters/rechub_mind.py`（`MindAdapter`，多兴趣取 max，接入统一评测与 `recommend` CLI）
+- 依赖：`requirements/optional-rechub.txt`（`torch-rechub==1.0.0`）；源码 sparse-checkout 到
+  `third_party/torch-rechub`（commit `7ea1731`）并登记 `SOURCES.toml`
+- zoo：MIND 从 `blocked` → **`ready`**（`ready=7 / upstream_ready=7 / blocked=10`）
+
+**结果（kuasar_small，测试集 4,275 个目标）**：
+
+| 指标 | 双塔 + 物品特征 | MIND | 变化 |
+| --- | --- | --- | --- |
+| Recall@10 | 0.003200 | **0.003742** | +16.9% |
+| Recall@20 | 0.004408 | **0.005675** | **+28.8%** |
+| HitRate@20 | 0.008500 | **0.010500** | +23.5% |
+| NDCG@20 | 0.002836 | 0.002712 | −4.4% |
+
+- 20 epochs 验证集 Recall@20 = 0.007650，最后三轮仍在上升 → **未收敛**，当前不是上限
+- 8 epochs 版本测试只有 0.002183 → **训练预算对 MIND 影响极大**（2.6 倍）
+- 训练耗时约 60 分钟（CPU），是双塔的 3 倍；多路召回的总预算要算进去
+
+实验记录：`experiments/2026-11-07-kuasar_small-mind/`。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -428,7 +461,9 @@ Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入
 
 ### 3.3 Phase 3–5：多路召回
 
-- [ ] Phase 3 MIND：**先决策**（见 4.1），再适配 KuaiSAR 序列
+- [x] **Phase 3 MIND**：改用 `torch-rechub` 实现（TorchEasyRec 平台受限），已训练/评测：
+      测试 Recall@20 0.005675（比双塔 +28.8%），20 epochs 未收敛（见 2.20）
+- [ ] MIND 训练到收敛（30–40 epochs）并做多 seed 复核
 - [ ] Phase 4 LightGCN：`PreparedData → RecBole atomic` 桥接 + 适配器
 - [ ] Phase 5 多路融合：统一「通道 → 候选（含来源与原始分数）」结构、去重、配额、消融
 
@@ -534,6 +569,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-07 | **Phase 2 清单** | 12 项完成 10 项：新增 ANN 对照（IVF nprobe=128 与精确指标相同、快 8.9×；HNSW ef=256 快 8×）与独立推理入口（原始 user_id → Top-K 原始 item_id）；剩余特征入塔与超参扫描 | `src/recsys/evaluation/ann_benchmark.py`、`src/recsys/adapters/__main__.py`、实验记录 |
 | 2026-11-07 | **Phase 2 特征** | 物品侧特征入塔（4 类目 + 5 数值，buffer 随 checkpoint）：测试 Recall@10 0.0016 → 0.0032（翻倍）、Recall@20 +26.9%、NDCG@20 +54%；子集特征表切片与 `--checkpoint-name` 变体命名；基线重训逐位复现 | `src/recsys/models/two_tower.py`、`src/recsys/training/trainer.py`、`src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two-tower-features/` |
 | 2026-11-07 | **Phase 2 超参** | 4 组 × 8 epochs 扫描 + 2 组 × 20 epochs 复核：选定 d64/b2048/lr1e-2；发现「8 轮扫描排名在 20 轮后反转」，记录短预算选参的陷阱；Phase 2 清单 12/12 | `experiments/2026-11-07-kuasar_small-two-tower-sweep/` |
+| 2026-11-07 | **Phase 3 MIND** | 因 TorchEasyRec 的 Linux-only wheel 不可用，改用 torch-rechub 1.0.0 接入 MIND（模型/训练/适配器/CLI）；测试 Recall@20 0.005675（比双塔 +28.8%），NDCG@20 略低；20 epochs 未收敛，训练约 60 分钟 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`src/recsys/adapters/rechub_mind.py`、`third_party/torch-rechub`、`experiments/2026-11-07-kuasar_small-mind/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

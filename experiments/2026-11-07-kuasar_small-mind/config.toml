@@ -1,0 +1,33 @@
+# 本次运行配置（2026-11-07）
+
+[dataset]
+name = "kuasar_small"
+users = 2000
+items = 454717
+split_strategy = "per_user_last_two_requests"
+
+[model]
+name = "mind"
+implementation = "torch-rechub==1.0.0（vendored at third_party/torch-rechub, commit 7ea1731）"
+adapter = "src/recsys/adapters/rechub_mind.py"
+embed_dim = 64
+max_length = 20
+interest_num = 4
+temperature = 0.1
+batch_size = 1024
+learning_rate = 0.01
+optimizer = "Adam"
+epochs = 20
+loss = "in-batch softmax cross entropy"
+dynamic_interest = false
+
+[hardware]
+device = "cpu"
+threads = 4
+memory_gb = 15.7
+
+[commands]
+train = "python -m recsys.training.train_mind --dataset kuasar_small --epochs 20 --batch-size 1024 --embed-dim 64 --max-length 20 --interest-num 4 --checkpoint-name mind20"
+evaluate = "python -m recsys.adapters evaluate --model mind --checkpoint artifacts/kuasar_small/mind20.pt --split test --ks 10 20"
+infer = "python -m recsys.adapters recommend --model mind --checkpoint artifacts/kuasar_small/mind20.pt --users 97722,113991 --k 5"
+baseline = "python -m recsys.adapters evaluate --model two_tower --checkpoint artifacts/kuasar_small/two_tower_features.pt --split test --ks 10 20"

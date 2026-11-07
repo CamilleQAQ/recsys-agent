@@ -147,18 +147,30 @@ def run_recommend(adapter: RecommenderAdapter, data: PreparedData, args: argpars
         if args.history != "none"
         else {user: set() for user in user_indices}
     )
-    user_vectors = adapter.encode_users(user_indices)
-    item_vectors = adapter.encode_items(list(range(data.num_items)))
-    scores = user_vectors @ item_vectors.T
-    index_to_item = data.mappings.index_to_item
+    try:
+        user_vectors = adapter.encode_users(user_indices)
+        item_vectors = adapter.encode_items(list(range(data.num_items)))
+        scores = user_vectors @ item_vectors.T
+        index_to_item = data.mappings.index_to_item
 
-    for row, user_idx in enumerate(user_indices):
-        blocked = sorted(history[user_idx])
-        if blocked:
-            scores[row, blocked] = float("-inf")
-        top = scores[row].argsort()[::-1][: args.k]
-        item_ids = [int(index_to_item[int(item)]) for item in top]
-        print(f"user {int(data.mappings.index_to_user[user_idx])}: {item_ids}")
+        for row, user_idx in enumerate(user_indices):
+            blocked = sorted(history[user_idx])
+            if blocked:
+                scores[row, blocked] = float("-inf")
+            top = scores[row].argsort()[::-1][: args.k]
+            item_ids = [int(index_to_item[int(item)]) for item in top]
+            print(f"user {int(data.mappings.index_to_user[user_idx])}: {item_ids}")
+    except AdapterError:
+        # 序列类模型（如 MIND）的用户向量依赖历史，不能脱离数据单独编码；
+        # 退回到统一的 recommend()，用该切分的历史做推理。
+        recommendations = adapter.recommend(data, split=args.history if args.history != "none" else "test", k=args.k)
+        for user_idx in user_indices:
+            raw_id = int(data.mappings.index_to_user[user_idx])
+            items = recommendations.get(user_idx)
+            if items is None:
+                print(f"[warn] 用户 {raw_id} 不在 {args.history} 切分的评测用户里", file=sys.stderr)
+                continue
+            print(f"user {raw_id}: {[int(data.mappings.index_to_item[int(item)]) for item in items]}")
     return 0
 
 

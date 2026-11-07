@@ -255,10 +255,15 @@ def main() -> int:
     try:
         checkpoints = write_checkpoints(workdir)
         for model_id in adapter_ids():
+            checkpoint = checkpoints.get(model_id)
+            if model_id in CHECKPOINT_REQUIRED and checkpoint is None:
+                # 例如 MIND：需要真实训练产物，冒烟脚本不伪造它的状态字典。
+                print(f"[skip] {model_id} 需要真实 checkpoint，冒烟测试跳过")
+                continue
             try:
                 adapter = load_adapter(
                     model_id,
-                    checkpoints.get(model_id),
+                    checkpoint,
                     device_name="cpu",
                 )
                 recommendations = adapter.recommend(data, split="test", k=3)

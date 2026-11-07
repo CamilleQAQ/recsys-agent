@@ -171,3 +171,15 @@ coverage = "生成式推荐：TIGER、RPG、COBRA、GRACE/HSTU、LC-Rec、OneRec
 usability = "torch==2.6 + transformers + gin_config；需 item embedding 与语义 ID 预处理"
 local_changes = ["删除 .git"]
 added = "2026-11-05"
+
+[[repos]]
+name = "torch-rechub"
+url = "https://github.com/datawhalechina/torch-rechub"
+branch = "main"
+commit = "7ea1731a806ec3cb74a2c837b5bac8b04268dac6"
+license = "MIT"
+license_file = "LICENSE"
+coverage = "召回/排序 30+ 模型，我们用其中的 MIND（多兴趣）；DIN/DIEN/DCNv2/DSSM 可按需接入"
+usability = "纯 PyTorch，Windows + Python 3.14 已跑通；运行时用 pip 包 torch-rechub==1.0.0，这里保留同版本源码作审计"
+local_changes = ["sparse-checkout：只保留 torch_rechub/ 源码与根目录许可证/说明，删除 .git"]
+added = "2026-11-07"

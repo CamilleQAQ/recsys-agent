@@ -11,6 +11,7 @@
 | Popularity | [`popularity.md`](popularity.md) |
 | BPR-MF（矩阵分解） | [`matrix_factorization.md`](matrix_factorization.md) |
 | Two-Tower（ID 双塔） | [`two_tower.md`](two_tower.md) |
+| MIND（多兴趣召回） | [`mind.md`](mind.md) |
 | SASRec（本项目实现） | [`sasrec.md`](sasrec.md) |
 | FAISS（向量检索） | [`faiss.md`](faiss.md) |
 | FAISS 物品索引封装（本项目） | [`faiss_item_index.md`](faiss_item_index.md) |

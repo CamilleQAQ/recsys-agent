@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import chain
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -203,3 +204,60 @@ def build_evaluation_examples(
             )
         )
     return examples
+
+
+class MindTrainDataset(Dataset):
+    """MIND 的训练样本：每个「用户 + 位置」是一条 (历史, 下一个物品)。
+
+    与 ``SASRecTrainDataset`` 的区别：这里把每个位置都展开成一个样本
+    （2000 用户 ≈ 74 万条），而不是每个用户只取最后一条；
+    in-batch 负采样需要足够多的正样本对才有意义。
+
+    序列预先整体 +1（0 留给 padding），返回的 ``item_token`` 已经加过 1。
+    """
+
+    def __init__(
+        self,
+        train_interactions: Sequence[Interaction],
+        num_items: int,
+        max_seq_len: int,
+        seed: int = 42,
+    ) -> None:
+        if num_items <= 0:
+            raise ValueError("num_items must be positive")
+        if max_seq_len <= 0:
+            raise ValueError("max_seq_len must be positive")
+        sequences = build_user_sequences(train_interactions)
+        self.sequences = {
+            user: np.asarray(items, dtype=np.int64) + 1
+            for user, items in sequences.items()
+            if len(items) >= 2
+        }
+        self.users = np.asarray(sorted(self.sequences), dtype=np.int64)
+        counts = np.asarray(
+            [len(self.sequences[int(user)]) - 1 for user in self.users], dtype=np.int64
+        )
+        self.offsets = np.concatenate(([0], np.cumsum(counts)))
+        self.num_items = num_items
+        self.max_seq_len = max_seq_len
+        self.random = random.Random(seed)
+        if self.offsets[-1] == 0:
+            raise ValueError("没有可用的训练序列（每个用户至少要有 2 条交互）")
+
+    def __len__(self) -> int:
+        return int(self.offsets[-1])
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        user_position = int(np.searchsorted(self.offsets, index, side="right") - 1)
+        user_idx = int(self.users[user_position])
+        sequence = self.sequences[user_idx]
+        target_position = index - int(self.offsets[user_position]) + 1
+        history = sequence[max(0, target_position - self.max_seq_len) : target_position]
+        padded = np.zeros(self.max_seq_len, dtype=np.int64)
+        # 右对齐：最近的物品紧挨着 padding 的左边，语义上更直观
+        padded[-len(history) :] = history
+        return {
+            "user_idx": torch.tensor(user_idx, dtype=torch.long),
+            "history": torch.tensor(padded, dtype=torch.long),
+            "item_token": torch.tensor(int(sequence[target_position]), dtype=torch.long),
+        }

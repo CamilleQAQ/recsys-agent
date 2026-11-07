@@ -15,7 +15,7 @@
 | `two_tower` | Two-Tower（ID 双塔） | 自研 | `src/recsys/models/two_tower.py` | 可直接运行 |
 | `lightgcn` | LightGCN | vendor:RecBole | `third_party/RecBole/recbole/model/general_recommender/lightgcn.py` | 上游可用，未接入 |
 | `dssm` | DSSM（双塔） | vendor:TorchEasyRec | `third_party/TorchEasyRec/tzrec/models/dssm.py` | 受依赖/权重限制 |
-| `mind` | MIND（多兴趣召回） | vendor:TorchEasyRec | `third_party/TorchEasyRec/tzrec/models/mind.py` | 受依赖/权重限制 |
+| `mind` | MIND（多兴趣召回） | vendor:torch-rechub | `third_party/torch-rechub/torch_rechub/models/matching/mind.py` | 可直接运行 |
 | `sid_rqvae` | 语义 ID 召回（RQ-VAE，TorchEasyRec 路线） | vendor:TorchEasyRec | `third_party/TorchEasyRec/tzrec/models/sid_rqvae.py` | 受依赖/权重限制 |
 | `tiger` | TIGER（生成式检索） | vendor:genrec | `third_party/genrec/genrec/models/tiger.py` | 受依赖/权重限制 |
 | `hstu` | HSTU（生成式序列推荐） | vendor:TorchEasyRec | `third_party/TorchEasyRec/tzrec/models/hstu.py` | 受依赖/权重限制 |

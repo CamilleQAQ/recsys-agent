@@ -1,0 +1,67 @@
+{
+  "run": "2026-11-07-kuasar_small-mind",
+  "baseline_run": "2026-11-07-kuasar_small-two-tower-features",
+  "dataset": {"name": "kuasar_small", "users": 2000, "items": 454717, "train": 748674, "validation": 5775, "test": 4275},
+  "model": {
+    "mind": {
+      "implementation": "torch-rechub 1.0.0",
+      "embed_dim": 64,
+      "max_length": 20,
+      "interest_num": 4,
+      "temperature": 0.1,
+      "batch_size": 1024,
+      "epochs": 20,
+      "parameters": 29246400,
+      "checkpoint_mb": 111.6
+    }
+  },
+  "validation": {
+    "epoch": 20,
+    "Recall@10": 0.00375,
+    "NDCG@10": 0.002396,
+    "HitRate@10": 0.011,
+    "Recall@20": 0.00765,
+    "NDCG@20": 0.003676,
+    "HitRate@20": 0.021
+  },
+  "test": {
+    "mind": {
+      "Recall@10": 0.003742,
+      "NDCG@10": 0.002163,
+      "HitRate@10": 0.0075,
+      "Precision@10": 0.00075,
+      "Recall@20": 0.005675,
+      "NDCG@20": 0.002712,
+      "HitRate@20": 0.0105,
+      "Precision@20": 0.000525,
+      "Coverage": 0.070765
+    },
+    "two_tower_features": {
+      "Recall@10": 0.0032,
+      "NDCG@10": 0.002465,
+      "HitRate@10": 0.006,
+      "Recall@20": 0.004408,
+      "NDCG@20": 0.002836,
+      "HitRate@20": 0.0085,
+      "Coverage": 0.071134
+    },
+    "delta_vs_two_tower": {
+      "Recall@10": "+16.9%",
+      "Recall@20": "+28.8%",
+      "HitRate@20": "+23.5%",
+      "NDCG@20": "-4.4%",
+      "Coverage": "-0.5%"
+    }
+  },
+  "checkpoint": {
+    "path": "artifacts/kuasar_small/mind20.pt",
+    "sha256": "eba017182142a8d09183ccf93de99d53535b32830de0a27bbdfad70d40ff9dac",
+    "provenance": "data=d6b5c0e8a96b code=c7b5de6823d0 users=2000 items=454717"
+  },
+  "notes": [
+    "20 epochs 结束时验证 Recall@20 仍在上升（0.00765，最后三轮 0.00496 → 0.00765），未收敛",
+    "8 epochs 的版本（mind.pt）测试 Recall@20 只有 0.002183，说明训练预算对 MIND 影响很大",
+    "单 seed；NDCG@20 略低于双塔，Recall 类指标明显更高",
+    "MIND 的用户向量依赖历史序列，encode_users 不可脱离数据使用，推荐走 recommend()"
+  ]
+}

@@ -1,0 +1,3 @@
+# MIND（多兴趣召回）依赖：纯 PyTorch 实现，MIT 许可。
+# 只在本机训练/评测 MIND 时需要；不装不影响其它模型。
+torch-rechub==1.0.0

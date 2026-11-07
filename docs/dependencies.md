@@ -20,6 +20,7 @@
 | F Linux GPU（TorchEasyRec） | 3.10–3.12 | tzrec（阿里 OSS wheel）、CUDA | DSSM/MIND/HSTU/语义 ID | 上游 README，**Windows 不可用** |
 | G Linux 多卡 | 3.10+ | torch>=2.6, verl, vllm, ray | OpenOneRec、generative-recommenders | 上游 README，需外部权重 |
 | H 生成式（genrec） | 3.9+ | torch==2.6, transformers==4.57, gin_config, wandb, sentence_transformers | TIGER/RPG/COBRA/LC-Rec | 上游 README，需物品 embedding |
+| **I torch-rechub** | 3.10+ | torch>=2.6, numpy<3, pandas, scikit-learn, tqdm | **MIND**（本机已跑通）；DIN/DIEN/DCNv2/DSSM 等 30+ 模型可按需接入 | `pip install torch-rechub==1.0.0` + `requirements/optional-rechub.txt` |
 
 ## 版本冲突与处理
 
@@ -32,6 +33,7 @@
 | TensorFlow vs PyTorch | 体积大、CUDA/cuDNN 互相牵制 | TF 相关（recommenders、BERT4Rec）不进主环境 |
 | ray 版本 | RecBole 要求 `ray<=2.6.3`；FuxiCTR 要求 `ray[data]>=2.52` | 二者独立环境；同时需要时先确认可兼容区间 |
 | 阿里 OSS wheel | TorchEasyRec 依赖 graphlearn/pyfg/common_io 的 Linux wheel | Windows 无法安装；只在 Linux 构建机跑 |
+| pandas 3 vs torch-rechub | torch-rechub 1.0.0 声明 `pandas<3`，但 Python 3.14 只有 pandas 3.1.1 的 wheel | 实测导入/MIND 前向正常，仅 pip 告警；若要用它的 `MatchTrainer` 再评估是否降级 |
 | faiss-cpu 与 numpy | 部分 faiss-cpu wheel 对 numpy 2.x 支持滞后 | 按 `requirements/optional-faiss.txt`；失败时先降 numpy 再装 faiss |
 
 ## 本机实测（2026-11-05）

@@ -15,11 +15,12 @@ from recsys.adapters.builtin import (
     SASRecAdapter,
     TwoTowerAdapter,
 )
+from recsys.adapters.rechub_mind import MindAdapter
 from recsys.training.trainer import resolve_device
 
 #: 统一接口里可用的模型（顺序与 Model Zoo 推荐顺序一致）。
 ADAPTERS: dict[str, type[RecommenderAdapter]] = {
-    adapter.model_id: adapter for adapter in BUILTIN_ADAPTERS
+    adapter.model_id: adapter for adapter in (*BUILTIN_ADAPTERS, MindAdapter)
 }
 
 #: 需要 checkpoint 才能加载的模型。
@@ -28,6 +29,7 @@ CHECKPOINT_REQUIRED = frozenset(
         TwoTowerAdapter.model_id,
         MatrixFactorizationAdapter.model_id,
         SASRecAdapter.model_id,
+        MindAdapter.model_id,
     }
 )
 
@@ -76,6 +78,7 @@ __all__ = [
     "ADAPTERS",
     "CHECKPOINT_REQUIRED",
     "MatrixFactorizationAdapter",
+    "MindAdapter",
     "PopularityAdapter",
     "SASRecAdapter",
     "TwoTowerAdapter",

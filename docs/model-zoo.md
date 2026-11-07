@@ -9,10 +9,10 @@
 
 | 分类 | 模型数 | 可直接运行 | 上游可用，未接入 | 受依赖/权重限制 |
 | --- | --- | --- | --- | --- |
-| retrieval | 12 | 3 | 1 | 8 |
+| retrieval | 12 | 4 | 1 | 7 |
 | ranking | 9 | 1 | 6 | 2 |
 | infrastructure | 3 | 2 | 0 | 1 |
-| **合计** | **24** | **6** | **7** | **11** |
+| **合计** | **24** | **7** | **7** | **10** |
 
 ## 一览
 
@@ -23,7 +23,7 @@
 | `two_tower` | Two-Tower（ID 双塔） | retrieval | 自研 | 可直接运行 | TwoTowerAdapter |
 | `lightgcn` | LightGCN | retrieval | vendor:RecBole | 上游可用，未接入 | — |
 | `dssm` | DSSM（双塔） | retrieval | vendor:TorchEasyRec | 受依赖/权重限制 | — |
-| `mind` | MIND（多兴趣召回） | retrieval | vendor:TorchEasyRec | 受依赖/权重限制 | — |
+| `mind` | MIND（多兴趣召回） | retrieval | vendor:torch-rechub | 可直接运行 | MindAdapter |
 | `sid_rqvae` | 语义 ID 召回（RQ-VAE，TorchEasyRec 路线） | retrieval | vendor:TorchEasyRec | 受依赖/权重限制 | — |
 | `tiger` | TIGER（生成式检索） | retrieval | vendor:genrec | 受依赖/权重限制 | — |
 | `hstu` | HSTU（生成式序列推荐） | retrieval | vendor:TorchEasyRec | 受依赖/权重限制 | — |
@@ -138,19 +138,19 @@
 
 - **ID**：`mind`
 - **分类**：召回模型 / vendor
-- **来源**：third_party/TorchEasyRec（上游 https://github.com/alibaba/TorchEasyRec）
-- **Commit**：`2815a9732bed014219ee89826dd4987b67ccf6b0`
-- **许可证**：Apache-2.0
-- **源码**：`third_party/TorchEasyRec/tzrec/models/mind.py`
+- **来源**：third_party/torch-rechub（上游 https://github.com/datawhalechina/torch-rechub）
+- **Commit**：`7ea1731a806ec3cb74a2c837b5bac8b04268dac6`
+- **许可证**：MIT
+- **源码**：`third_party/torch-rechub/torch_rechub/models/matching/mind.py`、`third_party/torch-rechub/torch_rechub/basic/layers.py`、`src/recsys/adapters/rechub_mind.py`、`src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`
 - **原理**：在双塔结构上对用户行为序列做动态路由聚类，得到多个兴趣向量分别召回后合并。
 - **适用场景**：用户兴趣多峰的短视频/电商场景，与 KuaiSAR 的短期兴趣建模契合。
-- **依赖 / Python**：torch、tzrec；Python >=3.10（Linux）
-- **训练入口**：python -m tzrec.train_eval --pipeline_config_path examples/mind_taobao.config
-- **推理入口**：python -m tzrec.predict --pipeline_config_path <config>
-- **数据格式**：用户 item 序列特征 + 候选特征，pipeline protobuf 声明
-- **保存/加载**：同 TorchEasyRec（model/ 目录）
-- **代码完整度**：受依赖/权重限制（blocked）—— 同 DSSM，受 TorchEasyRec 平台依赖限制，需 Linux 环境验证
-- **适配层**：尚未接入
+- **依赖 / Python**：torch、torch-rechub==1.0.0；Python >=3.10（纯 PyTorch，Windows 可用）
+- **训练入口**：python -m recsys.training.train_mind --dataset kuasar_small --epochs 20
+- **推理入口**：python -m recsys.adapters recommend --model mind --checkpoint artifacts/kuasar_small/mind.pt --users <user_id>
+- **数据格式**：user_id + 历史 item 序列 + item_id（token 0 = padding，模型内部整体 +1）
+- **保存/加载**：单个 .pt：state_dict + model_config + provenance（约 120 MB）
+- **代码完整度**：可直接运行（ready）—— torch-rechub 1.0.0 + 本项目适配器；kuasar_small 上训练/评测通过（MIND 在测试集上弱于双塔，见实验记录）
+- **适配层**：MindAdapter
 
 ### 语义 ID 召回（RQ-VAE，TorchEasyRec 路线）
 

@@ -167,22 +167,28 @@ id = "mind"
 name = "MIND（多兴趣召回）"
 category = "retrieval"
 family = "vendor"
-repo = "TorchEasyRec"
-code = ["third_party/TorchEasyRec/tzrec/models/mind.py"]
-license = "Apache-2.0"
-upstream_url = "https://github.com/alibaba/TorchEasyRec"
-upstream_commit = "2815a9732bed014219ee89826dd4987b67ccf6b0"
+repo = "torch-rechub"
+code = [
+  "third_party/torch-rechub/torch_rechub/models/matching/mind.py",
+  "third_party/torch-rechub/torch_rechub/basic/layers.py",
+  "src/recsys/adapters/rechub_mind.py",
+  "src/recsys/models/mind.py",
+  "src/recsys/training/train_mind.py",
+]
+license = "MIT"
+upstream_url = "https://github.com/datawhalechina/torch-rechub"
+upstream_commit = "7ea1731a806ec3cb74a2c837b5bac8b04268dac6"
 principle = "在双塔结构上对用户行为序列做动态路由聚类，得到多个兴趣向量分别召回后合并。"
 use_cases = "用户兴趣多峰的短视频/电商场景，与 KuaiSAR 的短期兴趣建模契合。"
-deps = ["torch", "tzrec"]
-python = ">=3.10（Linux）"
-train_entry = "python -m tzrec.train_eval --pipeline_config_path examples/mind_taobao.config"
-infer_entry = "python -m tzrec.predict --pipeline_config_path <config>"
-data_format = "用户 item 序列特征 + 候选特征，pipeline protobuf 声明"
-checkpoint = "同 TorchEasyRec（model/ 目录）"
-completeness = "blocked"
-completeness_note = "同 DSSM，受 TorchEasyRec 平台依赖限制，需 Linux 环境验证"
-adapter = ""
+deps = ["torch", "torch-rechub==1.0.0"]
+python = ">=3.10（纯 PyTorch，Windows 可用）"
+train_entry = "python -m recsys.training.train_mind --dataset kuasar_small --epochs 20"
+infer_entry = "python -m recsys.adapters recommend --model mind --checkpoint artifacts/kuasar_small/mind.pt --users <user_id>"
+data_format = "user_id + 历史 item 序列 + item_id（token 0 = padding，模型内部整体 +1）"
+checkpoint = "单个 .pt：state_dict + model_config + provenance（约 120 MB）"
+completeness = "ready"
+completeness_note = "torch-rechub 1.0.0 + 本项目适配器；kuasar_small 上训练/评测通过（MIND 在测试集上弱于双塔，见实验记录）"
+adapter = "MindAdapter"
 
 [[models]]
 id = "sid_rqvae"
