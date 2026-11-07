@@ -283,6 +283,25 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ---
 
+### 2.16 Phase 2 小规模验证：kuasar_small + Two-Tower（2026-11-07）
+
+- [x] `src/recsys/data/kuasar_subset.py`：从全量 processed 按用户抽子集（保留请求/曝光结构），
+      产物与主 store 同构，`prepare_dataset("kuasar_small")` 直接可用
+- [x] 子集：**2,000 用户 / 454,717 物品 / 758,724 正样本**（train 748,674 / val 5,775 / test 4,275），23.2 MB
+- [x] 训练：Two-Tower（embedding 塔、64 维、batch 2048、20 epochs、in-batch 负样本），
+      CPU 4 线程约十几分钟；checkpoint 111.5 MB，带 provenance
+- [x] 测试集：Recall@10 0.0016 / Recall@20 **0.003475** / NDCG@20 0.001839 / Coverage 0.0716
+      （随机基线约 9.4e-5，≈37 倍；绝对水平低，原因是长尾 ID 塔学不动）
+- [x] 检索对照：暴力检索 1.875 s（0.94 ms/user）vs FAISS IndexFlatIP 7.227 s（3.61 ms/user），
+      指标逐位相同、agreement 1.0 → **这个规模下 FAISS 精确索引不划算**
+- [x] 首次实验记录：`experiments/2026-11-07-kuasar_small-two_tower/`（config / metrics / checkpoint / report）
+- 全量外推：候选对约 115 倍 → 暴力检索约 3–4 分钟/次，物品向量约 1 GB
+
+**结论**：链路（数据 → 训练 → 统一评测 → FAISS 一致性）已在 CPU 上闭环；下一步是
+「词表裁剪 vs 换硬件」的全量决策，以及 ANN 对照。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -306,8 +325,12 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ### 3.2 Phase 2：Two-Tower + FAISS 在 KuaiSAR 上跑通
 
-- [ ] 特征/样本换成 KuaiSAR，重训 Two-Tower
-- [ ] FAISS 建索引 + 精确/近似检索对比（复用 `faiss_evaluator`）
+- [x] 小规模验证（2,000 用户子集）：整条链路跑通，结论见
+      [experiments/2026-11-07-kuasar_small-two_tower](experiments/2026-11-07-kuasar_small-two_tower/report.md)
+      —— 测试 Recall@20 0.003475（≈37× 随机）、FAISS IndexFlat 比 torch 暴力检索慢 3.9×、单次评测 1.9–7.2 秒
+- [ ] **全量决策**：词表裁剪（交互 ≥N 次）还是换 GPU/大内存；裁剪会改变评测口径，必须写清楚
+- [ ] 全量训练 + 评测（预计暴力检索 3–4 分钟/次、物品向量约 1 GB）
+- [ ] ANN 对照（IVF/HNSW）与召回率损失评估——精确检索已证明用 torch matmul 更快
 - [ ] 补 Coverage 与效率指标（训练耗时、单用户推理延迟、索引构建时间）
 
 ### 3.3 Phase 3–5：多路召回
@@ -413,6 +436,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | **Phase 1.5** | 物品特征通道：`kuasar_features.py` 把 695 万行宽表压成 12 列 npy（139 MB，覆盖 99.9999% 交互物品）；`ItemFeatures` 接入 `PreparedData`，指纹进 provenance；`is_ad` 覆盖交互词表内 10,265 个广告物品 | `src/recsys/data/kuasar_features.py`、`src/recsys/data/schema.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 | 2026-11-06 | **Phase 1.6** | 数据版本与缓存校验：17 个 npy 的文件级 sha256 + `data_version`；`load_processed`/`load_item_features` 默认校验；构建可复用（`[reuse]`）；`--check`/`--force`；篡改测试通过 | `src/recsys/data/kuasar_store.py`、`src/recsys/data/kuasar_features.py`、`docs/kuasar.md` |
 | 2026-11-06 | **Phase 1 收尾** | 排序候选与特征样本：`kuasar_ranking.py` 按请求聚合曝光候选（train 14.35M/3.10M 请求），产出 items/labels/users/groups + 用户活跃度；`iter_candidate_batches` 按批 join 11 列特征；行数对账 14,605,716 全平 | `src/recsys/data/kuasar_ranking.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
+| 2026-11-07 | **Phase 2 验证** | `kuasar_small`（2,000 用户 / 454,717 物品）+ Two-Tower 20 epochs：链路闭环；测试 Recall@20 0.003475（≈37× 随机）；FAISS IndexFlat 比 torch 暴力检索慢 3.9×；建立首个实验记录 | `src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two_tower/`、`docs/kuasar.md` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

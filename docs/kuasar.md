@@ -322,6 +322,35 @@ for X, y, groups in iter_candidate_batches(samples, data.item_features, user_lev
 7. **内存**：15.7 GB 总量；清理后台后可用 5.3–5.6 GB。全量烘焙一次约 36 秒，峰值约 1.5 GB；
    后续训练仍建议先确认可用内存 ≥ 6 GB。
 
+## 4.11 小规模子集 `kuasar_small`（Phase 2 验证用）
+
+全量 4.05M 物品在 16 GB / CPU 机器上训练不现实，因此切一个**保留完整请求/曝光结构**的用户子集：
+
+```powershell
+python -m recsys.data.kuasar_subset --users 2000 --min-positives 30 --seed 42
+# → data/kuasar_small/processed（23.2 MB）
+```
+
+| 项 | 全量 | `kuasar_small` |
+| --- | --- | --- |
+| 用户 | 25,877 | **2,000** |
+| 物品 | 4,046,367 | **454,717** |
+| 正样本 | 7,237,037 | **758,724**（train 748,674 / val 5,775 / test 4,275） |
+| 请求 | 3.15M | 273,902（train 269,902 / val 2,000 / test 2,000） |
+| 曝光对 | 14.3M / 14.4M | 1.06M / 1.06M |
+| 体积 | 639 MB | 23 MB |
+
+规则：只抽「有留出请求且正样本 ≥ 30」的用户；物品词表 = 这些用户交互过的物品；
+曝光 CSR 按用户切片、丢弃词表外物品并重新编码；**切分标签沿用全量请求级结果**，不重新定义口径。
+选中用户与物品的原始 ID 都保留在 `ids/*.npy`，可随时反查或与全量结果对照。
+
+`prepare_dataset("kuasar_small")` 与全量共用同一套 `PreparedData` 与 `split_strategy`，
+所以训练/评测代码不需要任何特判。
+
+验证结果（Two-Tower 20 epochs、CPU）：测试 Recall@20 0.003475、Coverage 7.16%，
+FAISS IndexFlat 与暴力检索指标一致但慢 3.9×——详见
+[experiments/2026-11-07-kuasar_small-two_tower](../experiments/2026-11-07-kuasar_small-two_tower/report.md)。
+
 ## 6. 尚未完成（Phase 1.3 / 1.4 / 1.5 / 1.6）
 
 - [x] 口径决定：正样本 `click == 1`；广告物品保留；搜索侧不纳入 Phase 1（2026-11-06）

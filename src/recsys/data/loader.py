@@ -16,11 +16,22 @@ from recsys.data.kuairec import prepare_kuairec
 from recsys.data.kuasar_store import prepare_kuasar
 from recsys.data.schema import PreparedData
 
-SUPPORTED_DATASETS = ("kuairec", "kuasar")
+SUPPORTED_DATASETS = ("kuairec", "kuasar", "kuasar_small")
 
 #: KuaiSAR 的正样本就是 click == 1，没有阈值概念；这里给一个统一接口需要的数值。
 KUASAR_POSITIVE_CLICK = 1.0
 KUASAR_SPLIT_STRATEGY = "per_user_last_two_requests"
+
+#: 数据名 → `data/` 下的子目录。`kuasar_small` 是从全量切出来的验证子集，协议与全量一致。
+_DATASET_DIRS = {
+    "kuairec": "kuairec",
+    "kuasar": "kuasar",
+    "kuasar_small": "kuasar_small",
+}
+
+
+def _is_kuasar_family(dataset: str) -> bool:
+    return dataset in {"kuasar", "kuasar_small"}
 
 
 def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -> float:
@@ -30,7 +41,7 @@ def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -
     normalized_name = dataset.lower()
     if normalized_name == "kuairec":
         return float(KUAIREC_WATCH_RATIO_THRESHOLD)
-    if normalized_name == "kuasar":
+    if _is_kuasar_family(normalized_name):
         return KUASAR_POSITIVE_CLICK
     raise ValueError(
         f"Unsupported dataset {dataset!r}; choose one of {SUPPORTED_DATASETS}"
@@ -42,7 +53,7 @@ def split_strategy_for(dataset: str) -> str:
     normalized_name = dataset.lower()
     if normalized_name == "kuairec":
         return SPLIT_STRATEGY
-    if normalized_name == "kuasar":
+    if _is_kuasar_family(normalized_name):
         return KUASAR_SPLIT_STRATEGY
     raise ValueError(
         f"Unsupported dataset {dataset!r}; choose one of {SUPPORTED_DATASETS}"
@@ -67,8 +78,8 @@ def resolve_checkpoint_dataset(checkpoint: dict) -> str:
 def resolve_dataset_data_dir(dataset: str, data_dir: Path) -> Path:
     """返回该数据集自己的目录：每个数据集住进 ``data/<name>/``。"""
     normalized_name = dataset.lower()
-    if normalized_name in SUPPORTED_DATASETS:
-        return data_dir / normalized_name
+    if normalized_name in _DATASET_DIRS:
+        return data_dir / _DATASET_DIRS[normalized_name]
     raise ValueError(
         f"Unsupported dataset {dataset!r}; choose one of {SUPPORTED_DATASETS}"
     )
@@ -83,6 +94,7 @@ def prepare_dataset(
     normalized_name = dataset.lower()
     threshold = resolve_positive_threshold(normalized_name, positive_threshold)
     dataset_dir = resolve_dataset_data_dir(normalized_name, data_dir)
-    if normalized_name == "kuasar":
+    if _is_kuasar_family(normalized_name):
+        # 全量与子集共用同一份 processed 布局，只是目录不同
         return prepare_kuasar(dataset_dir)
     return prepare_kuairec(dataset_dir, watch_ratio_threshold=float(threshold))

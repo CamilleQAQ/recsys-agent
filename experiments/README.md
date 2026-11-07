@@ -56,5 +56,9 @@ experiments/
 
 ## 当前状态
 
-仓库里没有正式实验记录（`artifacts/` 目前只有 KuaiSAR 的勘查与画像 JSON，以及少量冒烟产物）。
-第一次正式实验请按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。
+| 日期 | 运行 | 数据集 | 一句话结论 |
+| --- | --- | --- | --- |
+| 2026-11-07 | [kuasar_small-two_tower](2026-11-07-kuasar_small-two_tower/report.md) | kuasar_small（2,000 用户） | 链路跑通；测试 Recall@20 0.0035（≈37× 随机）；FAISS IndexFlat 比 torch 暴力检索慢 3.9× |
+
+权重不入库，只记路径 / sha256 / provenance（见各目录的 `checkpoint.txt`）。
+下一个实验按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。

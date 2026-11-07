@@ -1,0 +1,35 @@
+# 本次运行的配置快照（2026-11-07）
+
+[dataset]
+name = "kuasar_small"
+parent = "kuasar"
+subset_users = 2000
+subset_min_positives = 30
+seed = 42
+users = 2000
+items = 454717
+positives = 758724
+split_strategy = "per_user_last_two_requests"
+
+[model]
+name = "two_tower"
+tower_type = "embedding"
+embedding_dim = 64
+hidden_dim = 128
+output_dim = 64
+temperature = 0.1
+batch_size = 2048
+learning_rate = 0.01
+epochs = 20
+mask_false_negatives = false
+loss = "in-batch cross entropy"
+
+[hardware]
+device = "cpu"
+threads = 4
+memory_gb = 15.7
+
+[commands]
+build_subset = "python -m recsys.data.kuasar_subset --users 2000 --min-positives 30 --seed 42"
+train = "python -m recsys.training.trainer --dataset kuasar_small --epochs 20 --batch-size 2048 --embedding-dim 64 --output-dim 64 --no-mask-false-negatives --seed 42"
+evaluate = "python -m recsys.evaluation.faiss_evaluator --checkpoint artifacts/kuasar_small/two_tower.pt --split test"
