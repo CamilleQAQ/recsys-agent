@@ -4,16 +4,17 @@
 
 0. [../PROJECT_MASTER.md](../PROJECT_MASTER.md) —— 项目总档案：定位、架构、13 个 Phase、记录规范（**大纲，不随进度改动**）；
 1. [../PROJECT_PROGRESS.md](../PROJECT_PROGRESS.md) —— 进度台账：做完了什么、卡在哪、下一步做什么（**每轮更新这一份**）；
-2. [../README.md](../README.md) —— 现状、目录、快速开始；
-3. [architecture.md](architecture.md) —— 代码分层与数据流，改代码前先看这张图；
-4. [data-contract.md](data-contract.md) —— 数据契约与评估口径，接新数据集/新模型必看；
-5. [model-zoo.md](model-zoo.md) —— 24 个模型的索引（**生成物**，改 `models/zoo.toml` 后重新渲染）；
-6. [models/](models/README.md) —— 已接入模型的技术档案（**生成物**，PROJECT_MASTER §9.2）；
-7. [dependencies.md](dependencies.md) —— 哪套环境装什么、为什么必须隔离；
-8. [kuairec.md](kuairec.md) —— KuaiRec 流程模板：口径、命令、坑；
-9. [kuasar-roadmap.md](kuasar-roadmap.md) —— Phase 1：接入 KuaiSAR 的工作清单；
-10. [kuasar.md](kuasar.md) —— KuaiSAR 字段说明、文件清单与样本统计（数据说明）；
-11. [cleanup-report.md](cleanup-report.md) —— 仓库整理与清理账目。
+2. [../DEVELOPMENT_STORY.md](../DEVELOPMENT_STORY.md) —— 开发故事线：遇到的坑、根因、取舍与数字（**面试讲解用**）；
+3. [../README.md](../README.md) —— 现状、目录、快速开始；
+4. [architecture.md](architecture.md) —— 代码分层与数据流，改代码前先看这张图；
+5. [data-contract.md](data-contract.md) —— 数据契约与评估口径，接新数据集/新模型必看；
+6. [model-zoo.md](model-zoo.md) —— 24 个模型的索引（**生成物**，改 `models/zoo.toml` 后重新渲染）；
+7. [models/](models/README.md) —— 已接入模型的技术档案（**生成物**，PROJECT_MASTER §9.2）；
+8. [dependencies.md](dependencies.md) —— 哪套环境装什么、为什么必须隔离；
+9. [kuairec.md](kuairec.md) —— KuaiRec 流程模板：口径、命令、坑；
+10. [kuasar-roadmap.md](kuasar-roadmap.md) —— Phase 1：接入 KuaiSAR 的工作清单；
+11. [kuasar.md](kuasar.md) —— KuaiSAR 字段说明、文件清单与样本统计（数据说明）；
+12. [cleanup-report.md](cleanup-report.md) —— 仓库整理与清理账目。
 
 ## 写文档的规矩
 

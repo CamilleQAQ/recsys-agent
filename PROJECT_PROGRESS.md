@@ -17,19 +17,20 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 所处阶段 | **Phase 0 完成**（仓库审计 + Model Zoo + 工程底座），准备进入 **Phase 1**（KuaiSAR 数据层） |
+| 所处阶段 | **Phase 1 完成**（数据层 1.1–1.6 + 排序样本）；**Phase 2 小规模验证完成**；下一步 Phase 5（多路融合 + 重排） |
 | 版本控制 | git `main`，远端 [CamilleQAQ/recsys-agent](https://github.com/CamilleQAQ/recsys-agent)；首次提交 `0bef337`（2026-11-06） |
-| 数据主线 | KuaiSAR 2.0：下载完成、**全量画像完成**（1.1/1.2）；1.3 正样本定稿待做 |
+| 数据主线 | KuaiSAR 2.0：原始 3.5 GB → processed 253 MB + 特征 139 MB + 排序样本 250 MB；另有 2,000 用户子集 `kuasar_small`（23 MB） |
 | 数据规模 | `rec_inter` 14,605,716 行 / 25,877 用户 / 4,046,367 物品；搜索 5,059,169 行 / 452,541 会话 |
-| 磁盘 | E: 可用 33.3 GB（下载前 37.7 GB）；项目本体 203 MB（不含 `data/`） |
+| 磁盘 | E: 可用 60.4 GB；`data/` 4.9 GB（不入库）；`artifacts/` 111.5 MB（冒烟 checkpoint，不入库） |
 | 第三方仓库 | 13 个（[third_party/SOURCES.toml](third_party/SOURCES.toml)，含 commit / 许可 / 可用性） |
 | 模型索引 | 24 个：12 召回 / 9 排序 / 3 基础设施（[models/zoo.toml](models/zoo.toml)） |
 | 已接入统一接口 | 6 个 `ready`：Popularity、BPR-MF、Two-Tower、SASRec、FAISS、FAISS 索引封装 |
 | 上游可用未接入 | 7 个 `upstream_ready`（LightGCN、DIN、DIEN、DCNv2、DeepFM、MMoE、LightGBM） |
 | 环境受限 | 11 个 `blocked`（MIND/HSTU/OneRec/TFRS/MMRec/TIGER 等，见 [docs/model-zoo.md](docs/model-zoo.md)） |
-| 代码规模 | 43 个 Python 模块（`src/recsys/`），全部可导入 |
+| 代码规模 | 48 个 Python 模块（`src/recsys/`），全部可导入 |
 | 第三方体积 | 108.8 MB / 6,875 文件（清理前 400.7 MB / 6,376 文件） |
 | 质量闸门 | `zoo.py check` 通过；`check_project.py` 0 错误；`smoke_adapters.py` 全过 |
+| 面试材料 | [DEVELOPMENT_STORY.md](DEVELOPMENT_STORY.md)：10 个故事线（问题 → 根因 → 取舍 → 数字），重大决策后追加 |
 
 ---
 
@@ -437,6 +438,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | **Phase 1.6** | 数据版本与缓存校验：17 个 npy 的文件级 sha256 + `data_version`；`load_processed`/`load_item_features` 默认校验；构建可复用（`[reuse]`）；`--check`/`--force`；篡改测试通过 | `src/recsys/data/kuasar_store.py`、`src/recsys/data/kuasar_features.py`、`docs/kuasar.md` |
 | 2026-11-06 | **Phase 1 收尾** | 排序候选与特征样本：`kuasar_ranking.py` 按请求聚合曝光候选（train 14.35M/3.10M 请求），产出 items/labels/users/groups + 用户活跃度；`iter_candidate_batches` 按批 join 11 列特征；行数对账 14,605,716 全平 | `src/recsys/data/kuasar_ranking.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 | 2026-11-07 | **Phase 2 验证** | `kuasar_small`（2,000 用户 / 454,717 物品）+ Two-Tower 20 epochs：链路闭环；测试 Recall@20 0.003475（≈37× 随机）；FAISS IndexFlat 比 torch 暴力检索慢 3.9×；建立首个实验记录 | `src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two_tower/`、`docs/kuasar.md` |
+| 2026-11-07 | **文档** | 新增 `DEVELOPMENT_STORY.md`：10 个开发故事线（仓库瘦身、文档生成、数据结构、切分口径、曝光语义、训练效率、FAISS 反直觉、缓存指纹、范围纪律、长尾），含 60 秒讲法与高频追问 | `DEVELOPMENT_STORY.md`、`README.md`、`docs/README.md` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

@@ -107,6 +107,7 @@ python -m recsys.data.kuasar_ranking --check
 | --- | --- |
 | [PROJECT_MASTER.md](PROJECT_MASTER.md) | 项目总档案与 13 个 Phase（大纲） |
 | [PROJECT_PROGRESS.md](PROJECT_PROGRESS.md) | 进度台账：已完成 / 待决策 / 下一步 / 变更历史 |
+| [DEVELOPMENT_STORY.md](DEVELOPMENT_STORY.md) | **开发故事线**：遇到的问题、根因、取舍与数字（面试用） |
 | [docs/architecture.md](docs/architecture.md) | 分层、数据流、适配层、工件溯源、扩展点 |
 | [docs/data-contract.md](docs/data-contract.md) | `PreparedData` 契约、切分规则、模型输入映射 |
 | [docs/model-zoo.md](docs/model-zoo.md) | 24 个模型的完整索引（生成物） |
