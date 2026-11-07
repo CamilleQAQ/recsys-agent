@@ -1,0 +1,40 @@
+# 本次运行配置（2026-11-07）
+
+[dataset]
+name = "kuasar_small"
+parent = "kuasar"
+users = 2000
+items = 454717
+positives = 758724
+split_strategy = "per_user_last_two_requests"
+
+[model]
+name = "two_tower"
+tower_type = "embedding"          # ID 表 + 特征拼接后过 MLP
+embedding_dim = 64
+hidden_dim = 128
+output_dim = 64
+temperature = 0.1
+batch_size = 2048
+learning_rate = 0.01
+epochs = 20
+mask_false_negatives = false
+loss = "in-batch cross entropy"
+
+[features]
+item_cat_columns = ["category_first_code", "category_second_code", "item_type_code", "upload_type_code"]
+item_cat_cardinalities = [38, 294, 4, 29]   # 已 +1，0 号桶留给缺失
+feature_dim = 16
+item_numeric_columns = ["author_freq", "caption_tokens", "upload_days", "is_ad", "upload_valid"]
+numeric_transforms = ["log1p", "log1p", "years", "raw", "raw"]
+user_features = "none（ID-only；子集未带用户活跃度）"
+
+[hardware]
+device = "cpu"
+threads = 4
+memory_gb = 15.7
+
+[commands]
+train = "python -m recsys.training.trainer --dataset kuasar_small --epochs 20 --batch-size 2048 --embedding-dim 64 --output-dim 64 --no-mask-false-negatives --use-item-features --seed 42 --checkpoint-name two_tower_features"
+evaluate = "python -m recsys.adapters evaluate --model two_tower --checkpoint artifacts/kuasar_small/two_tower_features.pt --split test --ks 10 20"
+baseline = "python -m recsys.adapters evaluate --model two_tower --checkpoint artifacts/kuasar_small/two_tower.pt --split test --ks 10 20"

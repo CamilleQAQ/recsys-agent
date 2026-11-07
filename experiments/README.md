@@ -59,6 +59,7 @@ experiments/
 | 日期 | 运行 | 数据集 | 一句话结论 |
 | --- | --- | --- | --- |
 | 2026-11-07 | [kuasar_small-two_tower](2026-11-07-kuasar_small-two_tower/report.md) | kuasar_small（2,000 用户） | 链路跑通；测试 Recall@20 0.0035（≈37× 随机）；FAISS IndexFlat 比 torch 暴力检索慢 3.9× |
+| 2026-11-07 | [kuasar_small-two-tower-features](2026-11-07-kuasar_small-two-tower-features/report.md) | kuasar_small（2,000 用户） | 物品侧特征入塔：Recall@10 **翻倍**（0.0016 → 0.0032）、Recall@20 +26.9%；验证/测试在 Recall@10 上结论不一致，需多 seed |
 
 权重不入库，只记路径 / sha256 / provenance（见各目录的 `checkpoint.txt`）。
 下一个实验按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。

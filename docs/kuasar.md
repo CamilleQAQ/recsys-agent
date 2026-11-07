@@ -303,6 +303,9 @@ for X, y, groups in iter_candidate_batches(samples, data.item_features, user_lev
 特征列：物品侧 9 列（类目×2、作者频次、item_type、upload_type、上传日期/有效性、caption token 数、`is_ad`）
 + 用户侧 2 列（搜索活跃度、推荐活跃度）。
 
+子集 `kuasar_small` 同样带特征：构建时会从全量特征表按子集词表切片（12 列，
+子集内 2,055 个广告物品），因此 `prepare_dataset("kuasar_small").item_features` 可直接用。
+
 
 
 ## 5. 对设计的影响

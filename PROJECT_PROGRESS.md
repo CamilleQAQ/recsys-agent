@@ -340,6 +340,32 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ---
 
+### 2.18 Phase 2 第 3 项：物品侧特征入塔（2026-11-07）
+
+- [x] `TwoTowerModel` 支持侧特征：ID 表 ⊕ 4 个类目 embedding（`feature_dim=16`，编码 +1 留缺失桶）
+      ⊕ 5 个数值特征（`log1p(author_freq)`、`log1p(caption_tokens)`、`upload_days/365.25`、`is_ad`、`upload_valid`）
+- [x] 特征以 **buffer** 形式挂在模型上：checkpoint 自带特征，`encode_items(ids)` 独立可推理
+- [x] 子集构建器现在会**切片全量特征表**（12 列），`prepare_dataset("kuasar_small")` 直接带特征
+- [x] 训练入口新增 `--use-item-features` / `--feature-dim` / `--checkpoint-name`（变体不再互相覆盖）
+- [x] 基线按原配置重训，指标**逐位复现**（Recall@20 0.003475、Coverage 0.071592）
+- [x] 记录为独立实验：`experiments/2026-11-07-kuasar_small-two-tower-features/`
+
+**测试集对照（4,275 个目标，单 seed）**：
+
+| 指标 | ID-only | + 物品特征 | 变化 |
+| --- | --- | --- | --- |
+| Recall@10 | 0.001600 | **0.003200** | **+100.0%** |
+| Recall@20 | 0.003475 | **0.004408** | +26.9% |
+| NDCG@20 | 0.001839 | 0.002836 | +54.2% |
+| Coverage | 0.071592 | 0.071134 | −0.6% |
+
+参数量 29.23M → 33.35M，checkpoint 111.5 → 134.2 MB。验证集只有 5,775 个目标，
+Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入实验报告「已知问题」。
+
+**Phase 2 清单：11/12 完成**，只剩第 5 项（超参扫描记录）。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -367,8 +393,10 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
       [experiments/2026-11-07-kuasar_small-two_tower](experiments/2026-11-07-kuasar_small-two_tower/report.md)
 - [x] ANN 对照（IVF/HNSW 扫描）：离线用暴力检索、服务化用 IVF/HNSW（见 2.17）
 - [x] 独立推理入口：`python -m recsys.adapters recommend --model two_tower --checkpoint ... --users 97722`
-- [ ] **特征入塔**：把 `item_features`（类目/作者/`is_ad`）与用户活跃度接进用户塔/物品塔
+- [x] **特征入塔**：物品侧 4 类目 + 5 数值特征；Recall@10 翻倍、Recall@20 +26.9%（见 2.18）
 - [ ] **超参选择记录**：dim / batch / lr 的小规模扫描，选一组写入实验记录
+- [ ] 多 seed 复核特征实验（验证/测试在 Recall@10 上方向不一致）
+- [ ] 用户侧特征（活跃度）入塔——子集需切 `user_features.csv`
 - [ ] 全量决策：词表裁剪（交互 ≥N 次）还是换 GPU/大内存；裁剪会改变评测口径，必须写清楚
 - [ ] 补 Coverage 与效率指标（训练耗时、单用户推理延迟、索引构建时间）
 
@@ -478,6 +506,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-07 | **Phase 2 验证** | `kuasar_small`（2,000 用户 / 454,717 物品）+ Two-Tower 20 epochs：链路闭环；测试 Recall@20 0.003475（≈37× 随机）；FAISS IndexFlat 比 torch 暴力检索慢 3.9×；建立首个实验记录 | `src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two_tower/`、`docs/kuasar.md` |
 | 2026-11-07 | **文档** | 新增 `DEVELOPMENT_STORY.md`：10 个开发故事线（仓库瘦身、文档生成、数据结构、切分口径、曝光语义、训练效率、FAISS 反直觉、缓存指纹、范围纪律、长尾），含 60 秒讲法与高频追问 | `DEVELOPMENT_STORY.md`、`README.md`、`docs/README.md` |
 | 2026-11-07 | **Phase 2 清单** | 12 项完成 10 项：新增 ANN 对照（IVF nprobe=128 与精确指标相同、快 8.9×；HNSW ef=256 快 8×）与独立推理入口（原始 user_id → Top-K 原始 item_id）；剩余特征入塔与超参扫描 | `src/recsys/evaluation/ann_benchmark.py`、`src/recsys/adapters/__main__.py`、实验记录 |
+| 2026-11-07 | **Phase 2 特征** | 物品侧特征入塔（4 类目 + 5 数值，buffer 随 checkpoint）：测试 Recall@10 0.0016 → 0.0032（翻倍）、Recall@20 +26.9%、NDCG@20 +54%；子集特征表切片与 `--checkpoint-name` 变体命名；基线重训逐位复现 | `src/recsys/models/two_tower.py`、`src/recsys/training/trainer.py`、`src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two-tower-features/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

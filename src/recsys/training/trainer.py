@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -17,12 +18,67 @@ from recsys.data.loader import (
     prepare_dataset,
     resolve_positive_threshold,
 )
-from recsys.data.schema import Interaction, InteractionDataset
+from recsys.data.schema import Interaction, InteractionDataset, PreparedData
 from recsys.models.two_tower import TwoTowerModel
 from recsys.training.losses import in_batch_cross_entropy_loss
 from recsys.utils.checkpoint import json_ready_config
 from recsys.utils.provenance import build_provenance
 from recsys.utils.seed import set_random_seed
+
+#: 物品侧类目特征（连续编码，-1 表示缺失 → 统一映射到 0 号「未知」桶）。
+ITEM_CAT_COLUMNS = (
+    "category_first_code",
+    "category_second_code",
+    "item_type_code",
+    "upload_type_code",
+)
+#: 物品侧数值特征及其变换：计数量取 log1p，日期取年，布尔保持 0/1。
+ITEM_NUM_SPECS = (
+    ("author_freq", "log1p"),
+    ("caption_tokens", "log1p"),
+    ("upload_days", "years"),
+    ("is_ad", "raw"),
+    ("upload_valid", "raw"),
+)
+
+
+def build_item_feature_tensors(
+    prepared_data: PreparedData,
+) -> dict[str, object] | None:
+    """把 `item_features` 转成塔可以直接查的两张表；没有特征时返回 None。
+
+    返回 ``{"cat": [num_items, 4] long, "numeric": [num_items, 5] float32,
+    "cat_cardinalities": [...], "numeric_names": [...]}``。
+    类目编码整体 +1，腾出 0 号给「缺失/未知」，因此基数也要 +1。
+    """
+    features = prepared_data.item_features
+    if features is None:
+        return None
+    cat_columns = []
+    cardinalities = []
+    for name in ITEM_CAT_COLUMNS:
+        column = np.asarray(features.column(name))
+        cardinality = int(column.max()) + 1 if column.size else 0
+        if cardinality <= 0:
+            raise ValueError(f"特征列 {name} 没有有效编码，无法入塔")
+        cat_columns.append(column.astype(np.int64) + 1)
+        cardinalities.append(cardinality + 1)
+
+    numeric_columns = []
+    for name, transform in ITEM_NUM_SPECS:
+        values = np.asarray(features.column(name)).astype(np.float32)
+        if transform == "log1p":
+            values = np.log1p(np.clip(values, 0, None))
+        elif transform == "years":
+            values = np.clip(values, 0, None) / 365.25
+        numeric_columns.append(values)
+
+    return {
+        "cat": np.stack(cat_columns, axis=1).astype(np.int64),
+        "numeric": np.stack(numeric_columns, axis=1).astype(np.float32),
+        "cat_cardinalities": cardinalities,
+        "numeric_names": [name for name, _ in ITEM_NUM_SPECS],
+    }
 
 
 @dataclass(frozen=True)
@@ -39,6 +95,9 @@ class TrainConfig:
     temperature: float = 0.1
     tower_type: str = "embedding"
     mask_false_negatives: bool = True
+    use_item_features: bool = False
+    feature_dim: int = 16
+    checkpoint_name: str = "two_tower"
     positive_threshold: float | None = None
     weight_decay: float = 0.0
     seed: int = 42
@@ -171,6 +230,9 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
         train_dataset, config.batch_size, config.seed, shuffle=True
     )
 
+    feature_tensors = (
+        build_item_feature_tensors(prepared_data) if config.use_item_features else None
+    )
     model = TwoTowerModel(
         num_users=prepared_data.num_users,
         num_items=prepared_data.num_items,
@@ -179,7 +241,28 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
         output_dim=config.output_dim,
         temperature=config.temperature,
         tower_type=config.tower_type,
+        item_cat_cardinalities=(
+            feature_tensors["cat_cardinalities"] if feature_tensors else None
+        ),
+        item_numeric_count=(
+            len(feature_tensors["numeric_names"]) if feature_tensors else 0
+        ),
+        feature_dim=config.feature_dim,
     ).to(device)
+    if feature_tensors is not None:
+        # buffer 挂在模型上：checkpoint 自带特征，推理时只需 item_id。
+        model.item_cat_features.copy_(
+            torch.from_numpy(feature_tensors["cat"]).to(device)
+        )
+        model.item_numeric_features.copy_(
+            torch.from_numpy(feature_tensors["numeric"]).to(device)
+        )
+        print(
+            f"Item features: {len(feature_tensors['cat_cardinalities'])} categorical "
+            f"(cardinalities={feature_tensors['cat_cardinalities']}) + "
+            f"{len(feature_tensors['numeric_names'])} numeric "
+            f"({', '.join(feature_tensors['numeric_names'])})"
+        )
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=config.learning_rate,
@@ -242,7 +325,7 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
         model.load_state_dict(best_state_dict)
 
     config.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = config.artifacts_dir / config.dataset / "two_tower.pt"
+    checkpoint_path = config.artifacts_dir / config.dataset / f"{config.checkpoint_name}.pt"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     # checkpoint 里同时存模型权重和重建模型所需的全部配置，
     # 这样评估脚本只看这一个文件就能把模型还原出来。
@@ -260,6 +343,13 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
                 "output_dim": config.output_dim,
                 "temperature": config.temperature,
                 "tower_type": config.tower_type,
+                "item_cat_cardinalities": (
+                    feature_tensors["cat_cardinalities"] if feature_tensors else None
+                ),
+                "item_numeric_count": (
+                    len(feature_tensors["numeric_names"]) if feature_tensors else 0
+                ),
+                "feature_dim": config.feature_dim,
             },
             "train_config": json_ready_config(config),
             "provenance": build_provenance(
@@ -307,6 +397,19 @@ def parse_args() -> TrainConfig:
         help="Disable masking of known train positives in off-diagonal logits.",
     )
     parser.set_defaults(mask_false_negatives=True)
+    parser.add_argument(
+        "--use-item-features",
+        action="store_true",
+        help="把物品侧特征（类目/作者频次/上传日期/is_ad）拼进物品塔；需要数据集有 item_features",
+    )
+    parser.add_argument(
+        "--feature-dim", type=int, default=16, help="每个类目特征的 embedding 维度"
+    )
+    parser.add_argument(
+        "--checkpoint-name",
+        default="two_tower",
+        help="checkpoint 文件名（不含 .pt）；不同变体用不同名字，避免互相覆盖",
+    )
     parser.add_argument(
         "--positive-threshold",
         type=float,

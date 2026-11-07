@@ -78,8 +78,9 @@
   },
   "checkpoint": {
     "path": "artifacts/kuasar_small/two_tower.pt",
-    "sha256": "83f10a8bcf1f8659feb52841a23a4e28aa2732daca7966b6b7c4c8ecc57383e2",
+    "sha256": "8567b72d3faa2bfd6841ffce5914af2bdb52edfa3ee47aeb702bb7b3a10f6eb6",
     "size_mb": 111.5,
-    "provenance": "data=d6b5c0e8a96b code=41056d451d44 users=2000 items=454717"
+    "provenance": "data=d6b5c0e8a96b code=9b9d8dc1525d users=2000 items=454717",
+    "note": "2026-11-07 按原配置重训（一次冒烟实验曾覆盖该文件），指标逐位复现"
   }
 }

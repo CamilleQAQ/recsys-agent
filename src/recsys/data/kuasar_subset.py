@@ -28,6 +28,7 @@ import numpy as np
 
 from recsys.config import DEFAULT_DATA_DIR
 from recsys.data.kuasar import KUASAR_ARCHIVE_MD5, KUASAR_DATASET_DIRNAME
+from recsys.data.kuasar_features import COLUMNS, features_dir, _file_sha256
 from recsys.data.kuasar_store import _save, dataset_dir as kuasar_dataset_dir, load_processed
 
 DEFAULT_OUTPUT = Path("data") / "kuasar_small"
@@ -55,6 +56,38 @@ def _slice_exposure(
     new_indptr = np.concatenate(([0], np.cumsum(counts))).astype(np.int64)
     flat = np.concatenate(kept_items) if kept_items else np.empty(0, dtype=np.int32)
     return {"indptr": new_indptr, "items": flat.astype(np.int32)}
+
+
+def slice_item_features(
+    parent_root: Path, target_root: Path, item_positions: np.ndarray
+) -> dict[str, Any] | None:
+    """把全量特征表按子集物品切片；父数据集没有特征表时返回 None。"""
+    source = features_dir(parent_root) / "schema.json"
+    if not source.exists():
+        return None
+    schema = json.loads(source.read_text(encoding="utf-8"))
+    target = features_dir(target_root)
+    target.mkdir(parents=True, exist_ok=True)
+    fingerprints: dict[str, str] = {}
+    for name in COLUMNS:
+        values = np.asarray(np.load(features_dir(parent_root) / f"{name}.npy", mmap_mode="r"))
+        sliced = values[item_positions]
+        path = target / f"{name}.npy"
+        np.save(path, sliced)
+        fingerprints[name] = _file_sha256(path)
+    sliced_schema = {
+        **schema,
+        "num_items": int(item_positions.size),
+        "matched_items": int(item_positions.size),
+        "is_ad_items": int(np.asarray(np.load(target / "is_ad.npy")).sum()),
+        "fingerprints": fingerprints,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    (target / "schema.json").write_text(
+        json.dumps(sliced_schema, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(f"      特征表已切片：{len(COLUMNS)} 列 → {target}", flush=True)
+    return sliced_schema
 
 
 def build_subset(
@@ -137,6 +170,10 @@ def build_subset(
         "split": all_labels,
     }
     fingerprints = _save(processed, mapped, split_data, exposure)
+    # 物品特征按子集词表切片，否则子集上的排序/特征实验没有特征可用
+    feature_schema = slice_item_features(
+        kuasar_dataset_dir(data_dir), output, unique_items
+    )
 
     split_counts = {
         name: int((all_labels == code).sum()) for code, name in ((0, "train"), (1, "validation"), (2, "test"))
@@ -149,6 +186,11 @@ def build_subset(
         "split_counts": split_counts,
         "requests": {name: int(np.unique(all_ts[all_labels == code]).size) for code, name in ((0, "train"), (1, "validation"), (2, "test"))},
         "exposure_pairs": {name: int(csr["items"].size) for name, csr in exposure.items()},
+        "item_features": (
+            {"columns": len(feature_schema["columns"]), "ad_items": feature_schema.get("is_ad_items")}
+            if feature_schema
+            else None
+        ),
         "min_positives": min_positives,
         "seed": seed,
         "elapsed_s": round(time.time() - started, 1),

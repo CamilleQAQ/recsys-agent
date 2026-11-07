@@ -1,0 +1,69 @@
+{
+  "run": "2026-11-07-kuasar_small-two-tower-features",
+  "baseline_run": "2026-11-07-kuasar_small-two_tower",
+  "dataset": {"name": "kuasar_small", "users": 2000, "items": 454717},
+  "model": {
+    "two_tower_features": {
+      "tower_type": "embedding",
+      "embedding_dim": 64,
+      "output_dim": 64,
+      "temperature": 0.1,
+      "feature_dim": 16,
+      "item_cat_cardinalities": [38, 294, 4, 29],
+      "item_numeric_count": 5,
+      "parameters": 33353589,
+      "epochs": 20
+    }
+  },
+  "validation_at_best_epoch": {
+    "epoch": 19,
+    "Recall@10": 0.001467,
+    "NDCG@10": 0.000981,
+    "HitRate@10": 0.0045,
+    "Recall@20": 0.004133,
+    "NDCG@20": 0.001884,
+    "HitRate@20": 0.012
+  },
+  "test": {
+    "features": {
+      "Recall@10": 0.0032,
+      "NDCG@10": 0.002465,
+      "HitRate@10": 0.006,
+      "Precision@10": 0.0006,
+      "Recall@20": 0.004408,
+      "NDCG@20": 0.002836,
+      "HitRate@20": 0.0085,
+      "Precision@20": 0.000425,
+      "Coverage": 0.071134
+    },
+    "baseline_id_only": {
+      "Recall@10": 0.0016,
+      "NDCG@10": 0.001202,
+      "HitRate@10": 0.0035,
+      "Precision@10": 0.00035,
+      "Recall@20": 0.003475,
+      "NDCG@20": 0.001839,
+      "HitRate@20": 0.0085,
+      "Precision@20": 0.000425,
+      "Coverage": 0.071592
+    },
+    "delta": {
+      "Recall@10": "+100.0%",
+      "Recall@20": "+26.9%",
+      "NDCG@20": "+54.2%",
+      "HitRate@10": "+71.4%",
+      "Coverage": "-0.6%"
+    }
+  },
+  "checkpoint": {
+    "path": "artifacts/kuasar_small/two_tower_features.pt",
+    "sha256": "784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b",
+    "size_mb": 134.2,
+    "provenance": "data=d6b5c0e8a96b code=9b9d8dc1525d users=2000 items=454717"
+  },
+  "notes": [
+    "验证集只有 5,775 个目标，Recall@10 与 Recall@20 的结论不一致（验证 Recall@10 反而低于基线）",
+    "测试集 4,275 个目标，Single-seed 结果，差异需多 seed 复核",
+    "特征 buffer 随 checkpoint 保存，推理只需 item_id"
+  ]
+}
