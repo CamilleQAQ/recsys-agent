@@ -1,0 +1,31 @@
+# 超参扫描（Phase 2 工作清单第 5 项）
+
+[dataset]
+name = "kuasar_small"
+users = 2000
+items = 454717
+features = "on（4 类目 + 5 数值）"
+
+[grid]
+epochs = 8
+batch_sizes = [1024, 2048]
+dimensions = [32, 64, 128]
+learning_rates = [0.003, 0.01]
+optimizer = "Adam"
+loss = "in-batch cross entropy, temperature 0.1"
+negative_sampling = "in-batch（无显式负采样），mask_false_negatives=false"
+
+[runs]
+d32_b2048_lr1e-2  = {dim=32,  batch=2048, lr=0.01}
+d64_b1024_lr1e-2  = {dim=64,  batch=1024, lr=0.01}
+d64_b2048_lr3e-3  = {dim=64,  batch=2048, lr=0.003}
+d128_b2048_lr1e-2 = {dim=128, batch=2048, lr=0.01}
+
+[finalists_20_epochs]
+d64  = "artifacts/kuasar_small/two_tower_features.pt"
+d128 = "artifacts/kuasar_small/two_tower_features_d128.pt"
+
+[commands]
+sweep = "python -m recsys.training.trainer --dataset kuasar_small --epochs 8 --batch-size <B> --embedding-dim <D> --output-dim <D> --learning-rate <LR> --no-mask-false-negatives --use-item-features --seed 42 --checkpoint-name sweep_d<D>_b<B>_lr<LR>"
+final_d64 = "python -m recsys.training.trainer --dataset kuasar_small --epochs 20 --batch-size 2048 --embedding-dim 64 --output-dim 64 --no-mask-false-negatives --use-item-features --seed 42 --checkpoint-name two_tower_features"
+final_d128 = "python -m recsys.training.trainer --dataset kuasar_small --epochs 20 --batch-size 2048 --embedding-dim 128 --output-dim 128 --no-mask-false-negatives --use-item-features --seed 42 --checkpoint-name two_tower_features_d128"

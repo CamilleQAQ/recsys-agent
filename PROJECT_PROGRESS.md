@@ -366,6 +366,32 @@ Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入
 
 ---
 
+### 2.19 Phase 2 第 5 项：超参扫描（2026-11-07）
+
+- [x] 4 组配置 × 8 epochs 扫描（dim 32/64/128、batch 1024/2048、lr 3e-3/1e-2，特征开启），
+      指标取 checkpoint 里的 best-epoch 验证结果
+- [x] 前两名跑满 20 epochs 复核（d64 与 d128），测试集确认
+- [x] **选定配置**：`embedding_dim=output_dim=64`、`batch=2048`、`lr=0.01`、Adam、20 epochs、特征开启
+- [x] 记录为独立实验：`experiments/2026-11-07-kuasar_small-two-tower-sweep/`
+
+**扫描结果（验证集 best epoch）**：
+
+| 配置 | best epoch | Recall@20 | 测试 Recall@20 | 测试 NDCG@20 |
+| --- | --- | --- | --- | --- |
+| d32 / b2048 / lr1e-2 | 2 | 0.001433 | — | — |
+| d64 / b1024 / lr1e-2 | 5 | 0.001300 | — | — |
+| d64 / b2048 / lr3e-3 | 4 | 0.000867 | — | — |
+| d128 / b2048 / lr1e-2 | 7 | 0.002258 | 0.004825 | 0.002015 |
+| **d64 / b2048 / lr1e-2（选定）** | 19 | 0.004133 | **0.004408** | **0.002836** |
+
+**关键教训**：8 轮扫描把 d128 排成第一（是第二名的 1.7 倍），跑满 20 轮后 d64 与 d128 的
+验证 Recall@20 只差 6%，而 NDCG@20 / Recall@10 的排序完全反转——**短预算扫描测的是「谁先动起来」，
+不是「谁最终更好」；最终比较必须同预算、同 epoch 数**。这一条也写进了 `DEVELOPMENT_STORY.md`。
+
+**Phase 2 清单：12/12 完成。**
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -394,7 +420,7 @@ Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入
 - [x] ANN 对照（IVF/HNSW 扫描）：离线用暴力检索、服务化用 IVF/HNSW（见 2.17）
 - [x] 独立推理入口：`python -m recsys.adapters recommend --model two_tower --checkpoint ... --users 97722`
 - [x] **特征入塔**：物品侧 4 类目 + 5 数值特征；Recall@10 翻倍、Recall@20 +26.9%（见 2.18）
-- [ ] **超参选择记录**：dim / batch / lr 的小规模扫描，选一组写入实验记录
+- [x] **超参选择记录**：4 组扫描 + 2 组 20 轮复核，选定 d64/b2048/lr1e-2；记录「短预算选参不可靠」（见 2.19）
 - [ ] 多 seed 复核特征实验（验证/测试在 Recall@10 上方向不一致）
 - [ ] 用户侧特征（活跃度）入塔——子集需切 `user_features.csv`
 - [ ] 全量决策：词表裁剪（交互 ≥N 次）还是换 GPU/大内存；裁剪会改变评测口径，必须写清楚
@@ -507,6 +533,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-07 | **文档** | 新增 `DEVELOPMENT_STORY.md`：10 个开发故事线（仓库瘦身、文档生成、数据结构、切分口径、曝光语义、训练效率、FAISS 反直觉、缓存指纹、范围纪律、长尾），含 60 秒讲法与高频追问 | `DEVELOPMENT_STORY.md`、`README.md`、`docs/README.md` |
 | 2026-11-07 | **Phase 2 清单** | 12 项完成 10 项：新增 ANN 对照（IVF nprobe=128 与精确指标相同、快 8.9×；HNSW ef=256 快 8×）与独立推理入口（原始 user_id → Top-K 原始 item_id）；剩余特征入塔与超参扫描 | `src/recsys/evaluation/ann_benchmark.py`、`src/recsys/adapters/__main__.py`、实验记录 |
 | 2026-11-07 | **Phase 2 特征** | 物品侧特征入塔（4 类目 + 5 数值，buffer 随 checkpoint）：测试 Recall@10 0.0016 → 0.0032（翻倍）、Recall@20 +26.9%、NDCG@20 +54%；子集特征表切片与 `--checkpoint-name` 变体命名；基线重训逐位复现 | `src/recsys/models/two_tower.py`、`src/recsys/training/trainer.py`、`src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two-tower-features/` |
+| 2026-11-07 | **Phase 2 超参** | 4 组 × 8 epochs 扫描 + 2 组 × 20 epochs 复核：选定 d64/b2048/lr1e-2；发现「8 轮扫描排名在 20 轮后反转」，记录短预算选参的陷阱；Phase 2 清单 12/12 | `experiments/2026-11-07-kuasar_small-two-tower-sweep/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

@@ -1,0 +1,42 @@
+{
+  "run": "2026-11-07-kuasar_small-two-tower-sweep",
+  "split": "validation（选择用），test（确认用）",
+  "sweep_8_epochs": {
+    "note": "指标取 best epoch 的验证集结果（checkpoint 里记录的 best_validation_metrics）",
+    "d32_b2048_lr1e-2":  {"best_epoch": 2, "Recall@10": 0.000333, "Recall@20": 0.001433, "NDCG@20": 0.000521, "params": 18730421, "checkpoint_mb": 78.4},
+    "d64_b1024_lr1e-2":  {"best_epoch": 5, "Recall@10": 0.000350, "Recall@20": 0.001300, "NDCG@20": 0.000573, "params": 33353589, "checkpoint_mb": 134.2},
+    "d64_b2048_lr3e-3":  {"best_epoch": 4, "Recall@10": 0.000867, "Recall@20": 0.000867, "NDCG@20": 0.000371, "params": 33353589, "checkpoint_mb": 134.2},
+    "d128_b2048_lr1e-2": {"best_epoch": 7, "Recall@10": 0.000492, "Recall@20": 0.002258, "NDCG@20": 0.000985, "params": 62599925, "checkpoint_mb": 245.7}
+  },
+  "finalists_20_epochs": {
+    "d64_b2048_lr1e-2": {
+      "best_epoch": 19,
+      "validation": {"Recall@10": 0.001467, "Recall@20": 0.004133, "NDCG@20": 0.001884, "HitRate@20": 0.012},
+      "test": {"Recall@10": 0.0032, "Recall@20": 0.004408, "NDCG@20": 0.002836, "HitRate@20": 0.0085, "Coverage": 0.071134},
+      "train_minutes_approx": 18
+    },
+    "d128_b2048_lr1e-2": {
+      "best_epoch": 17,
+      "validation": {"Recall@10": 0.002808, "Recall@20": 0.004383, "NDCG@20": 0.001587, "HitRate@20": 0.009},
+      "test": {"Recall@10": 0.002875, "Recall@20": 0.004825, "NDCG@20": 0.002015, "HitRate@20": 0.0100, "Coverage": 0.070024},
+      "checkpoint_sha256": "81dd7605fa90f2f4f2347ca937d6494acac97c9675becdc5f346ead55c5c54e8",
+      "checkpoint_mb": 245.7,
+      "train_minutes_approx": 35
+    }
+  },
+  "decision": {
+    "chosen": "embedding_dim=64, output_dim=64, batch=2048, lr=0.01, Adam, 20 epochs, features=on",
+    "reason": [
+      "d128 在 Recall@20 上略优（验证 0.004383 vs 0.004133；测试 0.004825 vs 0.004408），但差距约 2 个命中（4,275 个目标），在噪声区间",
+      "d128 的 NDCG@20 明显更差（测试 0.002015 vs 0.002836，-29%），Recall@10 也更低（0.002875 vs 0.0032）",
+      "d128 训练时间约 2 倍（35 min vs 18 min）、checkpoint 2 倍（245.7 MB vs 134.2 MB）",
+      "d64 在验证与测试上的头部指标更均衡"
+    ],
+    "alternative": "如果服务只关心『候选池里有几个正样本』（Recall@20），d128 可作为备选，但需要多 seed 复核"
+  },
+  "lessons": [
+    "8 epoch 的扫描把 d128 排第一（0.002258），20 epoch 后 d64 与 d128 的验证 Recall@20 只差 6%，而 NDCG/Recall@10 的排序完全反转——短训练选参不可靠",
+    "best_epoch 与 last_epoch 差别很大：d32 的 best 是第 2 轮、d128 是第 7 轮，说明这些配置在 8 轮内就过拟合/震荡，必须用完整训练复核",
+    "lr=3e-3 在 8 轮内几乎没学会（0.000867），不代表慢学习率不好，只是训练预算不够"
+  ]
+}
