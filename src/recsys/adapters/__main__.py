@@ -86,7 +86,80 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     evaluate.add_argument("--split", choices=["validation", "test"], default="test")
     evaluate.add_argument("--ks", type=int, nargs="+", default=[10, 20])
     evaluate.add_argument("--device", default="auto")
+
+    recommend = subparsers.add_parser(
+        "recommend", help="加载 checkpoint，给指定用户出 Top-K（独立推理，不跑全量评测）"
+    )
+    recommend.add_argument("--model", choices=adapter_ids(), required=True)
+    recommend.add_argument("--checkpoint", type=Path, required=True)
+    recommend.add_argument("--dataset", choices=SUPPORTED_DATASETS, default=DEFAULT_DATASET)
+    recommend.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    recommend.add_argument("--positive-threshold", type=float, default=None)
+    recommend.add_argument(
+        "--users",
+        required=True,
+        help="原始 user_id，逗号分隔（不是内部索引），例如 5,17,1024",
+    )
+    recommend.add_argument("--k", type=int, default=10)
+    recommend.add_argument(
+        "--history",
+        choices=["test", "validation", "none"],
+        default="test",
+        help="用哪个切分之前的历史过滤已看过的物品；none 表示不过滤",
+    )
+    recommend.add_argument("--device", default="auto")
     return parser.parse_args(argv)
+
+
+def _history_for_users(
+    data: PreparedData, user_indices: set[int], split: str
+) -> dict[int, set[int]]:
+    """按时间口径取「目标时刻之前」的历史：test = train + validation，validation = train。"""
+    history: dict[int, set[int]] = {user: set() for user in user_indices}
+    sequences = [data.train_interactions]
+    if split == "test":
+        sequences.append(data.validation_interactions)
+    for interactions in sequences:
+        for interaction in interactions:
+            if interaction.user_idx in history:
+                history[interaction.user_idx].add(interaction.item_idx)
+    return history
+
+
+def run_recommend(adapter: RecommenderAdapter, data: PreparedData, args: argparse.Namespace) -> int:
+    """独立推理：原始 user_id → Top-K 原始 item_id。"""
+    raw_ids = [int(part) for part in args.users.split(",") if part.strip()]
+    user_indices: list[int] = []
+    missing: list[int] = []
+    for raw_id in raw_ids:
+        try:
+            user_indices.append(int(data.mappings.user_to_index[raw_id]))
+        except KeyError:
+            missing.append(raw_id)
+    if missing:
+        print(f"[warn] 词表里没有这些 user_id：{missing}", file=sys.stderr)
+    if not user_indices:
+        print("[error] 没有可推理的用户", file=sys.stderr)
+        return 2
+
+    history = (
+        _history_for_users(data, set(user_indices), args.history)
+        if args.history != "none"
+        else {user: set() for user in user_indices}
+    )
+    user_vectors = adapter.encode_users(user_indices)
+    item_vectors = adapter.encode_items(list(range(data.num_items)))
+    scores = user_vectors @ item_vectors.T
+    index_to_item = data.mappings.index_to_item
+
+    for row, user_idx in enumerate(user_indices):
+        blocked = sorted(history[user_idx])
+        if blocked:
+            scores[row, blocked] = float("-inf")
+        top = scores[row].argsort()[::-1][: args.k]
+        item_ids = [int(index_to_item[int(item)]) for item in top]
+        print(f"user {int(data.mappings.index_to_user[user_idx])}: {item_ids}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
             adapter, args.dataset, args.positive_threshold
         )
         data = prepare_dataset(dataset, args.data_dir, positive_threshold=threshold)
+        if args.command == "recommend":
+            return run_recommend(adapter, data, args)
         run_evaluation(adapter, data, args.split, list(args.ks))
     except AdapterError as error:
         print(f"[adapter error] {error}", file=sys.stderr)

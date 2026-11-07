@@ -303,6 +303,43 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 ---
 
+### 2.17 Phase 2 清单收尾：ANN 对照与独立推理（2026-11-07）
+
+对照 `PROJECT_MASTER` 的 12 项工作清单，**已完成 10 项**，剩第 3、5 项：
+
+| # | 工作项 | 状态 |
+| --- | --- | --- |
+| 1 | 审计 Two-Tower 结构/损失/负采样 | ✅ in-batch 负采样 + 温度缩放 CE，见 `models/retrieval/two_tower.md` |
+| 2 | 判断能否直接适配 KuaiSAR | ✅ 通过数组后端接入，未重写模型 |
+| 3 | 明确用户塔/物品塔输入特征 | ⛔ 目前仅 ID embedding（特征表已就绪，未入塔） |
+| 4 | 训练/验证/测试流程 | ✅ `--dataset kuasar_small` 一条命令跑通 |
+| 5 | 维度/优化器/lr/batch/负采样策略 | ⚠️ 有一组手选配置（64 维、Adam 1e-2、batch 2048），**无扫描记录** |
+| 6 | 记录训练损失与验证指标 | ✅ checkpoint 存 `epoch_losses` / `best_validation_metrics` |
+| 7 | 生成用户/物品向量 | ✅ `adapter.encode_users/encode_items` |
+| 8 | FAISS 建物品索引 | ✅ `IndexFlatIP`（`faiss_evaluator`） |
+| 9 | Top-K 近邻检索 | ✅ `faiss_top_k_from_embeddings` |
+| 10 | 精确 vs 近似检索对照 | ✅ 新增 `ann_benchmark`（IVF/HNSW 扫描） |
+| 11 | 模型保存/加载/独立推理 | ✅ 新增 `python -m recsys.adapters recommend --users ...` |
+| 12 | 固定协议评估 Recall/HR/Coverage | ✅ 测试集 Recall@20 0.003475、HR@20 0.0085、Coverage 7.16% |
+
+**ANN 对照结果**（`python -m recsys.evaluation.ann_benchmark`，k_search=600，2,000 用户）：
+
+| 索引 | 与精确重合 | Recall@20 | ms/用户 | 索引体积 |
+| --- | --- | --- | --- | --- |
+| 暴力检索 | 1.000 | 0.003475 | 1.137 | — |
+| FAISS Flat | 1.000 | 0.003475 | 2.151 | 111 MB |
+| IVF nprobe=8 | 0.497 | 0.003867 | 0.036 | 115 MB |
+| IVF nprobe=128 | 0.874 | 0.003475 | 0.127 | 115 MB |
+| HNSW ef=256 | 0.648 | 0.003808 | 0.140 | 174 MB |
+
+结论：**离线评测继续用暴力检索**；**服务化用 IVF nprobe 32–128 或 HNSW ef 64–256**
+（8–9 倍加速，指标不降）。指标 ±0.0003 在噪声区间，索引质量要看候选重合率。
+
+**独立推理**：`recommend` 子命令支持「原始 user_id → Top-K 原始 item_id」，
+不依赖评测脚本，实测输出 `user 97722: [1084492, 3304371, ...]`。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -328,10 +365,11 @@ MovieLens 是原始代码遗留的"快速上手"数据线，之前保留它属�
 
 - [x] 小规模验证（2,000 用户子集）：整条链路跑通，结论见
       [experiments/2026-11-07-kuasar_small-two_tower](experiments/2026-11-07-kuasar_small-two_tower/report.md)
-      —— 测试 Recall@20 0.003475（≈37× 随机）、FAISS IndexFlat 比 torch 暴力检索慢 3.9×、单次评测 1.9–7.2 秒
-- [ ] **全量决策**：词表裁剪（交互 ≥N 次）还是换 GPU/大内存；裁剪会改变评测口径，必须写清楚
-- [ ] 全量训练 + 评测（预计暴力检索 3–4 分钟/次、物品向量约 1 GB）
-- [ ] ANN 对照（IVF/HNSW）与召回率损失评估——精确检索已证明用 torch matmul 更快
+- [x] ANN 对照（IVF/HNSW 扫描）：离线用暴力检索、服务化用 IVF/HNSW（见 2.17）
+- [x] 独立推理入口：`python -m recsys.adapters recommend --model two_tower --checkpoint ... --users 97722`
+- [ ] **特征入塔**：把 `item_features`（类目/作者/`is_ad`）与用户活跃度接进用户塔/物品塔
+- [ ] **超参选择记录**：dim / batch / lr 的小规模扫描，选一组写入实验记录
+- [ ] 全量决策：词表裁剪（交互 ≥N 次）还是换 GPU/大内存；裁剪会改变评测口径，必须写清楚
 - [ ] 补 Coverage 与效率指标（训练耗时、单用户推理延迟、索引构建时间）
 
 ### 3.3 Phase 3–5：多路召回
@@ -439,6 +477,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-06 | **Phase 1 收尾** | 排序候选与特征样本：`kuasar_ranking.py` 按请求聚合曝光候选（train 14.35M/3.10M 请求），产出 items/labels/users/groups + 用户活跃度；`iter_candidate_batches` 按批 join 11 列特征；行数对账 14,605,716 全平 | `src/recsys/data/kuasar_ranking.py`、`configs/datasets/kuasar.toml`、`docs/kuasar.md` |
 | 2026-11-07 | **Phase 2 验证** | `kuasar_small`（2,000 用户 / 454,717 物品）+ Two-Tower 20 epochs：链路闭环；测试 Recall@20 0.003475（≈37× 随机）；FAISS IndexFlat 比 torch 暴力检索慢 3.9×；建立首个实验记录 | `src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two_tower/`、`docs/kuasar.md` |
 | 2026-11-07 | **文档** | 新增 `DEVELOPMENT_STORY.md`：10 个开发故事线（仓库瘦身、文档生成、数据结构、切分口径、曝光语义、训练效率、FAISS 反直觉、缓存指纹、范围纪律、长尾），含 60 秒讲法与高频追问 | `DEVELOPMENT_STORY.md`、`README.md`、`docs/README.md` |
+| 2026-11-07 | **Phase 2 清单** | 12 项完成 10 项：新增 ANN 对照（IVF nprobe=128 与精确指标相同、快 8.9×；HNSW ef=256 快 8×）与独立推理入口（原始 user_id → Top-K 原始 item_id）；剩余特征入塔与超参扫描 | `src/recsys/evaluation/ann_benchmark.py`、`src/recsys/adapters/__main__.py`、实验记录 |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

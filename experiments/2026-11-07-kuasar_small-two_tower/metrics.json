@@ -59,6 +59,23 @@
     "recall_at_20_expected": 9.4e-05,
     "note": "20 × (test targets per user 2.14) / 454717，仅作量级参考"
   },
+  "ann_benchmark": {
+    "script": "python -m recsys.evaluation.ann_benchmark",
+    "k_search": 600,
+    "repeats": 3,
+    "indexes": {
+      "brute_force":      {"overlap": 1.000, "recall_20": 0.003475, "ms_per_user": 1.137, "index_mb": 0.0,   "build_s": 0.0},
+      "faiss_flat":       {"overlap": 1.000, "recall_20": 0.003475, "ms_per_user": 2.151, "index_mb": 111.01, "build_s": 0.068},
+      "ivf_nprobe_1":     {"overlap": 0.194, "recall_20": 0.000958, "ms_per_user": 0.019, "index_mb": 115.38, "build_s": 22.827},
+      "ivf_nprobe_8":     {"overlap": 0.497, "recall_20": 0.003867, "ms_per_user": 0.036, "index_mb": 115.38, "build_s": 22.827},
+      "ivf_nprobe_32":    {"overlap": 0.707, "recall_20": 0.003183, "ms_per_user": 0.056, "index_mb": 115.38, "build_s": 22.827},
+      "ivf_nprobe_128":   {"overlap": 0.874, "recall_20": 0.003475, "ms_per_user": 0.127, "index_mb": 115.38, "build_s": 22.827},
+      "hnsw_ef_16":       {"overlap": 0.210, "recall_20": 0.002417, "ms_per_user": 0.019, "index_mb": 173.58, "build_s": 6.393},
+      "hnsw_ef_64":       {"overlap": 0.390, "recall_20": 0.003792, "ms_per_user": 0.052, "index_mb": 173.58, "build_s": 6.393},
+      "hnsw_ef_256":      {"overlap": 0.648, "recall_20": 0.003808, "ms_per_user": 0.140, "index_mb": 173.58, "build_s": 6.393}
+    },
+    "note": "Recall@20 在 4275 个目标上，±0.0003 属噪声区间；overlap 才是索引质量的可比指标"
+  },
   "checkpoint": {
     "path": "artifacts/kuasar_small/two_tower.pt",
     "sha256": "83f10a8bcf1f8659feb52841a23a4e28aa2732daca7966b6b7c4c8ecc57383e2",

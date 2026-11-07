@@ -33,3 +33,5 @@ memory_gb = 15.7
 build_subset = "python -m recsys.data.kuasar_subset --users 2000 --min-positives 30 --seed 42"
 train = "python -m recsys.training.trainer --dataset kuasar_small --epochs 20 --batch-size 2048 --embedding-dim 64 --output-dim 64 --no-mask-false-negatives --seed 42"
 evaluate = "python -m recsys.evaluation.faiss_evaluator --checkpoint artifacts/kuasar_small/two_tower.pt --split test"
+ann = "python -m recsys.evaluation.ann_benchmark --checkpoint artifacts/kuasar_small/two_tower.pt --split test"
+infer = "python -m recsys.adapters recommend --model two_tower --checkpoint artifacts/kuasar_small/two_tower.pt --users 97722,113991 --k 5"
