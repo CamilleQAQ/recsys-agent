@@ -49,6 +49,35 @@ DEFAULT_OUTPUT = Path("artifacts/kuasar_small/quota_agent")
 TOTAL_BUDGET = 100
 
 
+def tool_schema() -> dict:
+    """给 LLM 的原生工具定义（OpenAI tools 格式），参数为两个必填整数配额。"""
+    return {
+        "type": "function",
+        "function": {
+            "name": "evaluate_fusion_quota",
+            "description": (
+                "在固定的 128 个验证用户、每用户 100 个候选的预算下，"
+                "评测双塔与 MIND 的融合配额，返回命中目标数、Recall@100、Coverage 等真实指标。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "two_tower_quota": {
+                        "type": "integer",
+                        "description": "双塔配额（0-100），与 mind_quota 之和必须为 100",
+                    },
+                    "mind_quota": {
+                        "type": "integer",
+                        "description": "MIND 配额（0-100），与 two_tower_quota 之和必须为 100",
+                    },
+                },
+                "required": ["two_tower_quota", "mind_quota"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 class QuotaError(ValueError):
     """配额非法、缓存不一致或预算越界。"""
 

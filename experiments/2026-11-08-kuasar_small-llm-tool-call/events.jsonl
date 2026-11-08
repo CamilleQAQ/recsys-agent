@@ -1,0 +1,1 @@
+{"event": "blocked", "reason": "缺少真实 LLM 配置：DSH_AGENT_LLM_BASE_URL, DSH_AGENT_LLM_API_KEY, DSH_AGENT_LLM_MODEL", "elapsed_s": 0.0}

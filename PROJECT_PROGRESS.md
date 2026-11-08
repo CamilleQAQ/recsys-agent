@@ -508,6 +508,24 @@ checkpoint / report）；缓存与模型在 `artifacts/kuasar_small/mvp/`。
 
 ---
 
+### 2.24 Phase 11 验收：真实 LLM 原生 tool_calls（2026-11-08，未验收）
+
+- [x] 新增 `src/recsys/experiments/llm_tool_call.py`：显式要求真实 LLM，注册
+      `evaluate_fusion_quota` 的 OpenAI tools schema，解析服务商 `tool_calls`（恰好 1 条、
+      函数名/调用 ID/参数校验），按参数执行真实评测，再用原 `tool_call_id` 回传结果、请求模型给停止理由
+- [x] 预算与守卫：最多 2 次模型请求、1 次工具调用、180 秒；超时取 `min(30s, 剩余)` 且不重试；
+      普通文本 JSON、多条 tool_calls、未知工具、非法配额、重复基准一律拒绝（`--self-check` 6 条全过）
+- [x] 脱敏日志：`events.jsonl` 记录基准加载、工具名、响应 ID、`tool_call_id`、参数、真实结果、
+      回传动作、模型回复与停止原因；不含密钥、原始用户/物品 ID、候选明细或标签
+- [ ] **真实运行**：本机未设置 `DSH_AGENT_LLM_BASE_URL` / `DSH_AGENT_LLM_API_KEY` /
+      `DSH_AGENT_LLM_MODEL`，入口在发请求前显式失败（exit 2，0 请求、0 工具调用、0.0 s），
+      未回落本地策略；**真实 LLM 工具调用未验收**
+
+**交付**：`experiments/2026-11-08-kuasar_small-llm-tool-call/`（config / metrics(blocked) / events / report），
+配置密钥后运行同一条命令即可完成验收。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -564,8 +582,10 @@ checkpoint / report）；缓存与模型在 `artifacts/kuasar_small/mvp/`。
 - [x] Phase 9 召回→融合→排序→重排端到端离线链路（MVP，128 用户；重排为类目配额，见 2.22）
 - [ ] Phase 10 TIGER（genrec）：物品 embedding → RQ-VAE 语义 ID → trie 约束解码
 - [x] Phase 11 Research Agent MVP：`evaluate_fusion_quota` 工具 + 配额决策闭环（本地策略，
-      3 组评测，见 2.23）；真实 LLM 调用待验收（无密钥）
-- [ ] Phase 11 完整版：LLM tool-calling 实测、LangGraph 工作流、更多工具注册
+      3 组评测，见 2.23）
+- [ ] Phase 11 真实 LLM tool-calling：入口已实现且守卫自检通过，缺 `DSH_AGENT_LLM_*` 配置，
+      **未验收**（见 2.24）；配置密钥后跑 `python -m recsys.experiments.llm_tool_call` 即可
+- [ ] Phase 11 完整版：LangGraph 工作流、更多工具注册
 - [ ] Phase 12–13 RAG、Agent 对照实验
 
 ---
@@ -662,6 +682,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-08 | **Phase 3 阶段评估** | P1 止损：训练预算 0；发现并修复 MIND 评测随机性（胶囊路由 `torch.randn`），同一 checkpoint 固定种子后可逐位复现；分群评估完成（mid 组 +0.0058、high 组 −0.0040、总体 +0.0006）；旧 0.005675 解释为单次随机路由抽样；40-epoch 收敛/同预算对照/训练多 seed 留待办 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`scripts/eval_groups.py`、`experiments/2026-11-08-kuasar_small-mind-phase3/` |
 | 2026-11-08 | **离线 MVP** | 新增 `recsys_mvp`：128 用户双路召回（双塔 + MIND）→ 名次融合（≤100，来源可追溯）→ LightGBM（父 train 工件 9,997 行 / 20 轮）→ 类目重排（每类 ≤5）；自动断言全过；10.0 s / 1,379 MiB；Top-20 指标为 0（样本量限制），Top-100 命中 9 记录在 diagnostics | `src/recsys/experiments/recsys_mvp.py`、`src/recsys/adapters/ranking.py`、`experiments/2026-11-08-kuasar_small-recsys-mvp/` |
 | 2026-11-08 | **Phase 11 Agent MVP** | 新增 `evaluate_fusion_quota` 工具与 `quota_agent`：先 50/50 基准，再按上下文选 30/70、20/80；3 组评测 1.37 s；结论 30/70（命中 5 vs 基准 4）；工具/决策/候选明细全落盘；真实 LLM 待配置 | `src/recsys/experiments/fusion_quota.py`、`src/recsys/experiments/quota_agent.py`、`experiments/2026-11-08-kuasar_small-fusion-quota-agent/` |
+| 2026-11-08 | **Phase 11 验收（LLM）** | 新增真实 tool_calls 验收入口：注册 `evaluate_fusion_quota`、解析 `tool_calls`、按 `tool_call_id` 回传；6 条解析守卫自检通过；因无 `DSH_AGENT_LLM_*` 配置未发起请求，标为未验收 | `src/recsys/experiments/llm_tool_call.py`、`experiments/2026-11-08-kuasar_small-llm-tool-call/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。
