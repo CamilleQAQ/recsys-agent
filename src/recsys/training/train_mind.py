@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,7 +33,7 @@ from recsys.models.mind import (
     build_batch,
     build_mind_model,
     default_model_config,
-    score_users,
+    rank_users,
 )
 from recsys.training.trainer import resolve_device
 from recsys.utils.checkpoint import json_ready_config
@@ -71,20 +72,17 @@ def _validation_recommendations(
     targets = prepared_data.validation_interactions
     users = sorted(group_items_by_user(targets))
     histories = build_observed_histories(prepared_data, "validation")
-    scores, _ = score_users(
-        model, users, histories, prepared_data.num_items, max_length=max_length, device=device
-    )
     blocked = seen_items_for_split(prepared_data, "validation")
-    recommendations: dict[int, list[int]] = {}
-    for row, user in enumerate(users):
-        user_scores = scores[row]
-        seen = blocked.get(user, set())
-        if seen:
-            user_scores[list(seen)] = -np.inf
-        top = np.argpartition(-user_scores, k)[:k]
-        top = top[np.argsort(-user_scores[top])]
-        recommendations[user] = [int(item) for item in top]
-    return recommendations
+    return rank_users(
+        model,
+        users,
+        histories,
+        prepared_data.num_items,
+        max_length=max_length,
+        device=device,
+        k=k,
+        seen_items=blocked,
+    )
 
 
 def train(config: MindTrainConfig) -> tuple[nn.Module, list[float]]:
@@ -124,11 +122,14 @@ def train(config: MindTrainConfig) -> tuple[nn.Module, list[float]]:
     )
 
     epoch_losses: list[float] = []
+    epoch_history: list[dict] = []
     best_epoch = 0
     best_metrics: dict[str, float] = {}
     best_state = None
+    training_started = time.perf_counter()
 
     for epoch in range(config.epochs):
+        epoch_started = time.perf_counter()
         model.train()
         model.mode = "in_batch"
         total_loss = 0.0
@@ -155,6 +156,11 @@ def train(config: MindTrainConfig) -> tuple[nn.Module, list[float]]:
         epoch_losses.append(average_loss)
         print(f"Epoch {epoch + 1:02d}/{config.epochs:02d} - loss: {average_loss:.6f}")
 
+        epoch_record: dict = {
+            "epoch": epoch + 1,
+            "loss": round(average_loss, 6),
+            "seconds": round(time.perf_counter() - epoch_started, 1),
+        }
         if prepared.validation_interactions:
             recommendations = _validation_recommendations(
                 model, prepared, config.max_length, device, k=20
@@ -162,11 +168,16 @@ def train(config: MindTrainConfig) -> tuple[nn.Module, list[float]]:
             metrics = evaluate_recommendations(
                 recommendations, prepared.validation_interactions, ks=(10, 20)
             )
-            print(f"  validation Recall@20: {metrics['Recall@20']:.6f}")
+            epoch_record["validation"] = {key: round(value, 6) for key, value in metrics.items()}
+            print(
+                f"  validation Recall@20: {metrics['Recall@20']:.6f} "
+                f"NDCG@20: {metrics['NDCG@20']:.6f}"
+            )
             if not best_metrics or metrics["Recall@20"] > best_metrics.get("Recall@20", -1.0):
                 best_epoch = epoch + 1
                 best_metrics = metrics
                 best_state = copy.deepcopy(model.state_dict())
+        epoch_history.append(epoch_record)
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -192,6 +203,8 @@ def train(config: MindTrainConfig) -> tuple[nn.Module, list[float]]:
                 prepared, dataset=config.dataset, positive_threshold=threshold
             ),
             "epoch_losses": epoch_losses,
+            "epoch_history": epoch_history,
+            "train_seconds": round(time.perf_counter() - training_started, 1),
             "best_epoch": best_epoch,
             "best_validation_metrics": best_metrics,
         },

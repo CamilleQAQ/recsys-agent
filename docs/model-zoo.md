@@ -149,7 +149,7 @@
 - **推理入口**：python -m recsys.adapters recommend --model mind --checkpoint artifacts/kuasar_small/mind.pt --users <user_id>
 - **数据格式**：user_id + 历史 item 序列 + item_id（token 0 = padding，模型内部整体 +1）
 - **保存/加载**：单个 .pt：state_dict + model_config + provenance（约 120 MB）
-- **代码完整度**：可直接运行（ready）—— torch-rechub 1.0.0 + 本项目适配器；kuasar_small 上训练/评测通过（MIND 在测试集上弱于双塔，见实验记录）
+- **代码完整度**：可直接运行（ready）—— 单 seed checkpoint 已做分群评估：总体 Recall@20 0.005044（3 个路由种子均值，区间 0.0044–0.0063）vs 双塔 0.004408；mid 组 +0.0058、high 组 −0.0040；收敛检查与训练多 seed 未完成（见 experiments/2026-11-08-kuasar_small-mind-phase3）
 - **适配层**：MindAdapter
 
 ### 语义 ID 召回（RQ-VAE，TorchEasyRec 路线）

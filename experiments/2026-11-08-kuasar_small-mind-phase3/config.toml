@@ -1,0 +1,58 @@
+# Phase 3 MIND：收敛检查 / 超参对照 / 三 seed / 分群评估（2026-11-08）
+
+[protocol]
+dataset = "kuasar_small"
+users = 2000
+items = 454717
+split_strategy = "per_user_last_two_requests"
+split_counts = { train = 748674, validation = 5775, test = 4275 }
+baseline_checkpoint = "artifacts/kuasar_small/two_tower_features.pt"
+baseline_sha256 = "784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b"
+data_split_sha256 = { train = "c62df14cbc3e…", validation = "000681165b44…", test = "d6b5c0e8a96b…" }
+id_mapping_sha256 = "b7d230622f6b…"
+history_rule = "验证集 = train；测试集 = train + validation（截断到 max_length）"
+candidate_rule = "全部 454,717 物品，精确 Top-K"
+filter_rule = "seen_items_for_split（真实曝光，含未点击）"
+
+[fixed_hyperparameters]
+embed_dim = 64
+batch_size = 1024
+learning_rate = 0.01
+optimizer = "Adam"
+weight_decay = 0.0
+temperature = 0.1
+loss = "in-batch softmax cross entropy"
+epochs = 40
+device = "cpu"
+threads = 6                      # 三组并行，每组 6 线程
+mask_false_negatives = "n/a（MIND 用 in-batch，不构建真值表）"
+
+[configs]
+A = { interest_num = 4, max_length = 20, purpose = "现有配置，观察 20 轮之后的变化" }
+B = { interest_num = 2, max_length = 20, purpose = "隔离兴趣数的影响" }
+C = { interest_num = 4, max_length = 40, purpose = "隔离历史截断长度的影响" }
+
+[selection]
+primary = "验证集 Recall@20（各自 best epoch）"
+tie_breaker = "验证集 NDCG@20"
+lock_rule = "三组同预算（40 epochs）比较后锁定配置，再跑 seed 43/44；不依据测试分数回头换配置或挑 seed"
+
+[seeds]
+main = 42
+replication = [43, 44]
+per_seed_checkpoint_rule = "按验证集 Recall@20 保存最佳 checkpoint（每个 seed 独立初始化）"
+
+[groups]
+source = "训练集正交互数（截断前）"
+boundaries = { low = "< 100", mid = "100–299", high = ">= 300" }
+fixed_before_test = true
+
+[commands]
+smoke = "python -u -B -m recsys.training.train_mind --dataset kuasar_small --epochs 1 --batch-size 1024 --embed-dim 64 --max-length 20 --interest-num 4 --max-batches-per-epoch 20 --checkpoint-name mind_p3_smoke"
+A42 = "python -u -B -m recsys.training.train_mind --dataset kuasar_small --epochs 40 --batch-size 1024 --embed-dim 64 --max-length 20 --interest-num 4 --seed 42 --checkpoint-name mind_p3_A42"
+B42 = "python -u -B -m recsys.training.train_mind --dataset kuasar_small --epochs 40 --batch-size 1024 --embed-dim 64 --max-length 20 --interest-num 2 --seed 42 --checkpoint-name mind_p3_B42"
+C42 = "python -u -B -m recsys.training.train_mind --dataset kuasar_small --epochs 40 --batch-size 1024 --embed-dim 64 --max-length 40 --interest-num 4 --seed 42 --checkpoint-name mind_p3_C42"
+seed43 = "python -u -B -m recsys.training.train_mind --dataset kuasar_small --epochs 40 --batch-size 1024 --embed-dim 64 --max-length <winner> --interest-num <winner> --seed 43 --checkpoint-name mind_p3_<WINNER>43"
+seed44 = "python -u -B -m recsys.training.train_mind --dataset kuasar_small --epochs 40 --batch-size 1024 --embed-dim 64 --max-length <winner> --interest-num <winner> --seed 44 --checkpoint-name mind_p3_<WINNER>44"
+group_eval = "python scripts/eval_groups.py --model mind --checkpoint <ckpt> --split test --output artifacts/_eval/<name>_test.json"
+aggregate = "python scripts/mind_phase3_report.py --winner <A|B|C> --seeds 42 43 44"

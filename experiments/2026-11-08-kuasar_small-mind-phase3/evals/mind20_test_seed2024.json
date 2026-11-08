@@ -1,0 +1,78 @@
+{
+  "model": "mind",
+  "checkpoint": "artifacts\\kuasar_small\\mind20.pt",
+  "split": "test",
+  "ks": [
+    10,
+    20
+  ],
+  "group_boundaries": {
+    "low": [
+      0,
+      100
+    ],
+    "mid": [
+      100,
+      300
+    ],
+    "high": [
+      300,
+      1000000000
+    ]
+  },
+  "overall": {
+    "Recall@10": 0.0037,
+    "NDCG@10": 0.002238,
+    "HitRate@10": 0.0075,
+    "Precision@10": 0.00075,
+    "Recall@20": 0.0063,
+    "NDCG@20": 0.002959,
+    "HitRate@20": 0.0115,
+    "Precision@20": 0.000575,
+    "Coverage": 0.07069
+  },
+  "groups": {
+    "low": {
+      "users": 704,
+      "targets": 1493,
+      "metrics": {
+        "Recall@10": 0.004901,
+        "NDCG@10": 0.00308,
+        "HitRate@10": 0.009943,
+        "Precision@10": 0.000994,
+        "Recall@20": 0.005185,
+        "NDCG@20": 0.00321,
+        "HitRate@20": 0.011364,
+        "Precision@20": 0.000568
+      }
+    },
+    "mid": {
+      "users": 622,
+      "targets": 1346,
+      "metrics": {
+        "Recall@10": 0.005681,
+        "NDCG@10": 0.003381,
+        "HitRate@10": 0.009646,
+        "Precision@10": 0.000965,
+        "Recall@20": 0.009968,
+        "NDCG@20": 0.004556,
+        "HitRate@20": 0.016077,
+        "Precision@20": 0.000804
+      }
+    },
+    "high": {
+      "users": 674,
+      "targets": 1436,
+      "metrics": {
+        "Recall@10": 0.000618,
+        "NDCG@10": 0.000304,
+        "HitRate@10": 0.002967,
+        "Precision@10": 0.000297,
+        "Recall@20": 0.00408,
+        "NDCG@20": 0.001223,
+        "HitRate@20": 0.007418,
+        "Precision@20": 0.000371
+      }
+    }
+  }
+}

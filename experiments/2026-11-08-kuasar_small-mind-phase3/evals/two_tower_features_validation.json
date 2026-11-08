@@ -1,0 +1,78 @@
+{
+  "model": "two_tower",
+  "checkpoint": "artifacts\\kuasar_small\\two_tower_features.pt",
+  "split": "validation",
+  "ks": [
+    10,
+    20
+  ],
+  "group_boundaries": {
+    "low": [
+      0,
+      100
+    ],
+    "mid": [
+      100,
+      300
+    ],
+    "high": [
+      300,
+      1000000000
+    ]
+  },
+  "overall": {
+    "Recall@10": 0.001467,
+    "NDCG@10": 0.000981,
+    "HitRate@10": 0.0045,
+    "Precision@10": 0.00045,
+    "Recall@20": 0.004133,
+    "NDCG@20": 0.001884,
+    "HitRate@20": 0.012,
+    "Precision@20": 0.0006,
+    "Coverage": 0.071126
+  },
+  "groups": {
+    "low": {
+      "users": 704,
+      "targets": 1980,
+      "metrics": {
+        "Recall@10": 0.00116,
+        "NDCG@10": 0.001401,
+        "HitRate@10": 0.005682,
+        "Precision@10": 0.000568,
+        "Recall@20": 0.004806,
+        "NDCG@20": 0.00265,
+        "HitRate@20": 0.017045,
+        "Precision@20": 0.000852
+      }
+    },
+    "mid": {
+      "users": 622,
+      "targets": 1845,
+      "metrics": {
+        "Recall@10": 0.002144,
+        "NDCG@10": 0.000824,
+        "HitRate@10": 0.003215,
+        "Precision@10": 0.000322,
+        "Recall@20": 0.005949,
+        "NDCG@20": 0.00202,
+        "HitRate@20": 0.011254,
+        "Precision@20": 0.000563
+      }
+    },
+    "high": {
+      "users": 674,
+      "targets": 1950,
+      "metrics": {
+        "Recall@10": 0.001162,
+        "NDCG@10": 0.000687,
+        "HitRate@10": 0.004451,
+        "Precision@10": 0.000445,
+        "Recall@20": 0.001756,
+        "NDCG@20": 0.000959,
+        "HitRate@20": 0.007418,
+        "Precision@20": 0.000371
+      }
+    }
+  }
+}

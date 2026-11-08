@@ -425,6 +425,40 @@ Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入
 
 ---
 
+### 2.21 Phase 3 阶段评估（P1 止损，2026-11-08）
+
+**范围**：训练预算 0，只做离线评测；复用 `mind20.pt` 与固定双塔基线。
+
+- [x] 核对 40-epoch 中断日志：A/B/C 分别到第 24/25/21 轮，日志保留在
+      `experiments/2026-11-08-kuasar_small-mind-phase3/logs/*.pre-restart.log`；
+      **没有权重**（`train_mind` 只在训练结束时保存），不构成收敛结论
+- [x] 发现并修复评测可复现性问题：torch-rechub 的 `CapsuleNetwork` 用 `torch.randn`
+      初始化路由权重，同一 checkpoint 每次评测指标都不同；新增 `deterministic_routing()`
+      在评测时固定种子并恢复 RNG 状态，两次评测逐位一致
+- [x] 分群评估（低/中/高活跃，<100 / 100–299 / ≥300；704/622/674 用户，目标 1,493/1,346/1,436）：
+      双塔与 MIND 在同一批测试用户、候选范围、曝光过滤下对比
+- [x] 旧报告差异已解释：旧值 0.005675 是未固定路由种子的单次抽样，落在本次 3 个路由种子的
+      区间 0.004408–0.006300 内；本次报告均值与区间
+- [x] 阶段报告 + metrics + checkpoint 记录：
+      `experiments/2026-11-08-kuasar_small-mind-phase3/`（report.md / metrics.json / checkpoint.txt）
+
+**结论**（测试集，MIND 为 3 个路由种子均值）：
+
+| 组 | 双塔 Recall@20 | MIND Recall@20 | 差 |
+| --- | --- | --- | --- |
+| 总体 | 0.004408 | **0.005044** | +0.000636 |
+| low（<100） | 0.003717 | 0.004198 | +0.000481 |
+| mid（100–299） | 0.003537 | **0.009325** | +0.005788 |
+| high（≥300） | **0.005935** | 0.001978 | −0.003957 |
+
+MIND 的收益集中在中等活跃用户；高活跃用户因历史截断到 20 条而明显退化。
+路由随机性带来约 ±20% 的 Recall@20 波动，单次评测不足以支撑结论。
+
+**未完成（留待办）**：40 epoch 收敛检查、同预算 A/B/C 超参对照、训练 seed 43/44 复现、
+三 seed 汇总脚本（`scripts/mind_phase3_report.py` 已就绪，等正式工件齐备后再跑）。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -461,9 +495,10 @@ Recall@10 在验证上反而下降——**结论需多 seed 复核**，已写入
 
 ### 3.3 Phase 3–5：多路召回
 
-- [x] **Phase 3 MIND**：改用 `torch-rechub` 实现（TorchEasyRec 平台受限），已训练/评测：
-      测试 Recall@20 0.005675（比双塔 +28.8%），20 epochs 未收敛（见 2.20）
-- [ ] MIND 训练到收敛（30–40 epochs）并做多 seed 复核
+- [x] **Phase 3 MIND**：改用 `torch-rechub` 实现（TorchEasyRec 平台受限），已训练/评测；
+      **阶段分群评估完成**：测试 Recall@20 0.005044（3 路由种子均值）vs 双塔 0.004408，
+      mid 组 +0.0058、high 组 −0.0040（见 2.21）
+- [ ] MIND 训练到收敛（30–40 epochs）、同预算 A/B/C 对照、训练 seed 43/44 复现
 - [ ] Phase 4 LightGCN：`PreparedData → RecBole atomic` 桥接 + 适配器
 - [ ] Phase 5 多路融合：统一「通道 → 候选（含来源与原始分数）」结构、去重、配额、消融
 
@@ -570,6 +605,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-07 | **Phase 2 特征** | 物品侧特征入塔（4 类目 + 5 数值，buffer 随 checkpoint）：测试 Recall@10 0.0016 → 0.0032（翻倍）、Recall@20 +26.9%、NDCG@20 +54%；子集特征表切片与 `--checkpoint-name` 变体命名；基线重训逐位复现 | `src/recsys/models/two_tower.py`、`src/recsys/training/trainer.py`、`src/recsys/data/kuasar_subset.py`、`experiments/2026-11-07-kuasar_small-two-tower-features/` |
 | 2026-11-07 | **Phase 2 超参** | 4 组 × 8 epochs 扫描 + 2 组 × 20 epochs 复核：选定 d64/b2048/lr1e-2；发现「8 轮扫描排名在 20 轮后反转」，记录短预算选参的陷阱；Phase 2 清单 12/12 | `experiments/2026-11-07-kuasar_small-two-tower-sweep/` |
 | 2026-11-07 | **Phase 3 MIND** | 因 TorchEasyRec 的 Linux-only wheel 不可用，改用 torch-rechub 1.0.0 接入 MIND（模型/训练/适配器/CLI）；测试 Recall@20 0.005675（比双塔 +28.8%），NDCG@20 略低；20 epochs 未收敛，训练约 60 分钟 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`src/recsys/adapters/rechub_mind.py`、`third_party/torch-rechub`、`experiments/2026-11-07-kuasar_small-mind/` |
+| 2026-11-08 | **Phase 3 阶段评估** | P1 止损：训练预算 0；发现并修复 MIND 评测随机性（胶囊路由 `torch.randn`），同一 checkpoint 固定种子后可逐位复现；分群评估完成（mid 组 +0.0058、high 组 −0.0040、总体 +0.0006）；旧 0.005675 解释为单次随机路由抽样；40-epoch 收敛/同预算对照/训练多 seed 留待办 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`scripts/eval_groups.py`、`experiments/2026-11-08-kuasar_small-mind-phase3/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

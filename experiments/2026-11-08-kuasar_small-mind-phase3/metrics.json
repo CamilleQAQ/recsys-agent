@@ -1,0 +1,262 @@
+{
+  "stage": "P1 止损：单 seed checkpoint 分群评估（训练预算 0）",
+  "protocol_ref": "protocol.json（同一文件）",
+  "checkpoints": {
+    "mind": {
+      "path": "artifacts/kuasar_small/mind20.pt",
+      "sha256": "eba017182142a8d09183ccf93de99d53535b32830de0a27bbdfad70d40ff9dac",
+      "epochs": 20,
+      "best_epoch": 20,
+      "note": "配置 A（K=4, L=20, d64, b1024, lr1e-2）的 20 轮 checkpoint；seed 42"
+    },
+    "two_tower_baseline": {
+      "path": "artifacts/kuasar_small/two_tower_features.pt",
+      "sha256": "784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b",
+      "note": "固定基线，未重训"
+    }
+  },
+  "routing_seed": {
+    "seeds": [
+      1234,
+      2024,
+      7
+    ],
+    "reason": "torch-rechub 的 CapsuleNetwork 用 torch.randn 初始化路由权重，同一 checkpoint 每次前向的兴趣向量不同；评测固定种子并恢复 RNG 状态。"
+  },
+  "overall": {
+    "Recall@10": {
+      "mean": 0.003086,
+      "min": 0.002667,
+      "max": 0.0037,
+      "values": {
+        "1234": 0.002892,
+        "2024": 0.0037,
+        "7": 0.002667
+      },
+      "baseline": 0.0032,
+      "delta_vs_baseline": -0.000114
+    },
+    "Recall@20": {
+      "mean": 0.005044,
+      "min": 0.004408,
+      "max": 0.0063,
+      "values": {
+        "1234": 0.004408,
+        "2024": 0.0063,
+        "7": 0.004425
+      },
+      "baseline": 0.004408,
+      "delta_vs_baseline": 0.000636
+    },
+    "NDCG@10": {
+      "mean": 0.001819,
+      "min": 0.001461,
+      "max": 0.002238,
+      "values": {
+        "1234": 0.001758,
+        "2024": 0.002238,
+        "7": 0.001461
+      },
+      "baseline": 0.002465,
+      "delta_vs_baseline": -0.000646
+    },
+    "NDCG@20": {
+      "mean": 0.002386,
+      "min": 0.001999,
+      "max": 0.002959,
+      "values": {
+        "1234": 0.0022,
+        "2024": 0.002959,
+        "7": 0.001999
+      },
+      "baseline": 0.002836,
+      "delta_vs_baseline": -0.00045
+    },
+    "HitRate@10": {
+      "mean": 0.006167,
+      "min": 0.005,
+      "max": 0.0075,
+      "values": {
+        "1234": 0.006,
+        "2024": 0.0075,
+        "7": 0.005
+      },
+      "baseline": 0.006,
+      "delta_vs_baseline": 0.000167
+    },
+    "HitRate@20": {
+      "mean": 0.0095,
+      "min": 0.0085,
+      "max": 0.0115,
+      "values": {
+        "1234": 0.0085,
+        "2024": 0.0115,
+        "7": 0.0085
+      },
+      "baseline": 0.0085,
+      "delta_vs_baseline": 0.001
+    },
+    "Coverage": {
+      "mean": 0.070699,
+      "min": 0.070615,
+      "max": 0.070791,
+      "values": {
+        "1234": 0.070615,
+        "2024": 0.07069,
+        "7": 0.070791
+      },
+      "baseline": 0.071134,
+      "delta_vs_baseline": -0.000435
+    }
+  },
+  "groups": {
+    "low": {
+      "users": 704,
+      "targets": 1493,
+      "baseline": {
+        "Recall@20": 0.003717,
+        "HitRate@20": 0.009943,
+        "NDCG@20": 0.002653
+      },
+      "mind": {
+        "Recall@20": {
+          "mean": 0.004198,
+          "values": {
+            "1234": 0.003764,
+            "2024": 0.005185,
+            "7": 0.003646
+          },
+          "delta_vs_baseline": 0.000481
+        },
+        "HitRate@20": {
+          "mean": 0.009943,
+          "values": {
+            "1234": 0.009943,
+            "2024": 0.011364,
+            "7": 0.008523
+          },
+          "delta_vs_baseline": 0.0
+        },
+        "NDCG@20": {
+          "mean": 0.002376,
+          "values": {
+            "1234": 0.002281,
+            "2024": 0.00321,
+            "7": 0.001638
+          },
+          "delta_vs_baseline": -0.000277
+        }
+      }
+    },
+    "mid": {
+      "users": 622,
+      "targets": 1346,
+      "baseline": {
+        "Recall@20": 0.003537,
+        "HitRate@20": 0.006431,
+        "NDCG@20": 0.002237
+      },
+      "mind": {
+        "Recall@20": {
+          "mean": 0.009325,
+          "values": {
+            "1234": 0.00911,
+            "2024": 0.009968,
+            "7": 0.008896
+          },
+          "delta_vs_baseline": 0.005788
+        },
+        "HitRate@20": {
+          "mean": 0.013934,
+          "values": {
+            "1234": 0.012862,
+            "2024": 0.016077,
+            "7": 0.012862
+          },
+          "delta_vs_baseline": 0.007503
+        },
+        "NDCG@20": {
+          "mean": 0.004231,
+          "values": {
+            "1234": 0.004101,
+            "2024": 0.004556,
+            "7": 0.004037
+          },
+          "delta_vs_baseline": 0.001994
+        }
+      }
+    },
+    "high": {
+      "users": 674,
+      "targets": 1436,
+      "baseline": {
+        "Recall@20": 0.005935,
+        "HitRate@20": 0.008902,
+        "NDCG@20": 0.003581
+      },
+      "mind": {
+        "Recall@20": {
+          "mean": 0.001978,
+          "values": {
+            "1234": 0.000742,
+            "2024": 0.00408,
+            "7": 0.001113
+          },
+          "delta_vs_baseline": -0.003957
+        },
+        "HitRate@20": {
+          "mean": 0.004945,
+          "values": {
+            "1234": 0.002967,
+            "2024": 0.007418,
+            "7": 0.004451
+          },
+          "delta_vs_baseline": -0.003957
+        },
+        "NDCG@20": {
+          "mean": 0.000694,
+          "values": {
+            "1234": 0.000362,
+            "2024": 0.001223,
+            "7": 0.000496
+          },
+          "delta_vs_baseline": -0.002887
+        }
+      }
+    }
+  },
+  "baseline_overall": {
+    "Recall@10": 0.0032,
+    "Recall@20": 0.004408,
+    "NDCG@10": 0.002465,
+    "NDCG@20": 0.002836,
+    "HitRate@10": 0.006,
+    "HitRate@20": 0.0085,
+    "Coverage": 0.071134
+  },
+  "discrepancy_vs_old_report": {
+    "old": {
+      "Recall@20": 0.005675,
+      "Recall@10": 0.003742,
+      "HitRate@20": 0.0105,
+      "NDCG@20": 0.002712,
+      "Coverage": 0.070765
+    },
+    "new_fixed_seed_1234": {
+      "Recall@10": 0.002892,
+      "Recall@20": 0.004408,
+      "NDCG@10": 0.001758,
+      "NDCG@20": 0.0022,
+      "HitRate@10": 0.006,
+      "HitRate@20": 0.0085,
+      "Coverage": 0.070615
+    },
+    "reason": "旧指标是未固定路由随机种子的单次抽样，落在 0.0044–0.0063 区间内；本次固定种子后可复现，并给出 3 个路由种子的均值/极值。"
+  },
+  "incomplete": [
+    "40 epoch 收敛检查（无完成权重，仅中断日志）",
+    "同预算 A/B/C 超参对照",
+    "训练 seed 43/44 复现（路由随机性 ≠ 训练随机性）",
+    "三 seed 汇总脚本（等正式工件齐备后再跑）"
+  ]
+}

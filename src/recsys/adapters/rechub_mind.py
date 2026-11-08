@@ -18,7 +18,7 @@ import torch
 from recsys.adapters.base import AdapterError, RecommenderAdapter
 from recsys.data.dataset import build_observed_histories
 from recsys.data.schema import PreparedData, seen_items_for_split
-from recsys.models.mind import load_mind_from_checkpoint, score_users
+from recsys.models.mind import load_mind_from_checkpoint, rank_users
 
 
 class MindAdapter(RecommenderAdapter):
@@ -65,25 +65,19 @@ class MindAdapter(RecommenderAdapter):
             return {}
         histories = self._histories(data, split)
         config = self.checkpoint["model_config"]
-        scores, _ = score_users(
+        blocked = seen_items_for_split(data, split)
+        routing_seed = int(kwargs.pop("routing_seed", 1234))
+        return rank_users(
             self.model,
             users,
             histories,
             data.num_items,
             max_length=int(config["max_length"]),
             device=self.device,
+            k=k,
+            seen_items=blocked,
+            routing_seed=routing_seed,
         )
-        blocked = seen_items_for_split(data, split)
-        recommendations: dict[int, list[int]] = {}
-        for row, user in enumerate(users):
-            user_scores = scores[row]
-            seen = blocked.get(user, set())
-            if seen:
-                user_scores[list(seen)] = -np.inf
-            top = np.argpartition(-user_scores, k)[:k]
-            top = top[np.argsort(-user_scores[top])]
-            recommendations[user] = [int(item) for item in top]
-        return recommendations
 
     def encode_users(self, user_ids: Sequence[int], *, batch_size: int = 1024) -> np.ndarray:
         raise AdapterError(
