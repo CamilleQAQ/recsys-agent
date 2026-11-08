@@ -45,6 +45,7 @@ class ToolContext:
     cache_dir: Path
     output_dir: Path
     history_root: Path = DEFAULT_HISTORY_ROOT
+    memory_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,7 @@ def _history_execute(arguments: dict, context: ToolContext) -> dict:
         arguments["mind_quota"],
         cache_dir=context.cache_dir,
         history_root=context.history_root,
+        memory_dir=context.memory_dir,
     )
 
 

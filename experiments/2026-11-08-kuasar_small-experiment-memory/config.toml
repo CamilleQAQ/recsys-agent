@@ -1,0 +1,126 @@
+# Phase 12：实验记忆 MVP（2026-11-08）
+# 两次独立 CLI 进程；本地确定性策略；配额评测真实执行；无 Mock 指标。
+
+[task]
+goal = "第一次查不到 → 真实评测一次 → 自动入库 → 第二次命中历史 → 零评测"
+dataset = "kuasar_small"
+fixed_users = 128
+validation_targets = 362
+candidate_budget_per_user = 100
+selected_quota = [80, 20]
+baseline_quota = [50, 50]
+policy = "local-deterministic（不请求真实 LLM；工具与评测真实执行）"
+status = "通过"
+
+[selection]
+why_80_20 = "80/20 没有 Phase 11 runs JSON、没有本地索引条目、也没有候选工件目录；70/30 虽无索引但有 2.24/2.25 候选工件，因此选更干净的 80/20"
+phase11_runs = ["50_50", "30_70", "20_80"]
+existing_candidate_artifacts = ["20_80", "30_70", "50_50", "70_30"]
+unregistered_without_artifact = ["80_20"]
+precheck_probe = "80/20 查询返回 miss（Phase 11 JSON 无记录 + 索引为空）"
+precheck_file = "experiments/2026-11-08-kuasar_small-experiment-memory/precheck.json"
+
+[identity]
+key = "24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f"
+fields = "dataset / users / items / split_strategy / split_sha256 / id_mapping_sha256 / routing_seed / k_recall / checkpoints sha256 / users_file_sha256 / recall_two_tower_sha256 / recall_mind_sha256 / targets_sha256 / fixed_users / validation_targets / quota / candidate_budget / fusion_rule_version / metric_definition"
+excluded = "运行日期、实验目录名、耗时、模型服务商"
+targets_sha256 = "1e68966d7cf17ecedc4804bf8676f8c2e2a4537afebce6d5789701f9337ab0ed"
+old_record_compatibility = "旧 Phase 11 JSON 仍走 experiment_history 的指纹/配置/工件兼容性检查"
+
+[index]
+format = "JSON，schema_version=1，entries 以实验键为 key"
+path = "experiments/2026-11-08-kuasar_small-experiment-memory/memory/index.json"
+record_dir = "experiments/2026-11-08-kuasar_small-experiment-memory/memory/runs/"
+entry_count = 1
+index_sha256 = "842353de7de7533d5bac25a359d5eb52865ba77f4b10316e58b69dae07fb2e84"
+record_sha256 = "c2ab46870eca5f397519267f0c5e5d692e219eaf34ccee67640df167a4b2619d"
+write_order = "真实评测工件 → run record（临时文件+原子替换） → index.json（临时文件+原子替换）"
+read_check = "身份匹配 + status=success + 指标记录 + run record 存在 + fusion 工件可读 + 工件指纹/池统计一致"
+
+[run1]
+kind = "independent CLI process 1"
+command = "python -m recsys.experiments.history_first_agent --experiment-dir experiments/2026-11-08-kuasar_small-experiment-memory/run1 --cache-dir artifacts/kuasar_small/mvp --memory-dir experiments/2026-11-08-kuasar_small-experiment-memory/memory --output-dir artifacts/kuasar_small/experiment_memory --quota 80/20 --local-policy"
+history = "miss"
+decision = "evaluated"
+evaluation_count = 1
+hits = 2
+recall_at_100 = 0.005208
+coverage = 0.026891
+candidates_total = 12800
+baseline_hits = 4
+baseline_recall_at_100 = 0.011719
+requests = 3
+history_queries = 1
+memory_saved = true
+graph_elapsed_s = 1.22
+wall_s = 6.5
+evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/run1/"
+
+[run2]
+kind = "independent CLI process 2（重新从磁盘读取索引）"
+command = "python -m recsys.experiments.history_first_agent --experiment-dir experiments/2026-11-08-kuasar_small-experiment-memory/run2 --cache-dir artifacts/kuasar_small/mvp --memory-dir experiments/2026-11-08-kuasar_small-experiment-memory/memory --output-dir artifacts/kuasar_small/experiment_memory --quota 80/20 --local-policy"
+history = "hit（source=memory_index）"
+decision = "reuse_history"
+evaluation_count = 0
+hits = 2
+recall_at_100 = 0.005208
+coverage = 0.026891
+requests = 2
+history_queries = 1
+memory_saved = false
+same_key = true
+graph_elapsed_s = 0.34
+wall_s = 5.01
+evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/run2/"
+
+[two_run]
+wall_total_s = 11.51
+budget_s = 120
+same_cache = "artifacts/kuasar_small/mvp（显式 CLI 路径；source=cli）"
+same_memory_dir = "experiments/2026-11-08-kuasar_small-experiment-memory/memory"
+same_key = "24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f"
+run2_no_evaluation_event = true
+run2_no_memory_save_event = true
+run2_evaluation_null = true
+index_rewritten_by_run2 = false
+artifact_reuse = "run2 读取 run1 的 record 与 fusion.json，指标一致；未生成新候选"
+evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json"
+
+[safety]
+command = "python -m recsys.experiments.history_first_agent --memory-safety-check --experiment-dir experiments/2026-11-08-kuasar_small-experiment-memory --memory-dir experiments/2026-11-08-kuasar_small-experiment-memory/memory --cache-dir artifacts/kuasar_small/mvp --quota 80/20"
+valid_index_hit = true
+fingerprint_change_miss = true
+rule_mismatch_miss = true
+missing_artifact_miss = true
+partial_status_miss = true
+real_evaluation_runs = 0
+evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json"
+
+[scope]
+training = 0
+re_recall = 0
+recommendation_mvp = 0
+ranking_or_rerank = 0
+test_split_evaluation = 0
+rag_or_vector_db = 0
+old_cache_and_experiments = "只读；未覆盖"
+
+[compatibility]
+phase11_cli = "python -m recsys.experiments.history_first_agent ...（不带 --memory-dir 时行为不变）"
+real_llm_path = "默认 policy=llm；本轮只新增 --local-policy，不改变真实 LLM 路径"
+tool_registry = "search_experiment_history 新增可选 memory_dir；evaluate_fusion_quota 未改"
+candidate_details = "artifacts/kuasar_small/experiment_memory/cache_eval/80_20/fusion.json"
+
+[artifacts]
+experiment = "experiments/2026-11-08-kuasar_small-experiment-memory/"
+precheck = "experiments/2026-11-08-kuasar_small-experiment-memory/precheck.json"
+index = "experiments/2026-11-08-kuasar_small-experiment-memory/memory/index.json"
+record = "experiments/2026-11-08-kuasar_small-experiment-memory/memory/runs/24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f.json"
+run1 = "experiments/2026-11-08-kuasar_small-experiment-memory/run1/"
+run2 = "experiments/2026-11-08-kuasar_small-experiment-memory/run2/"
+two_run_check = "experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json"
+safety = "experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json"
+self_check = "experiments/2026-11-08-kuasar_small-experiment-memory/self_check.json"
+compat_regression = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_compat/regression_miss/regression_miss.json"
+candidates = "artifacts/kuasar_small/experiment_memory/cache_eval/80_20/"
+report = "experiments/2026-11-08-kuasar_small-experiment-memory/report.md"

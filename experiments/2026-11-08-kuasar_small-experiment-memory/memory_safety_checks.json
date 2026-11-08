@@ -1,0 +1,39 @@
+{
+  "memory_dir": "experiments\\2026-11-08-kuasar_small-experiment-memory\\memory",
+  "cache_dir": "artifacts\\kuasar_small\\mvp",
+  "quota": [
+    80,
+    20
+  ],
+  "key": "24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f",
+  "checks": {
+    "valid_index_hit": true,
+    "fingerprint_change_miss": true,
+    "rule_mismatch_miss": true,
+    "missing_artifact_miss": true,
+    "partial_status_miss": true
+  },
+  "details": {
+    "valid": {
+      "hit": true,
+      "reason": "命中本地实验索引中可复用的成功记录"
+    },
+    "fingerprint_change": {
+      "hit": false,
+      "reason": "本地实验索引里没有该实验键"
+    },
+    "rule_mismatch": {
+      "hit": false,
+      "reason": "本地实验索引记录不兼容：索引记录 identity 与当前输入/规则不一致"
+    },
+    "missing_artifact": {
+      "hit": false,
+      "reason": "本地实验索引记录不兼容：融合工件不存在：experiments\\2026-11-08-kuasar_small-experiment-memory\\safety\\missing_fusion.json"
+    },
+    "partial_status": {
+      "hit": false,
+      "reason": "本地实验索引记录不兼容：索引记录状态不可复用：partial"
+    }
+  },
+  "passed": true
+}

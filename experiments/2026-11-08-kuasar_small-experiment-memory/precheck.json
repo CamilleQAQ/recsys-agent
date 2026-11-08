@@ -1,0 +1,152 @@
+{
+  "dataset": "kuasar_small",
+  "cache_dir": "artifacts\\kuasar_small\\mvp",
+  "history_root": "experiments\\2026-11-08-kuasar_small-fusion-quota-agent",
+  "memory_dir": "experiments\\2026-11-08-kuasar_small-experiment-memory\\memory",
+  "allowed_quotas": [
+    [
+      50,
+      50
+    ],
+    [
+      70,
+      30
+    ],
+    [
+      30,
+      70
+    ],
+    [
+      80,
+      20
+    ],
+    [
+      20,
+      80
+    ]
+  ],
+  "phase11_runs": [
+    {
+      "run": "experiments\\2026-11-08-kuasar_small-fusion-quota-agent\\runs\\20_80.json",
+      "quota": [
+        20,
+        80
+      ]
+    },
+    {
+      "run": "experiments\\2026-11-08-kuasar_small-fusion-quota-agent\\runs\\30_70.json",
+      "quota": [
+        30,
+        70
+      ]
+    },
+    {
+      "run": "experiments\\2026-11-08-kuasar_small-fusion-quota-agent\\runs\\50_50.json",
+      "quota": [
+        50,
+        50
+      ]
+    }
+  ],
+  "index_entries": [],
+  "candidate_artifact_quotas": [
+    [
+      20,
+      80
+    ],
+    [
+      30,
+      70
+    ],
+    [
+      50,
+      50
+    ],
+    [
+      70,
+      30
+    ],
+    [
+      70,
+      30
+    ]
+  ],
+  "candidate_artifacts": [
+    {
+      "quota": [
+        20,
+        80
+      ],
+      "path": "artifacts\\kuasar_small\\quota_agent\\cache_eval\\20_80"
+    },
+    {
+      "quota": [
+        30,
+        70
+      ],
+      "path": "artifacts\\kuasar_small\\quota_agent\\cache_eval\\30_70"
+    },
+    {
+      "quota": [
+        50,
+        50
+      ],
+      "path": "artifacts\\kuasar_small\\quota_agent\\cache_eval\\50_50"
+    },
+    {
+      "quota": [
+        70,
+        30
+      ],
+      "path": "artifacts\\kuasar_small\\llm_tool_call\\cache_eval\\70_30"
+    },
+    {
+      "quota": [
+        70,
+        30
+      ],
+      "path": "artifacts\\kuasar_small\\langgraph_tool_call\\cache_eval\\70_30"
+    }
+  ],
+  "registered_quotas": [
+    [
+      20,
+      80
+    ],
+    [
+      30,
+      70
+    ],
+    [
+      50,
+      50
+    ]
+  ],
+  "unregistered_quotas": [
+    [
+      70,
+      30
+    ],
+    [
+      80,
+      20
+    ]
+  ],
+  "unregistered_without_artifact": [
+    [
+      80,
+      20
+    ]
+  ],
+  "selected_quota": [
+    80,
+    20
+  ],
+  "selected_probe": {
+    "status": "miss",
+    "hit": false,
+    "reason": "历史实验目录里没有 80/20 的落盘记录；本地索引：本地实验索引里没有该实验键",
+    "key": null
+  },
+  "why": "80/20 没有 Phase 11 runs JSON、没有本地索引条目，也没有候选工件目录，因此是真正未入库的配额"
+}

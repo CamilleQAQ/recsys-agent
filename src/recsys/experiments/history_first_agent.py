@@ -1,15 +1,27 @@
-"""Phase 11.2：历史优先的 LangGraph Agent（先查历史，未命中才评测一次）。
+"""Phase 11.2 / 12：历史优先的 LangGraph Agent（先查历史，未命中才评测一次）。
 
-正式入口（一次真实 LLM 工作流）：
+Phase 11.2 正式入口（一次真实 LLM 工作流）：
 
     python -m recsys.experiments.history_first_agent `
       --experiment-dir experiments/2026-11-08-kuasar_small-history-first-agent `
       --quota 30/70
 
+Phase 12 实验记忆（本地确定性策略 + 真实评测；同一 memory_dir 跑两次）：
+
+    python -m recsys.experiments.history_first_agent `
+      --experiment-dir <run1> --memory-dir <memory> `
+      --cache-dir artifacts/kuasar_small/mvp --quota 80/20 --local-policy
+
+    python -m recsys.experiments.history_first_agent `
+      --experiment-dir <run2> --memory-dir <memory> `
+      --cache-dir artifacts/kuasar_small/mvp --quota 80/20 --local-policy
+
 本地检查（不请求真实 LLM）：
 
     python -m recsys.experiments.history_first_agent --self-check
     python -m recsys.experiments.history_first_agent --check-cache --cache-dir <dir>
+    python -m recsys.experiments.history_first_agent --audit-quotas
+    python -m recsys.experiments.history_first_agent --memory-safety-check
     python -m recsys.experiments.history_first_agent --regression-miss
     python -m recsys.experiments.history_first_agent --regression-timeout history
     python -m recsys.experiments.history_first_agent --regression-timeout evaluation
@@ -58,6 +70,11 @@ from recsys.experiments.agent_tools import (
 from recsys.experiments.experiment_history import (
     DEFAULT_HISTORY_ROOT,
     model_view as history_model_view,
+)
+from recsys.experiments.experiment_memory import (
+    audit_quotas,
+    run_memory_safety_checks,
+    save_evaluation,
 )
 from recsys.experiments.fusion_quota import (
     DEFAULT_CACHE,
@@ -305,6 +322,9 @@ class AgentState(TypedDict, total=False):
     cache_dir_source: str
     history_root: str
     output_dir: str
+    experiment_dir: str
+    memory_dir: str
+    policy: str
     target_quota: list[int]
     baseline: dict
     fingerprints: dict
@@ -321,6 +341,11 @@ class AgentState(TypedDict, total=False):
     eval_arguments: dict
     eval_assistant_message: dict
     eval_result: dict
+    memory_saved: bool
+    memory_key: str
+    memory_record: dict
+    memory_index: dict
+    memory_error: str
     final_reply: str
     analysis_path: str
     decision: str
@@ -360,6 +385,7 @@ def _tool_context(state: AgentState) -> ToolContext:
         cache_dir=Path(state["cache_dir"]),
         output_dir=Path(state["output_dir"]),
         history_root=Path(state["history_root"]),
+        memory_dir=Path(state["memory_dir"]) if state.get("memory_dir") else None,
     )
 
 
@@ -561,6 +587,8 @@ def node_execute_history(state: AgentState, registry: ToolRegistry) -> AgentStat
         return _leave(state, "execute_history")
     state["history_queries"] = int(state.get("history_queries", 0)) + 1
     state["history_result"] = result
+    if result.get("hit") and result.get("memory_key"):
+        state["memory_key"] = result["memory_key"]
     _event(
         state,
         {
@@ -568,6 +596,9 @@ def node_execute_history(state: AgentState, registry: ToolRegistry) -> AgentStat
             "tool_call_id": state.get("history_call_id"),
             "status": result.get("status"),
             "hit": bool(result.get("hit")),
+            "source": result.get("source"),
+            "memory_key": result.get("memory_key"),
+            "memory_index": result.get("memory_index"),
             "quota": result.get("quota"),
             "reason": result.get("reason"),
             "metrics": result.get("metrics"),
@@ -747,6 +778,60 @@ def node_execute_eval(state: AgentState, registry: ToolRegistry) -> AgentState:
 
     state["evaluation_count"] = int(state.get("evaluation_count", 0)) + 1
     state["eval_result"] = result
+
+    memory_saved: dict | None = None
+    if state.get("memory_dir"):
+        try:
+            memory_saved = save_evaluation(
+                Path(state["memory_dir"]),
+                cache_dir=Path(state["cache_dir"]),
+                quota=(int(result["quota"]["two_tower"]), int(result["quota"]["mind"])),
+                result=result,
+                source={
+                    "policy": state.get("policy"),
+                    "cache_dir_source": state.get("cache_dir_source"),
+                },
+                experiment_dir=Path(state["experiment_dir"])
+                if state.get("experiment_dir")
+                else None,
+            )
+        except Exception as error:  # noqa: BLE001 - 写入失败不发布索引
+            state["status"] = "failed"
+            state["error"] = f"实验记忆写入失败：{error}"
+            state["memory_error"] = str(error)
+            _event(
+                state,
+                {
+                    "event": "memory_failed",
+                    "tool_call_id": state.get("eval_call_id"),
+                    "error": str(error),
+                    "eval_result_kept": True,
+                },
+            )
+            return _leave(state, "execute_eval")
+        state["memory_saved"] = True
+        state["memory_key"] = memory_saved["key"]
+        state["memory_record"] = memory_saved["record"]
+        state["memory_index"] = {
+            "path": memory_saved["index_path"],
+            "record": memory_saved["record_path"],
+            "key": memory_saved["key"],
+            "entry_count": memory_saved["entry_count"],
+        }
+        _event(
+            state,
+            {
+                "event": "memory_saved",
+                "key": memory_saved["key"],
+                "index": memory_saved["index_path"],
+                "record": memory_saved["record_path"],
+                "entry_count": memory_saved["entry_count"],
+                "fusion": result.get("evidence", {}).get("fusion"),
+            },
+        )
+    else:
+        state["memory_saved"] = False
+
     state["decision"] = "evaluated"
     _event(
         state,
@@ -920,6 +1005,9 @@ def node_finish(state: AgentState) -> AgentState:
             state["conclusion"]["stop_reason"] = state["stop_reason"]
     state["conclusion"]["decision"] = state.get("decision")
     state["conclusion"]["status"] = state.get("status")
+    state["conclusion"]["history_source"] = history.get("source")
+    state["conclusion"]["memory_key"] = state.get("memory_key")
+    state["conclusion"]["memory_saved"] = bool(state.get("memory_saved"))
     _event(
         state,
         {
@@ -1003,6 +1091,9 @@ def _initial_state(
     output_dir: Path,
     target_quota: tuple[int, int],
     started: float | None = None,
+    memory_dir: Path | None = None,
+    experiment_dir: Path | None = None,
+    policy: str = "llm",
 ) -> AgentState:
     started = started if started is not None else time.perf_counter()
     return {
@@ -1016,6 +1107,9 @@ def _initial_state(
                 "cache_dir_source": cache_dir_source,
                 "history_root": str(history_root),
                 "output_dir": str(output_dir),
+                "memory_dir": str(memory_dir) if memory_dir else None,
+                "experiment_dir": str(experiment_dir) if experiment_dir else None,
+                "policy": policy,
                 "target_quota": list(target_quota),
                 "model": config.get("model"),
                 "endpoint_host": host_only(config.get("base_url", "")),
@@ -1028,6 +1122,9 @@ def _initial_state(
         "cache_dir_source": cache_dir_source,
         "history_root": str(history_root),
         "output_dir": str(output_dir),
+        "experiment_dir": str(experiment_dir) if experiment_dir else None,
+        "memory_dir": str(memory_dir) if memory_dir else None,
+        "policy": policy,
         "target_quota": list(target_quota),
         "request_count": 0,
         "history_queries": 0,
@@ -1048,6 +1145,7 @@ def _finalize(state: AgentState, experiment_dir: Path) -> dict:
     history = state.get("history_result") or {}
     evaluation = state.get("eval_result") or {}
     baseline = state.get("baseline") or {}
+    memory_index = state.get("memory_index") or {}
     evidence = {
         "cache_dir": state.get("cache_dir"),
         "history_run": (history.get("evidence") or {}).get("run"),
@@ -1056,11 +1154,16 @@ def _finalize(state: AgentState, experiment_dir: Path) -> dict:
         "baseline_run": (baseline.get("evidence") or {}).get("run") or str(BASELINE_RUN),
         "baseline_fusion": (baseline.get("evidence") or {}).get("fusion"),
         "evaluation_fusion": (evaluation.get("evidence") or {}).get("fusion"),
+        "memory_index": memory_index.get("path")
+        or (history.get("evidence") or {}).get("memory_index"),
+        "memory_record": memory_index.get("record")
+        or (history.get("evidence") or {}).get("run"),
     }
     config = state.get("config") or {}
     summary = {
         "status": state.get("status", "blocked"),
         "decision": state.get("decision"),
+        "policy": state.get("policy"),
         "stage": state.get("stage"),
         "graph_nodes": state.get("nodes", []),
         "request_count": int(state.get("request_count", 0)),
@@ -1076,6 +1179,14 @@ def _finalize(state: AgentState, experiment_dir: Path) -> dict:
         "baseline": baseline or None,
         "history": history or None,
         "evaluation": evaluation or None,
+        "memory": {
+            "dir": state.get("memory_dir"),
+            "saved": bool(state.get("memory_saved")),
+            "key": state.get("memory_key"),
+            "index": memory_index,
+            "record": state.get("memory_record"),
+            "error": state.get("memory_error"),
+        },
         "conclusion": state.get("conclusion"),
         "stop_reason": state.get("stop_reason"),
         "error": state.get("error"),
@@ -1113,6 +1224,7 @@ def _finalize(state: AgentState, experiment_dir: Path) -> dict:
                 "baseline": summary["baseline"],
                 "history": summary["history"],
                 "evaluation": summary["evaluation"],
+                "memory": summary["memory"],
                 "conclusion": summary["conclusion"],
                 "stop_reason": summary["stop_reason"],
                 "evidence": summary["evidence"],
@@ -1134,13 +1246,25 @@ def run(
     history_root: Path = DEFAULT_HISTORY_ROOT,
     output_dir: Path = OUTPUT_ROOT,
     target_quota: tuple[int, int] = DEFAULT_TARGET_QUOTA,
+    memory_dir: Path | None = None,
+    policy: str = "llm",
+    chat_fn: ChatFn | None = None,
 ) -> dict:
     target_quota = validate_quota(*target_quota)
+    if policy not in {"llm", "local"}:
+        raise QuotaError(f"不支持的策略：{policy}")
     experiment_dir.mkdir(parents=True, exist_ok=True)
     (experiment_dir / "events.jsonl").write_text("", encoding="utf-8")
     started = time.perf_counter()
-    load_dotenv()
-    config = llm_config()
+    if policy == "llm":
+        load_dotenv()
+        config = llm_config()
+    else:
+        config = {
+            "model": "local-deterministic",
+            "base_url": "http://127.0.0.1",
+            "api_key": "local",
+        }
 
     if config is None:
         missing = [name for name in LLM_ENV if not os.environ.get(name)]
@@ -1154,6 +1278,8 @@ def run(
                     "reason": f"缺少真实 LLM 配置：{', '.join(missing)}",
                     "cache_dir": str(cache_dir),
                     "cache_dir_source": cache_dir_source,
+                    "memory_dir": str(memory_dir) if memory_dir else None,
+                    "policy": policy,
                 }
             ],
             "started": started,
@@ -1162,6 +1288,9 @@ def run(
             "cache_dir_source": cache_dir_source,
             "history_root": str(history_root),
             "output_dir": str(output_dir),
+            "experiment_dir": str(experiment_dir),
+            "memory_dir": str(memory_dir) if memory_dir else None,
+            "policy": policy,
             "target_quota": list(target_quota),
             "request_count": 0,
             "history_queries": 0,
@@ -1180,8 +1309,13 @@ def run(
         output_dir=output_dir,
         target_quota=target_quota,
         started=started,
+        memory_dir=memory_dir,
+        experiment_dir=experiment_dir,
+        policy=policy,
     )
-    final_state = build_graph().invoke(state)
+    if chat_fn is None:
+        chat_fn = local_policy_chat(target_quota) if policy == "local" else post_chat
+    final_state = build_graph(chat_fn=chat_fn).invoke(state)
     summary = _finalize(final_state, experiment_dir)
     (experiment_dir / "baseline.json").write_text(
         json.dumps(summary.get("baseline") or {}, indent=2, ensure_ascii=False),
@@ -1289,6 +1423,47 @@ def _fake_reply(content: str) -> dict:
         "id": f"resp-final-{abs(hash(content)) % 100000}",
         "choices": [{"message": {"role": "assistant", "content": content}}],
     }
+
+
+def local_policy_chat(target_quota: tuple[int, int]):
+    """本地确定性策略：先查历史；未命中才评测一次；命中则直接引用并停止。
+
+    这是 Phase 12 的验收策略，不联网、不请求真实模型；工具调用仍走真实
+    ``search_experiment_history`` / ``evaluate_fusion_quota`` 和真实候选缓存。
+    """
+    arguments = {"two_tower_quota": int(target_quota[0]), "mind_quota": int(target_quota[1])}
+    state = {"turn": 0}
+
+    def chat(config, messages, *, tools, timeout):
+        state["turn"] += 1
+        if state["turn"] == 1:
+            return _fake_call("call-local-history", TOOL_SEARCH_HISTORY, arguments)
+
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        last: dict = {}
+        if tool_messages:
+            try:
+                last = json.loads(tool_messages[-1].get("content") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                last = {}
+
+        if tools:
+            # 只有历史未命中时，图才会把 evaluate_fusion_quota 开放给第 2 次请求。
+            return _fake_call("call-local-eval", TOOL_EVALUATE, arguments)
+
+        if last.get("status") == "hit" or last.get("hit"):
+            key = last.get("memory_key") or "phase11_json"
+            metrics = last.get("metrics") or {}
+            return _fake_reply(
+                f"本地确定性策略：命中实验键 {key}，复用命中 {metrics.get('hits')}、"
+                f"Recall@100 {metrics.get('recall_at_100')}，停止，评测 0 次。"
+            )
+        return _fake_reply(
+            f"本地确定性策略：历史未命中，评测完成，命中 {last.get('hits')}、"
+            f"Recall@100 {last.get('recall_at_100')}；停止并等待记忆入库。"
+        )
+
+    return chat
 
 
 def _prepare_miss_history_root(experiment_dir: Path) -> Path:
@@ -1766,9 +1941,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--history-root", type=Path, default=DEFAULT_HISTORY_ROOT)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT)
+    parser.add_argument(
+        "--memory-dir",
+        type=Path,
+        default=None,
+        help="实验记忆目录（index.json + runs/）；指定后评测成功自动入库",
+    )
     parser.add_argument("--quota", type=parse_quota, default=DEFAULT_TARGET_QUOTA)
+    parser.add_argument(
+        "--local-policy",
+        action="store_true",
+        help="本地确定性策略（不请求真实 LLM，工具与评测仍真实执行）",
+    )
     parser.add_argument("--self-check", action="store_true", help="合成响应自检（不联网、不读缓存）")
     parser.add_argument("--check-cache", action="store_true", help="只核对基准与缓存身份（不请求模型）")
+    parser.add_argument(
+        "--audit-quotas",
+        action="store_true",
+        help="核对允许配额哪些已入库，并写入 precheck.json（不评测）",
+    )
+    parser.add_argument(
+        "--memory-safety-check",
+        action="store_true",
+        help="检查索引在指纹变化/规则不匹配/工件缺失时不会误命中（不评测）",
+    )
     parser.add_argument("--regression-miss", action="store_true", help="本地模拟未命中后评测一次")
     parser.add_argument(
         "--real-eval",
@@ -1793,6 +1989,7 @@ def _cache_selection(args: argparse.Namespace) -> tuple[Path, str]:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     cache_dir, cache_source = _cache_selection(args)
+    memory_dir = Path(args.memory_dir) if args.memory_dir is not None else None
     try:
         if args.self_check:
             result = run_self_check()
@@ -1805,6 +2002,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["status"] == "ok" else 2
+        if args.audit_quotas:
+            result = audit_quotas(cache_dir, args.history_root, memory_dir)
+            _write_json(args.experiment_dir / "precheck.json", result)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        if args.memory_safety_check:
+            if memory_dir is None:
+                print("--memory-safety-check 需要 --memory-dir", file=sys.stderr)
+                return 2
+            result = run_memory_safety_checks(
+                memory_dir,
+                cache_dir=cache_dir,
+                quota=args.quota,
+                work_dir=args.experiment_dir / "safety",
+            )
+            _write_json(args.experiment_dir / "memory_safety_checks.json", result)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result["passed"] else 1
         if args.regression_miss:
             result = run_regression_miss(
                 args.experiment_dir,
@@ -1834,6 +2049,8 @@ def main(argv: list[str] | None = None) -> int:
             history_root=args.history_root,
             output_dir=args.output_dir,
             target_quota=args.quota,
+            memory_dir=memory_dir,
+            policy="local" if args.local_policy else "llm",
         )
     except QuotaError as error:
         print(f"[未验收] {error}", file=sys.stderr)

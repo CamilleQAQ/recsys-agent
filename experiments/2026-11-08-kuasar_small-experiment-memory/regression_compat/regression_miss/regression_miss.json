@@ -1,0 +1,30 @@
+{
+  "mode": "local_miss_then_evaluate",
+  "history_root": "experiments\\2026-11-08-kuasar_small-experiment-memory\\regression_compat\\regression_miss\\history_miss",
+  "cache_dir": "artifacts\\kuasar_small\\mvp",
+  "real_eval": false,
+  "status": "verified",
+  "decision": "evaluated",
+  "request_count": 3,
+  "history_query_count": 1,
+  "evaluation_count": 1,
+  "chat_calls": 3,
+  "fake_eval_calls": 1,
+  "history_reason": "历史实验目录里没有 30/70 的落盘记录",
+  "checks": {
+    "status_verified": true,
+    "decision_evaluated": true,
+    "history_query_once": true,
+    "history_miss": true,
+    "evaluation_once": true,
+    "request_count_3": true,
+    "history_call_id_returned": true,
+    "eval_call_id_returned": true,
+    "eval_result_kept": true,
+    "tool_order_history_first": true,
+    "cache_dir_used_by_eval": true,
+    "no_verified_on_partial_path": true
+  },
+  "passed": true,
+  "metrics_file": "experiments\\2026-11-08-kuasar_small-experiment-memory\\regression_compat\\regression_miss\\metrics.json"
+}

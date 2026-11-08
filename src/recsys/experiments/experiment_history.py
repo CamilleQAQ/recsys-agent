@@ -282,6 +282,13 @@ def _validate_run(
     return not reasons, reasons, details
 
 
+def validate_result_artifact(
+    result: dict, current_fingerprints: dict
+) -> tuple[list[str], Path | None]:
+    """公开的工件核验入口：供实验记忆写入/读取复用同一套指纹与池统计检查。"""
+    return _artifact_reasons(result, current_fingerprints)
+
+
 def _load_run(
     path: Path,
     *,
@@ -330,16 +337,20 @@ def search_experiment_history(
     *,
     cache_dir: Path = DEFAULT_CACHE,
     history_root: Path = DEFAULT_HISTORY_ROOT,
+    memory_dir: Path | None = None,
 ) -> dict:
-    """查一组配额的历史结果；返回 ``hit``（含聚合指标/基准/证据）或 ``miss``（含原因）。"""
+    """查一组配额的历史结果；先查本地实验索引，再查 Phase 11 JSON，返回 hit 或 miss。"""
     quota = validate_quota(two_tower_quota, mind_quota)
     cache_dir = Path(cache_dir)
     history_root = Path(history_root)
+    memory_dir = Path(memory_dir) if memory_dir is not None else None
     result: dict[str, Any] = {
         "tool": "search_experiment_history",
         "quota": {"two_tower": quota[0], "mind": quota[1]},
         "cache_dir": str(cache_dir),
         "history_root": str(history_root),
+        "memory_dir": str(memory_dir) if memory_dir else None,
+        "source": None,
         "checked_runs": 0,
         "quota_candidates": 0,
         "rejected": [],
@@ -360,6 +371,8 @@ def search_experiment_history(
         "config": str(config_path),
         "cache": str(cache_dir),
     }
+    if memory_dir is not None:
+        result["evidence"]["memory_index"] = str(memory_dir / "index.json")
     if not config_path.exists():
         result.update(
             status="miss",
@@ -408,6 +421,67 @@ def search_experiment_history(
     result["evidence"]["baseline_run"] = str(baseline_path)
     result["evidence"]["baseline_fusion"] = (baseline_run.get("evidence") or {}).get("fusion")
 
+    memory_lookup: dict | None = None
+    if memory_dir is not None:
+        # 延迟导入，避免 experiment_history ↔ experiment_memory 的模块级循环依赖。
+        from recsys.experiments.experiment_memory import lookup_index_entry
+
+        try:
+            memory_lookup = lookup_index_entry(memory_dir, context, quota)
+        except Exception as error:  # noqa: BLE001 - 索引损坏时按 miss 处理并记录原因
+            memory_lookup = {
+                "status": "miss",
+                "hit": False,
+                "reason": f"本地实验索引不可用：{error}",
+                "reasons": [str(error)],
+            }
+        result["memory_index"] = {
+            key: memory_lookup.get(key)
+            for key in ("status", "hit", "key", "reason", "reasons", "index")
+        }
+        if memory_lookup.get("hit"):
+            entry = memory_lookup["entry"]
+            evaluation = entry.get("evaluation") or {}
+            metrics = _metric_view(evaluation)
+            identity = entry.get("identity") or {}
+            result.update(
+                status="hit",
+                hit=True,
+                source="memory_index",
+                reason="命中本地实验索引中与当前输入/规则一致的成功记录",
+                memory_key=memory_lookup["key"],
+                metrics=metrics,
+                delta_vs_baseline={
+                    "hits": int(metrics["hits"]) - int(baseline_run["hits"]),
+                    "recall_at_100": round(
+                        float(metrics["recall_at_100"]) - float(baseline_run["recall_at_100"]), 6
+                    ),
+                },
+                fingerprints_verified=True,
+                rule_compatibility={
+                    "legacy_record": False,
+                    "inferred_from": "本地实验索引 identity",
+                    "fusion_rule_version": identity.get("fusion_rule_version"),
+                    "metric_definition": identity.get("metric_definition"),
+                    "key": memory_lookup["key"],
+                },
+                evidence={
+                    **result["evidence"],
+                    "memory_index": memory_lookup.get("index_path"),
+                    "run": (entry.get("evidence") or {}).get("record"),
+                    "fusion": (entry.get("evidence") or {}).get("fusion"),
+                    "memory_key": memory_lookup["key"],
+                },
+            )
+            return result
+        if memory_lookup.get("reasons"):
+            result["rejected"].append(
+                {
+                    "run": str(memory_dir / "index.json"),
+                    "reasons": memory_lookup["reasons"],
+                }
+            )
+
     run_paths = sorted(runs_dir.glob("*.json")) if runs_dir.exists() else []
     result["checked_runs"] = len(run_paths)
     if not run_paths:
@@ -449,6 +523,7 @@ def search_experiment_history(
         result.update(
             status="hit",
             hit=True,
+            source="phase11_json",
             reason="找到与当前缓存指纹、目标配额、候选预算和融合/指标口径一致的成功记录",
             metrics=_metric_view(candidate),
             delta_vs_baseline={"hits": delta_hits, "recall_at_100": delta_recall},
@@ -469,6 +544,8 @@ def search_experiment_history(
             f"找到 {result['quota_candidates']} 条 {quota[0]}/{quota[1]} 记录，"
             "但没有一条同时满足缓存文件哈希、候选预算与融合/指标口径"
         )
+    if memory_lookup is not None:
+        reason = f"{reason}；本地索引：{memory_lookup.get('reason') or '未命中'}"
     result.update(status="miss", hit=False, reason=reason)
     return result
 
@@ -481,7 +558,10 @@ def model_view(result: dict) -> dict:
         "hit": bool(result.get("hit")),
         "quota": result.get("quota"),
         "reason": result.get("reason"),
+        "source": result.get("source"),
     }
+    if result.get("memory_key"):
+        view["memory_key"] = result["memory_key"]
     for key in ("metrics", "baseline", "delta_vs_baseline"):
         if key in result:
             view[key] = result[key]

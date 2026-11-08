@@ -607,6 +607,75 @@ python -m recsys.experiments.history_first_agent --regression-timeout evaluation
 
 ---
 
+### 2.27 Phase 12 实验记忆 MVP：新实验自动入库与跨进程零评测复用（2026-11-08，通过）
+
+**目标**：在 Phase 11 历史优先流程上补齐写路径——第一次查不到 → 用已有候选缓存真实评测一次
+→ 自动保存并更新 JSON 索引 → 第二次独立进程命中历史 → 零评测。
+
+- [x] **选真正未入库的配额**：`precheck.json` 核对 Phase 11 `runs/*.json`、索引和已有候选工件；
+      50/50、30/70、20/80 已有 runs，70/30 虽无索引但已有 2.24/2.25 工件；
+      **80/20** 无 runs、无索引、无候选工件，探针返回 `miss`，故选 80/20
+- [x] **稳定实验键** `src/recsys/experiments/experiment_memory.py`：由数据集/切分、
+      `id_mapping`/`routing_seed`/`k_recall`、双塔与 MIND checkpoint sha256、
+      `users.json`/两路召回文件 sha256、`targets_sha256`、配额、每用户 100 预算、
+      融合规则版本和指标口径共同计算；日期/目录名/耗时/服务商不参与
+- [x] **自动入库**：真实评测成功后先核验 `fusion.json` 与指标，再写 run record，
+      最后用临时文件 + `os.replace` 原子更新 `index.json`；相同键只保留一条；
+      失败/partial/缺工件不发布
+- [x] **读取校验**：命中要求身份匹配、`status=success`、指标记录完整、run record 存在、
+      融合工件可读且指纹/池统计一致；旧 Phase 11 JSON 继续走原兼容性检查
+- [x] **第一次独立 CLI 进程**：本地确定性策略 + **真实评测**，历史 `miss` →
+      `evaluated`，命中 2、Recall@100 0.005208（基准 4 / 0.011719），评测 **1** 次；
+      自动写入索引，实验键 `24cc580d…07962f`，墙钟 6.5 s
+- [x] **第二次独立 CLI 进程**：重新从磁盘读取索引，历史 `hit`（`source=memory_index`）→
+      `reuse_history`，复用同键、同指标、同候选工件，评测 **0** 次；
+      events 无 `tool_executed`/`memory_saved`，索引未被改写，墙钟 5.01 s
+- [x] **匹配安全（不评测）**：有效索引 hit；缓存指纹变化、规则版本不匹配、
+      候选工件缺失、记录 `partial` 均为 miss（5/5）
+- [x] **范围**：训练 0、重新召回 0、推荐全链路 0、排序/重排 0、测试集 0、RAG 0；
+      旧缓存与旧实验只读。本轮未跑真实 LLM（任务要求本地确定性策略），配额评测真实执行
+- [x] **兼容性**：默认 `policy=llm` 与上一轮真实 LLM 路径不变；新增 `--local-policy`
+      只用于本地验收；`search_experiment_history` 增加可选 `memory_dir`，
+      `evaluate_fusion_quota` 未改
+
+**两次运行总墙钟 11.51 s**（预算 120 s）；索引 1 条记录，第二轮零评测。
+
+**交付**：`experiments/2026-11-08-kuasar_small-experiment-memory/`
+（config / precheck / memory/index.json / memory/runs/*.json / run1 / run2 /
+two_run_check / memory_safety_checks / report）。
+
+**复现**：
+
+```powershell
+$env:PYTHONPATH = "src"
+$exp = "experiments/2026-11-08-kuasar_small-experiment-memory"
+
+python -m recsys.experiments.history_first_agent --audit-quotas `
+  --experiment-dir $exp --memory-dir "$exp/memory" `
+  --output-dir artifacts/kuasar_small/experiment_memory --quota 80/20
+
+python -m recsys.experiments.history_first_agent --experiment-dir "$exp/run1" `
+  --cache-dir artifacts/kuasar_small/mvp --memory-dir "$exp/memory" `
+  --output-dir artifacts/kuasar_small/experiment_memory --quota 80/20 --local-policy
+
+python -m recsys.experiments.history_first_agent --experiment-dir "$exp/run2" `
+  --cache-dir artifacts/kuasar_small/mvp --memory-dir "$exp/memory" `
+  --output-dir artifacts/kuasar_small/experiment_memory --quota 80/20 --local-policy
+
+python -m recsys.experiments.history_first_agent --memory-safety-check `
+  --experiment-dir $exp --memory-dir "$exp/memory" `
+  --cache-dir artifacts/kuasar_small/mvp --quota 80/20
+```
+
+证据：[report.md](experiments/2026-11-08-kuasar_small-experiment-memory/report.md)、
+[precheck.json](experiments/2026-11-08-kuasar_small-experiment-memory/precheck.json)、
+[run1/metrics.json](experiments/2026-11-08-kuasar_small-experiment-memory/run1/metrics.json)、
+[run2/metrics.json](experiments/2026-11-08-kuasar_small-experiment-memory/run2/metrics.json)、
+[two_run_check.json](experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json)、
+[memory_safety_checks.json](experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json)。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -670,8 +739,10 @@ python -m recsys.experiments.history_first_agent --regression-timeout evaluation
       误报修复：第二次请求失败不再写 `verified`
 - [x] Phase 11.2 多工具注册 + 历史实验复用：**真实运行通过**（30/70 命中历史，
       5 个命中 / Recall@100 0.013672，评测 0 次，见 2.26）；`--cache-dir` 已贯穿全流程
+- [x] Phase 12 实验记忆 MVP：新实验自动入库 + 第二次独立进程零评测复用
+      （80/20，2 命中 / Recall@100 0.005208，见 2.27）
 - [ ] Phase 11 完整版：RAG、Agent 对照实验（工具注册与历史复用已完成）
-- [ ] Phase 12–13 RAG、Agent 对照实验
+- [ ] Phase 12–13 完整 RAG、Agent 对照实验
 
 ---
 

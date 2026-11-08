@@ -1,0 +1,49 @@
+{
+  "key": "24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f",
+  "run1": {
+    "decision": "evaluated",
+    "history": "miss",
+    "evaluation_count": 1,
+    "hits": 2,
+    "recall_at_100": 0.005208,
+    "elapsed_s": 1.22,
+    "memory_saved": true
+  },
+  "run2": {
+    "decision": "reuse_history",
+    "history": "hit",
+    "evaluation_count": 0,
+    "hits": 2,
+    "recall_at_100": 0.005208,
+    "elapsed_s": 0.34,
+    "memory_saved": false,
+    "source": "memory_index"
+  },
+  "artifacts": {
+    "fusion": "artifacts\\kuasar_small\\experiment_memory\\cache_eval\\80_20\\fusion.json",
+    "fusion_sha256": "24f826fe8982f8ef20c1da7a23decb8c37dd79f8a0d7a20a43d79813e409554c",
+    "record": "experiments\\2026-11-08-kuasar_small-experiment-memory\\memory\\runs\\24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f.json",
+    "record_sha256": "c2ab46870eca5f397519267f0c5e5d692e219eaf34ccee67640df167a4b2619d",
+    "index": "experiments\\2026-11-08-kuasar_small-experiment-memory\\memory\\index.json",
+    "index_sha256": "842353de7de7533d5bac25a359d5eb52865ba77f4b10316e58b69dae07fb2e84"
+  },
+  "checks": {
+    "run1_miss": true,
+    "run1_evaluated": true,
+    "run2_hit": true,
+    "run2_reuse_history": true,
+    "same_key": true,
+    "run2_source_memory_index": true,
+    "run2_no_eval_tool_event": true,
+    "run2_no_memory_save_event": true,
+    "run2_evaluation_null": true,
+    "index_single_entry": true,
+    "index_record_sha": true,
+    "run2_reuses_run1_fusion": true,
+    "run2_reuses_run1_record": true,
+    "run2_memory_not_saved": true,
+    "metrics_same": true,
+    "index_not_rewritten_by_run2": true
+  },
+  "passed": true
+}
