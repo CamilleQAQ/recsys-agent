@@ -70,9 +70,13 @@ from recsys.experiments.agent_tools import (
 from recsys.experiments.experiment_history import (
     DEFAULT_HISTORY_ROOT,
     model_view as history_model_view,
+    search_experiment_history,
 )
 from recsys.experiments.experiment_memory import (
     audit_quotas,
+    build_identity,
+    identity_key,
+    load_index,
     run_memory_safety_checks,
     save_evaluation,
 )
@@ -93,6 +97,8 @@ from recsys.experiments.llm_tool_call import (
 EXPERIMENT_DEFAULT = Path("experiments/2026-11-08-kuasar_small-history-first-agent")
 BASELINE_RUN = Path("experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/50_50.json")
 OUTPUT_ROOT = Path("artifacts/kuasar_small/history_first_agent")
+PHASE12_MEMORY_DIR = Path("experiments/2026-11-08-kuasar_small-experiment-memory/memory")
+REGRESSION_FIXTURE = Path("artifacts/kuasar_small/experiment_memory/cache_eval/80_20/metrics.json")
 
 MAX_MODEL_REQUESTS = 3
 MAX_HISTORY_QUERIES = 1
@@ -341,11 +347,13 @@ class AgentState(TypedDict, total=False):
     eval_arguments: dict
     eval_assistant_message: dict
     eval_result: dict
+    eval_result_returned: bool
     memory_saved: bool
     memory_key: str
     memory_record: dict
     memory_index: dict
     memory_error: str
+    memory_publish_reason: str
     final_reply: str
     analysis_path: str
     decision: str
@@ -778,59 +786,8 @@ def node_execute_eval(state: AgentState, registry: ToolRegistry) -> AgentState:
 
     state["evaluation_count"] = int(state.get("evaluation_count", 0)) + 1
     state["eval_result"] = result
-
-    memory_saved: dict | None = None
-    if state.get("memory_dir"):
-        try:
-            memory_saved = save_evaluation(
-                Path(state["memory_dir"]),
-                cache_dir=Path(state["cache_dir"]),
-                quota=(int(result["quota"]["two_tower"]), int(result["quota"]["mind"])),
-                result=result,
-                source={
-                    "policy": state.get("policy"),
-                    "cache_dir_source": state.get("cache_dir_source"),
-                },
-                experiment_dir=Path(state["experiment_dir"])
-                if state.get("experiment_dir")
-                else None,
-            )
-        except Exception as error:  # noqa: BLE001 - 写入失败不发布索引
-            state["status"] = "failed"
-            state["error"] = f"实验记忆写入失败：{error}"
-            state["memory_error"] = str(error)
-            _event(
-                state,
-                {
-                    "event": "memory_failed",
-                    "tool_call_id": state.get("eval_call_id"),
-                    "error": str(error),
-                    "eval_result_kept": True,
-                },
-            )
-            return _leave(state, "execute_eval")
-        state["memory_saved"] = True
-        state["memory_key"] = memory_saved["key"]
-        state["memory_record"] = memory_saved["record"]
-        state["memory_index"] = {
-            "path": memory_saved["index_path"],
-            "record": memory_saved["record_path"],
-            "key": memory_saved["key"],
-            "entry_count": memory_saved["entry_count"],
-        }
-        _event(
-            state,
-            {
-                "event": "memory_saved",
-                "key": memory_saved["key"],
-                "index": memory_saved["index_path"],
-                "record": memory_saved["record_path"],
-                "entry_count": memory_saved["entry_count"],
-                "fusion": result.get("evidence", {}).get("fusion"),
-            },
-        )
-    else:
-        state["memory_saved"] = False
+    state["memory_saved"] = False
+    state["eval_result_returned"] = False
 
     state["decision"] = "evaluated"
     _event(
@@ -922,8 +879,88 @@ def node_send_eval_result(state: AgentState, chat_fn: ChatFn) -> AgentState:
     state["final_reply"] = content
     state["analysis_path"] = "miss_eval"
     state["decision"] = "evaluated"
+    state["eval_result_returned"] = True
     _set_stop(state, "历史未命中，评测同一目标配额一次后停止")
     return _leave(state, "send_eval_result")
+
+
+def _log_publish_skipped(state: AgentState, reason: str) -> None:
+    state["memory_saved"] = False
+    state["memory_publish_reason"] = reason
+    _event(
+        state,
+        {
+            "event": "memory_publish_skipped",
+            "reason": reason,
+            "tool_call_id": state.get("eval_call_id"),
+            "eval_result_kept": bool(state.get("eval_result")),
+        },
+    )
+
+
+def _publish_evaluation(state: AgentState) -> None:
+    """只有 verified + 同 ID 回传 + 有效最终回复，才发布可复用索引记录。"""
+    history = state.get("history_result") or {}
+    evaluation = state.get("eval_result") or {}
+    if not state.get("memory_dir") or history.get("hit") or not evaluation:
+        return
+    if not state.get("eval_call_id") or not state.get("eval_result_returned"):
+        _log_publish_skipped(state, "评测结果没有用同一 tool_call_id 回传，拒绝发布")
+        return
+    try:
+        saved = save_evaluation(
+            Path(state["memory_dir"]),
+            cache_dir=Path(state["cache_dir"]),
+            quota=(int(evaluation["quota"]["two_tower"]), int(evaluation["quota"]["mind"])),
+            result=evaluation,
+            source={
+                "policy": state.get("policy"),
+                "cache_dir_source": state.get("cache_dir_source"),
+            },
+            experiment_dir=Path(state["experiment_dir"])
+            if state.get("experiment_dir")
+            else None,
+        )
+    except Exception as error:  # noqa: BLE001 - 发布失败不能显示入库成功
+        state["status"] = "failed"
+        state["error"] = f"实验记忆写入失败：{error}"
+        state["memory_error"] = str(error)
+        state["memory_saved"] = False
+        state["memory_publish_reason"] = state["error"]
+        state["stop_reason"] = state["error"]
+        _event(
+            state,
+            {
+                "event": "memory_failed",
+                "tool_call_id": state.get("eval_call_id"),
+                "error": str(error),
+                "eval_result_kept": True,
+                "memory_saved": False,
+            },
+        )
+        return
+    state["memory_saved"] = True
+    state["memory_key"] = saved["key"]
+    state["memory_record"] = saved["record"]
+    state["memory_index"] = {
+        "path": saved["index_path"],
+        "record": saved["record_path"],
+        "key": saved["key"],
+        "entry_count": saved["entry_count"],
+    }
+    state["memory_publish_reason"] = ""
+    _event(
+        state,
+        {
+            "event": "memory_saved",
+            "key": saved["key"],
+            "index": saved["index_path"],
+            "record": saved["record_path"],
+            "entry_count": saved["entry_count"],
+            "fusion": evaluation.get("evidence", {}).get("fusion"),
+            "tool_call_id": state.get("eval_call_id"),
+        },
+    )
 
 
 def node_finish(state: AgentState) -> AgentState:
@@ -999,15 +1036,27 @@ def node_finish(state: AgentState) -> AgentState:
         else:
             state["status"] = "verified"
 
+    if state.get("status") == "verified":
+        _publish_evaluation(state)
+    elif evaluation and not history.get("hit") and state.get("memory_dir"):
+        _log_publish_skipped(
+            state,
+            f"运行未通过 verified（status={state.get('status')}）："
+            f"{state.get('error') or state.get('stop_reason') or '闭环未完成'}",
+        )
+
     if state.get("status") != "verified" and not state.get("stop_reason"):
         state["stop_reason"] = state.get("error") or "闭环未完成"
         if state.get("conclusion"):
             state["conclusion"]["stop_reason"] = state["stop_reason"]
+    if state.get("conclusion"):
+        state["conclusion"]["stop_reason"] = state.get("stop_reason")
     state["conclusion"]["decision"] = state.get("decision")
     state["conclusion"]["status"] = state.get("status")
     state["conclusion"]["history_source"] = history.get("source")
     state["conclusion"]["memory_key"] = state.get("memory_key")
     state["conclusion"]["memory_saved"] = bool(state.get("memory_saved"))
+    state["conclusion"]["memory_publish_reason"] = state.get("memory_publish_reason")
     _event(
         state,
         {
@@ -1015,6 +1064,8 @@ def node_finish(state: AgentState) -> AgentState:
             "status": state.get("status"),
             "decision": state.get("decision"),
             "evaluation_count": int(state.get("evaluation_count", 0)),
+            "memory_saved": bool(state.get("memory_saved")),
+            "memory_publish_reason": state.get("memory_publish_reason"),
             "stop_reason": state.get("stop_reason"),
             "error": state.get("error"),
         },
@@ -1131,6 +1182,9 @@ def _initial_state(
         "evaluation_count": 0,
         "response_ids": {},
         "call_ids": {},
+        "memory_saved": False,
+        "eval_result_returned": False,
+        "memory_publish_reason": "",
     }
 
 
@@ -1182,10 +1236,21 @@ def _finalize(state: AgentState, experiment_dir: Path) -> dict:
         "memory": {
             "dir": state.get("memory_dir"),
             "saved": bool(state.get("memory_saved")),
+            "publish": (
+                "saved"
+                if state.get("memory_saved")
+                else "failed"
+                if state.get("memory_error")
+                else "skipped"
+                if evaluation and not history.get("hit")
+                else "not_applicable"
+            ),
+            "publish_reason": state.get("memory_publish_reason"),
             "key": state.get("memory_key"),
             "index": memory_index,
             "record": state.get("memory_record"),
             "error": state.get("memory_error"),
+            "eval_result_returned": bool(state.get("eval_result_returned")),
         },
         "conclusion": state.get("conclusion"),
         "stop_reason": state.get("stop_reason"),
@@ -1677,6 +1742,172 @@ def run_regression_timeout(
     return result
 
 
+def run_regression_publish_gate(
+    experiment_dir: Path,
+    *,
+    cache_dir: Path,
+    cache_dir_source: str,
+    target_quota: tuple[int, int] = (80, 20),
+) -> dict:
+    """本地回归：评测成功但最终回复超时，索引不得发布；随后查询必须仍 miss。
+
+    真实 LangGraph + 真实历史查询/index 读取；评测工具返回已落盘的
+    ``80_20/metrics.json`` 只读夹具，不执行真实评测，也不请求真实 LLM。
+    """
+    target_quota = validate_quota(*target_quota)
+    run_dir = Path(experiment_dir) / "regression_publish_gate"
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    history_root = _prepare_miss_history_root(run_dir)
+    memory_dir = run_dir / "memory"
+    output_dir = run_dir / "output"
+
+    fixture_path = _artifact_path(str(REGRESSION_FIXTURE))
+    if fixture_path is None or not fixture_path.exists():
+        raise AssertionError(f"缺少只读评测夹具：{REGRESSION_FIXTURE}")
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    if (fixture.get("quota") or {}) != {
+        "two_tower": target_quota[0],
+        "mind": target_quota[1],
+    }:
+        raise AssertionError("夹具配额与回归目标不一致")
+    if not (fixture.get("evidence") or {}).get("fusion"):
+        raise AssertionError("夹具缺少候选证据路径")
+
+    fake_config = {"model": "fake-model", "base_url": "http://127.0.0.1", "api_key": "fake"}
+    calls = {"chat": 0, "eval": 0}
+    script = [
+        _fake_call(
+            "call-gate-history",
+            TOOL_SEARCH_HISTORY,
+            {"two_tower_quota": target_quota[0], "mind_quota": target_quota[1]},
+        ),
+        _fake_call(
+            "call-gate-eval",
+            TOOL_EVALUATE,
+            {"two_tower_quota": target_quota[0], "mind_quota": target_quota[1]},
+        ),
+    ]
+
+    def fake_chat(config, messages, *, tools, timeout):
+        calls["chat"] += 1
+        if script:
+            return script.pop(0)
+        raise TimeoutError("simulated timeout after evaluation result")
+
+    def fake_eval(arguments, context: ToolContext) -> dict:
+        calls["eval"] += 1
+        return json.loads(json.dumps(fixture, ensure_ascii=False))
+
+    registry = build_registry(evaluate_execute=fake_eval)
+    state = _initial_state(
+        config=fake_config,
+        cache_dir=cache_dir,
+        cache_dir_source=cache_dir_source,
+        history_root=history_root,
+        output_dir=output_dir,
+        target_quota=target_quota,
+        memory_dir=memory_dir,
+        experiment_dir=run_dir,
+        policy="local",
+    )
+    final_state = build_graph(
+        chat_fn=fake_chat, baseline_fn=load_baseline, registry=registry
+    ).invoke(state)
+    summary = _finalize(final_state, run_dir)
+    events = [
+        json.loads(line)
+        for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    event_names = [event.get("event") for event in events]
+    index, index_path = load_index(memory_dir)
+    context = load_context(cache_dir)
+    key = identity_key(build_identity(context, target_quota))
+    evaluation = summary.get("evaluation") or {}
+    memory = summary.get("memory") or {}
+
+    requery = search_experiment_history(
+        target_quota[0],
+        target_quota[1],
+        cache_dir=cache_dir,
+        history_root=history_root,
+        memory_dir=memory_dir,
+    )
+    existing = search_experiment_history(
+        target_quota[0],
+        target_quota[1],
+        cache_dir=cache_dir,
+        history_root=DEFAULT_HISTORY_ROOT,
+        memory_dir=PHASE12_MEMORY_DIR,
+    )
+
+    checks = {
+        "status_partial": summary["status"] == "partial",
+        "simulated_cli_exit_2": (0 if summary["status"] == "verified" else 2) == 2,
+        "evaluation_executed_once": summary["evaluation_count"] == 1,
+        "tool_result_kept": bool(evaluation.get("quota")),
+        "candidate_evidence_kept": bool((evaluation.get("evidence") or {}).get("fusion")),
+        "timeout_reason_kept": "simulated timeout" in str(summary.get("error") or ""),
+        "no_memory_saved_event": "memory_saved" not in event_names,
+        "memory_publish_skipped_event": "memory_publish_skipped" in event_names,
+        "memory_not_saved": memory.get("saved") is False,
+        "memory_publish_skipped": memory.get("publish") == "skipped",
+        "eval_result_not_returned": memory.get("eval_result_returned") is False,
+        "index_empty": index["entries"] == {},
+        "key_not_indexed": key not in index["entries"],
+        "requery_miss": requery.get("status") == "miss",
+        "requery_without_second_eval": calls["eval"] == 1,
+        "existing_verified_hit": existing.get("status") == "hit",
+        "existing_verified_source": existing.get("source") == "memory_index",
+        "existing_verified_key": bool(existing.get("memory_key")),
+    }
+    result = {
+        "mode": "publish_gate_final_timeout",
+        "policy": "local-deterministic",
+        "fixture": str(fixture_path),
+        "cache_dir": str(cache_dir),
+        "history_root": str(history_root),
+        "memory_dir": str(memory_dir),
+        "status": summary["status"],
+        "simulated_cli_exit": 0 if summary["status"] == "verified" else 2,
+        "request_count": summary["request_count"],
+        "history_query_count": summary["history_query_count"],
+        "evaluation_count": summary["evaluation_count"],
+        "error": summary.get("error"),
+        "evaluation": {
+            "quota": evaluation.get("quota"),
+            "hits": evaluation.get("hits"),
+            "recall_at_100": evaluation.get("recall_at_100"),
+            "evidence": evaluation.get("evidence"),
+        },
+        "memory": memory,
+        "key": key,
+        "index_path": str(index_path),
+        "index_entry_count": len(index["entries"]),
+        "events": event_names,
+        "requery": {
+            "status": requery.get("status"),
+            "source": requery.get("source"),
+            "reason": requery.get("reason"),
+        },
+        "existing_verified": {
+            "status": existing.get("status"),
+            "source": existing.get("source"),
+            "memory_key": existing.get("memory_key"),
+        },
+        "fake_eval_calls": calls["eval"],
+        "fake_chat_calls": calls["chat"],
+        "checks": checks,
+        "passed": all(checks.values()),
+        "metrics_file": str(run_dir / "metrics.json"),
+        "events_file": str(run_dir / "events.jsonl"),
+    }
+    _write_json(run_dir / "regression.json", result)
+    return result
+
+
 def _synthetic_history(hit: bool, quota: tuple[int, int]) -> dict:
     base = {
         "tool": TOOL_SEARCH_HISTORY,
@@ -1965,6 +2196,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="检查索引在指纹变化/规则不匹配/工件缺失时不会误命中（不评测）",
     )
+    parser.add_argument(
+        "--regression-publish-gate",
+        action="store_true",
+        help="本地回归：评测成功但最终回复超时，索引不得发布（不评测）",
+    )
     parser.add_argument("--regression-miss", action="store_true", help="本地模拟未命中后评测一次")
     parser.add_argument(
         "--real-eval",
@@ -2018,6 +2254,15 @@ def main(argv: list[str] | None = None) -> int:
                 work_dir=args.experiment_dir / "safety",
             )
             _write_json(args.experiment_dir / "memory_safety_checks.json", result)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0 if result["passed"] else 1
+        if args.regression_publish_gate:
+            result = run_regression_publish_gate(
+                args.experiment_dir,
+                cache_dir=cache_dir,
+                cache_dir_source=cache_source,
+                target_quota=args.quota,
+            )
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["passed"] else 1
         if args.regression_miss:

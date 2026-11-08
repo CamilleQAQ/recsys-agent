@@ -10,7 +10,7 @@ candidate_budget_per_user = 100
 selected_quota = [80, 20]
 baseline_quota = [50, 50]
 policy = "local-deterministic（不请求真实 LLM；工具与评测真实执行）"
-status = "通过"
+status = "通过（2026-11-09 修复发布时机；失败结果不发布）"
 
 [selection]
 why_80_20 = "80/20 没有 Phase 11 runs JSON、没有本地索引条目、也没有候选工件目录；70/30 虽无索引但有 2.24/2.25 候选工件，因此选更干净的 80/20"
@@ -96,6 +96,25 @@ partial_status_miss = true
 real_evaluation_runs = 0
 evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json"
 
+[publish_gate]
+command = "python -m recsys.experiments.history_first_agent --regression-publish-gate --experiment-dir experiments/2026-11-08-kuasar_small-experiment-memory --cache-dir artifacts/kuasar_small/mvp --quota 80/20"
+kind = "local regression（隔离记忆目录 + 只读 80_20/metrics.json 夹具；不执行真实评测/LLM）"
+regression_status = "partial（预期，CLI 非零）"
+simulated_cli_exit = 2
+request_count = 3
+evaluation_count = 1
+tool_result_kept = true
+candidate_evidence_kept = true
+timeout_reason_kept = true
+memory_saved_event = false
+memory_publish_skipped_event = true
+index_entry_count = 0
+requery = "miss"
+existing_verified_record = "hit（memory_index，只读）"
+checks = 18
+passed = true
+evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/"
+
 [scope]
 training = 0
 re_recall = 0
@@ -109,6 +128,7 @@ old_cache_and_experiments = "只读；未覆盖"
 phase11_cli = "python -m recsys.experiments.history_first_agent ...（不带 --memory-dir 时行为不变）"
 real_llm_path = "默认 policy=llm；本轮只新增 --local-policy，不改变真实 LLM 路径"
 tool_registry = "search_experiment_history 新增可选 memory_dir；evaluate_fusion_quota 未改"
+publish_timing = "评测成功后只落工件；verified + 同 ID 回传 + 有效最终回复后，在 node_finish 发布索引"
 candidate_details = "artifacts/kuasar_small/experiment_memory/cache_eval/80_20/fusion.json"
 
 [artifacts]
@@ -120,6 +140,7 @@ run1 = "experiments/2026-11-08-kuasar_small-experiment-memory/run1/"
 run2 = "experiments/2026-11-08-kuasar_small-experiment-memory/run2/"
 two_run_check = "experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json"
 safety = "experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json"
+publish_gate = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/"
 self_check = "experiments/2026-11-08-kuasar_small-experiment-memory/self_check.json"
 compat_regression = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_compat/regression_miss/regression_miss.json"
 candidates = "artifacts/kuasar_small/experiment_memory/cache_eval/80_20/"

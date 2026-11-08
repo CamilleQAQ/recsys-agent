@@ -82,6 +82,55 @@
 - 索引 sha256：`842353de7de7533d5bac25a359d5eb52865ba77f4b10316e58b69dae07fb2e84`；
 - run record sha256：`c2ab46870eca5f397519267f0c5e5d692e219eaf34ccee67640df167a4b2619d`。
 
+## 发布时机修复（2026-11-09）
+
+**问题**：旧实现只要 `evaluate_fusion_quota` 成功，`node_execute_eval` 就立即调用
+`save_evaluation()` 发布索引。若随后最终回复超时，运行会变成 `partial`，但索引已经把这次
+实验标成可复用 `success`，下次查询会错误命中。
+
+**修改位置**：
+
+| 位置 | 修改 |
+| --- | --- |
+| `node_execute_eval`（[history_first_agent.py](../../src/recsys/experiments/history_first_agent.py)） | 只保留评测结果/工件/调用 ID，`memory_saved=false`、`eval_result_returned=false`，**不写索引** |
+| `node_send_eval_result` | 只有收到有效最终回复后才置 `eval_result_returned=true` |
+| `node_finish` / `_publish_evaluation` | 仅当 `status=verified`、新评测成功、同 `tool_call_id` 回传、最终回复有效时调用 `save_evaluation()` |
+| `node_finish` / `_log_publish_skipped` | 未 verified 时写 `memory_publish_skipped` 事件，`memory_saved=false` |
+| `_publish_evaluation` | 发布本身失败时 `status=failed`、`memory_failed` 事件、`memory_saved=false`，不显示入库成功 |
+
+**本地回归**（隔离临时记忆目录；复用 `80_20/metrics.json` 只读夹具；真实 LangGraph、
+真实索引查询/写入逻辑；不执行真实评测、不请求真实 LLM）：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m recsys.experiments.history_first_agent --regression-publish-gate `
+  --experiment-dir experiments/2026-11-08-kuasar_small-experiment-memory `
+  --cache-dir artifacts/kuasar_small/mvp --quota 80/20
+```
+
+执行顺序：临时历史 `miss` → 模拟评测成功（读取 `80_20/metrics.json`）→ 最终回复请求超时
+→ 用相同输入重新查历史。实际结果：
+
+| 断言 | 实际 |
+| --- | --- |
+| 最终状态 | **partial** |
+| 模拟 CLI 退出码 | **2** |
+| 评测次数 / 请求次数 | 1 / 3 |
+| 工具结果 | 保留（命中 2、Recall@100 0.005208） |
+| 候选证据路径 | 保留 `80_20/fusion.json` |
+| 超时原因 | 保留 `simulated timeout after evaluation result` |
+| `memory_saved` 事件 | **无** |
+| `memory_publish_skipped` 事件 | 有 |
+| 临时索引条目 / 本次键 | **0 / 未写入** |
+| 重新查历史 | **miss**（未触发第二次评测） |
+| 现有 80/20 verified 记录 | **hit**（`memory_index`，只读检查） |
+
+18 项检查全部通过。现有 Phase 12 的 `run1`/`run2` 记录与索引未改写；本回归只新增
+`regression_publish_gate/`。证据：
+[regression.json](regression_publish_gate/regression.json)、
+[metrics.json](regression_publish_gate/metrics.json)、
+[events.jsonl](regression_publish_gate/events.jsonl)。
+
 ## 匹配安全检查（不运行评测）
 
 ```powershell

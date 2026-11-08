@@ -607,7 +607,7 @@ python -m recsys.experiments.history_first_agent --regression-timeout evaluation
 
 ---
 
-### 2.27 Phase 12 实验记忆 MVP：新实验自动入库与跨进程零评测复用（2026-11-08，通过）
+### 2.27 Phase 12 实验记忆 MVP：新实验自动入库与跨进程零评测复用（2026-11-08，2026-11-09 修复发布时机，通过）
 
 **目标**：在 Phase 11 历史优先流程上补齐写路径——第一次查不到 → 用已有候选缓存真实评测一次
 → 自动保存并更新 JSON 索引 → 第二次独立进程命中历史 → 零评测。
@@ -637,12 +637,19 @@ python -m recsys.experiments.history_first_agent --regression-timeout evaluation
 - [x] **兼容性**：默认 `policy=llm` 与上一轮真实 LLM 路径不变；新增 `--local-policy`
       只用于本地验收；`search_experiment_history` 增加可选 `memory_dir`，
       `evaluate_fusion_quota` 未改
+- [x] **发布时机修复（2026-11-09）**：评测成功后只保留候选/指标/调用 ID/证据，不再在
+      `node_execute_eval` 发布索引；只有 `node_finish` 确认 `verified`、评测结果用同一
+      `tool_call_id` 回传且收到有效最终回复，才调用 `save_evaluation()`。新增
+      `--regression-publish-gate`：历史未命中 → 模拟评测成功 → 最终回复超时 →
+      重查历史。回归结果 `partial`、模拟 CLI 2、工具结果/证据/超时原因保留、
+      **无 `memory_saved` 事件、索引 0 条、重查仍 `miss`**；现有 80/20 verified 记录仍 hit。
+      **失败结果不发布，Phase 12 实验记忆 MVP 验收完成。**
 
 **两次运行总墙钟 11.51 s**（预算 120 s）；索引 1 条记录，第二轮零评测。
 
 **交付**：`experiments/2026-11-08-kuasar_small-experiment-memory/`
 （config / precheck / memory/index.json / memory/runs/*.json / run1 / run2 /
-two_run_check / memory_safety_checks / report）。
+two_run_check / memory_safety_checks / regression_publish_gate / report）。
 
 **复现**：
 
@@ -665,6 +672,9 @@ python -m recsys.experiments.history_first_agent --experiment-dir "$exp/run2" `
 python -m recsys.experiments.history_first_agent --memory-safety-check `
   --experiment-dir $exp --memory-dir "$exp/memory" `
   --cache-dir artifacts/kuasar_small/mvp --quota 80/20
+
+python -m recsys.experiments.history_first_agent --regression-publish-gate `
+  --experiment-dir $exp --cache-dir artifacts/kuasar_small/mvp --quota 80/20
 ```
 
 证据：[report.md](experiments/2026-11-08-kuasar_small-experiment-memory/report.md)、
@@ -672,7 +682,8 @@ python -m recsys.experiments.history_first_agent --memory-safety-check `
 [run1/metrics.json](experiments/2026-11-08-kuasar_small-experiment-memory/run1/metrics.json)、
 [run2/metrics.json](experiments/2026-11-08-kuasar_small-experiment-memory/run2/metrics.json)、
 [two_run_check.json](experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json)、
-[memory_safety_checks.json](experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json)。
+[memory_safety_checks.json](experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json)、
+[regression.json](experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/regression.json)。
 
 ---
 
@@ -740,7 +751,8 @@ python -m recsys.experiments.history_first_agent --memory-safety-check `
 - [x] Phase 11.2 多工具注册 + 历史实验复用：**真实运行通过**（30/70 命中历史，
       5 个命中 / Recall@100 0.013672，评测 0 次，见 2.26）；`--cache-dir` 已贯穿全流程
 - [x] Phase 12 实验记忆 MVP：新实验自动入库 + 第二次独立进程零评测复用
-      （80/20，2 命中 / Recall@100 0.005208，见 2.27）
+      （80/20，2 命中 / Recall@100 0.005208，见 2.27）；**失败结果不发布**
+      （发布时机修复 + `--regression-publish-gate`，验收完成）
 - [ ] Phase 11 完整版：RAG、Agent 对照实验（工具注册与历史复用已完成）
 - [ ] Phase 12–13 完整 RAG、Agent 对照实验
 
