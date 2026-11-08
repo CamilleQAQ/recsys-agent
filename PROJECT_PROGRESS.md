@@ -487,6 +487,27 @@ checkpoint / report）；缓存与模型在 `artifacts/kuasar_small/mvp/`。
 
 ---
 
+### 2.23 Phase 11 Research Agent MVP：融合配额对照（2026-11-08）
+
+**问题**：100 个候选/用户时，双塔与 MIND 怎么分配配额能保留更多验证目标？
+
+- [x] 工具 `evaluate_fusion_quota`（`src/recsys/experiments/fusion_quota.py`），可脱离 LLM 独立运行；
+      只读 MVP 缓存（0 训练、0 重新召回），核对 128 用户 / 362 目标、两路用户集合、名次、去重、
+      曝光泄漏与文件指纹，不一致直接报错
+- [x] 融合规则：双塔在前按配额交替，只有新物品消耗配额，重复跳过，一路耗尽由另一路补位并记录
+- [x] Agent CLI `python -m recsys.experiments.quota_agent`：先强制 50/50，再根据结果选下一组，
+      最多 3 组 / 180 秒；`--self-check` 覆盖非法配额、重复、超次数、超时间、补位与去重
+- [x] 实跑 3 组：50/50 命中 4、30/70 命中 5、20/80 命中 5；结论 **30/70 最优**
+      （Recall@100 0.013672 vs 基准 0.011719），总耗时 1.37 s
+- [x] 决策与工具日志 `events.jsonl` 可核对「先基准、后选组」；候选明细落
+      `artifacts/kuasar_small/quota_agent/cache_eval/`
+- [ ] **真实 LLM 工具调用**：代码路径已实现（OpenAI 兼容，环境变量配置），本机无密钥，
+      本轮为本地确定性策略；待配置后验收
+
+**交付**：`experiments/2026-11-08-kuasar_small-fusion-quota-agent/`（config / metrics / runs / events / report）。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -542,7 +563,10 @@ checkpoint / report）；缓存与模型在 `artifacts/kuasar_small/mvp/`。
 
 - [x] Phase 9 召回→融合→排序→重排端到端离线链路（MVP，128 用户；重排为类目配额，见 2.22）
 - [ ] Phase 10 TIGER（genrec）：物品 embedding → RQ-VAE 语义 ID → trie 约束解码
-- [ ] Phase 11–13 Research Agent、RAG、Agent 对照实验
+- [x] Phase 11 Research Agent MVP：`evaluate_fusion_quota` 工具 + 配额决策闭环（本地策略，
+      3 组评测，见 2.23）；真实 LLM 调用待验收（无密钥）
+- [ ] Phase 11 完整版：LLM tool-calling 实测、LangGraph 工作流、更多工具注册
+- [ ] Phase 12–13 RAG、Agent 对照实验
 
 ---
 
@@ -637,6 +661,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-07 | **Phase 3 MIND** | 因 TorchEasyRec 的 Linux-only wheel 不可用，改用 torch-rechub 1.0.0 接入 MIND（模型/训练/适配器/CLI）；测试 Recall@20 0.005675（比双塔 +28.8%），NDCG@20 略低；20 epochs 未收敛，训练约 60 分钟 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`src/recsys/adapters/rechub_mind.py`、`third_party/torch-rechub`、`experiments/2026-11-07-kuasar_small-mind/` |
 | 2026-11-08 | **Phase 3 阶段评估** | P1 止损：训练预算 0；发现并修复 MIND 评测随机性（胶囊路由 `torch.randn`），同一 checkpoint 固定种子后可逐位复现；分群评估完成（mid 组 +0.0058、high 组 −0.0040、总体 +0.0006）；旧 0.005675 解释为单次随机路由抽样；40-epoch 收敛/同预算对照/训练多 seed 留待办 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`scripts/eval_groups.py`、`experiments/2026-11-08-kuasar_small-mind-phase3/` |
 | 2026-11-08 | **离线 MVP** | 新增 `recsys_mvp`：128 用户双路召回（双塔 + MIND）→ 名次融合（≤100，来源可追溯）→ LightGBM（父 train 工件 9,997 行 / 20 轮）→ 类目重排（每类 ≤5）；自动断言全过；10.0 s / 1,379 MiB；Top-20 指标为 0（样本量限制），Top-100 命中 9 记录在 diagnostics | `src/recsys/experiments/recsys_mvp.py`、`src/recsys/adapters/ranking.py`、`experiments/2026-11-08-kuasar_small-recsys-mvp/` |
+| 2026-11-08 | **Phase 11 Agent MVP** | 新增 `evaluate_fusion_quota` 工具与 `quota_agent`：先 50/50 基准，再按上下文选 30/70、20/80；3 组评测 1.37 s；结论 30/70（命中 5 vs 基准 4）；工具/决策/候选明细全落盘；真实 LLM 待配置 | `src/recsys/experiments/fusion_quota.py`、`src/recsys/experiments/quota_agent.py`、`experiments/2026-11-08-kuasar_small-fusion-quota-agent/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

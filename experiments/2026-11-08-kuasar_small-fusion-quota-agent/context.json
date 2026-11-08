@@ -1,0 +1,15 @@
+{
+  "dataset": "kuasar_small",
+  "fixed_users": 128,
+  "validation_targets": 362,
+  "candidate_budget_per_user": 100,
+  "k_recall_per_channel": 100,
+  "previous_mvp": {
+    "fusion_rule": "无配额限制的 50/50 轮流（两路各 100 条源候选）",
+    "fusion_pool_hits": 4,
+    "union_hits_at_100": 9,
+    "two_tower_hits_at_100": 2,
+    "mind_hits_at_100": 7
+  },
+  "objective": "命中目标数优先，Recall@100 次之；持平时保留基准"
+}
