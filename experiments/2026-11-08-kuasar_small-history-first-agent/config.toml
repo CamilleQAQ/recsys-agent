@@ -1,0 +1,157 @@
+# Phase 11.2：多工具注册 + 历史实验复用（2026-11-08）
+# 真实 LLM 工作流 1 次；未命中/超时/缓存目录分支均为本地检查。
+
+[task]
+goal = "先查历史实验；只有无可比结果时才评测一次融合配额；同时修复 --cache-dir 不生效"
+dataset = "kuasar_small"
+fixed_users = 128
+validation_targets = 362
+candidate_budget_per_user = 100
+target_quota = [30, 70]
+baseline_quota = [50, 50]
+baseline_run = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/50_50.json"
+history_root = "experiments/2026-11-08-kuasar_small-fusion-quota-agent"
+scope = "只读原有双塔/MIND Top-100 缓存；不训练、不重新召回、不跑推荐全链路、不做测试集评估"
+
+[tools]
+registry = "src/recsys/experiments/agent_tools.py"
+names = ["search_experiment_history", "evaluate_fusion_quota"]
+schema = "两个工具都只有 two_tower_quota / mind_quota 两个必填整数；additionalProperties=false"
+validation = "工具名必须注册；参数必须恰好两个整数；配额必须属于 ALLOWED_QUOTAS；禁止路径/命令/脚本"
+execution = "LangGraph 只通过注册表执行；历史查询读工件，融合评测复用 fusion_quota.evaluate_fusion_quota"
+history_search = "src/recsys/experiments/experiment_history.py"
+workflow = "src/recsys/experiments/history_first_agent.py"
+
+[graph]
+engine = "langgraph==1.2.20"
+entry = "load_baseline"
+nodes = ["load_baseline", "request_history", "execute_history", "send_history_result",
+         "execute_eval", "send_eval_result", "finish"]
+hit_path = ["load_baseline", "request_history", "execute_history", "send_history_result", "finish"]
+miss_eval_path = ["load_baseline", "request_history", "execute_history", "send_history_result",
+                  "execute_eval", "send_eval_result", "finish"]
+routing = "load_baseline → request_history → execute_history → send_history_result；命中直接 finish；未命中且模型选择评测才进入 execute_eval"
+
+[history_rules]
+fingerprints = ["dataset", "users", "items", "split_strategy", "split_sha256",
+                "id_mapping_sha256", "routing_seed", "k_recall",
+                "checkpoints.two_tower.sha256", "checkpoints.mind.sha256",
+                "users_file_sha256", "recall_two_tower_sha256", "recall_mind_sha256"]
+budget = "每用户 100，candidates_total=12800，candidates_mean=100；two_tower/mind used + fills = 12000"
+rule = "双塔在前交替；重复项不消耗配额；一路耗尽由另一路补位；来源/原始名次可追溯"
+metric = "hits=(user,item) 命中对计数；recall_at_100=evaluate_recommendations(ks=(100,)) 的用户平均 Recall@100"
+legacy_record = "旧 run 无规则版本字段；用同一实验目录 config.toml 的 fusion_rule/objective + fusion.json 工件确认兼容，标记 legacy_record=true"
+reject = "partial/failed/error、缺少工件、指纹不符、配置口径不符的记录全部 miss 并记录原因"
+
+[status_rules]
+verified = "实际历史查询结果 + 有效最终回复；若评测则必须同 tool_call_id 回传结果"
+partial = "工具成功后最终请求失败/空回复/再次请求工具；保留工具结果，CLI 非零"
+blocked = "查询前评测、未知工具、非法/不一致配额、历史命中后评测、重复评测、预算超限"
+failed = "工具执行本身失败"
+
+[budget]
+limit = { model_requests = 3, history_queries = 1, evaluations = 1, seconds = 180 }
+actual_real_run = { model_requests = 2, history_queries = 1, evaluations = 0, seconds = 2.21 }
+training = 0
+re_recall = 0
+test_split_evaluation = 0
+
+[real_run]
+kind = "real_llm"
+model = "deepseek-chat"
+endpoint_host = "https://api.deepseek.com"
+status = "verified"
+decision = "reuse_history"
+graph_nodes = ["load_baseline", "request_history", "execute_history", "send_history_result", "finish"]
+response_ids = { history_request = "595b0020-f945-46a0-846b-3f01e6b729bb", history_followup = "04ce3279-7e95-4c2c-a277-ba05c5999c09" }
+tool_call_id = "call_00_EYwK4whr6AYjR48lZIYM3943"
+request_count = 2
+history_query_count = 1
+evaluation_count = 0
+baseline = { quota = [50, 50], hits = 4, recall_at_100 = 0.011719, coverage = 0.026843, candidates_total = 12800 }
+history = { quota = [30, 70], hits = 5, recall_at_100 = 0.013672, coverage = 0.02672, candidates_total = 12800, fills_total = 0 }
+delta = { hits = 1, recall_at_100 = 0.001953 }
+stop_reason = "历史结果与当前输入和评估口径一致，直接复用，未执行融合评测"
+evidence = ["experiments/2026-11-08-kuasar_small-history-first-agent/metrics.json",
+            "experiments/2026-11-08-kuasar_small-history-first-agent/events.jsonl",
+            "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/30_70.json",
+            "artifacts/kuasar_small/quota_agent/cache_eval/30_70/fusion.json"]
+
+[local_checks.self_check]
+command = "python -m recsys.experiments.history_first_agent --self-check"
+network = 0
+passed = true
+checks = 12
+covers = "查询前评测、未知工具、路径/命令/脚本参数、配额不一致、命中复用、未命中一次评测、未命中停止、多条 tool_calls、命中后请求工具、重复评测、命中后评测、模型请求上限"
+
+[local_checks.regression_miss]
+command = "python -m recsys.experiments.history_first_agent --regression-miss"
+kind = "local_simulation"
+status = "verified"
+decision = "evaluated"
+request_count = 3
+history_query_count = 1
+evaluation_count = 1
+eval_dependency = "fake (replaced)"
+passed = true
+
+[local_checks.regression_timeout_history]
+command = "python -m recsys.experiments.history_first_agent --regression-timeout history"
+kind = "local_simulation"
+status = "partial"
+simulated_cli_exit = 2
+request_count = 2
+history_query_count = 1
+evaluation_count = 0
+tool_result_kept = true
+passed = true
+
+[local_checks.regression_timeout_evaluation]
+command = "python -m recsys.experiments.history_first_agent --regression-timeout evaluation"
+kind = "local_simulation"
+status = "partial"
+simulated_cli_exit = 2
+request_count = 3
+history_query_count = 1
+evaluation_count = 1
+tool_result_kept = true
+passed = true
+
+[local_checks.cache_dir]
+kind = "local_check"
+independent_copy = "artifacts/kuasar_small/history_first_agent/cache_dir_check/mvp_copy"
+check_command = "python -m recsys.experiments.history_first_agent --check-cache --cache-dir artifacts/kuasar_small/history_first_agent/cache_dir_check/mvp_copy"
+check_status = "ok"
+real_eval_command = "python -m recsys.experiments.history_first_agent --regression-miss --real-eval --cache-dir artifacts/kuasar_small/history_first_agent/cache_dir_check/mvp_copy --output-dir artifacts/kuasar_small/history_first_agent/cache_dir_check/output"
+real_eval_status = "verified"
+real_eval_hits = 5
+baseline_cache = "artifacts/kuasar_small/history_first_agent/cache_dir_check/mvp_copy"
+history_cache = "artifacts/kuasar_small/history_first_agent/cache_dir_check/mvp_copy"
+evaluation_cache = "artifacts/kuasar_small/history_first_agent/cache_dir_check/mvp_copy"
+missing_dir = "blocked / CLI exit 2 / 未回退默认目录"
+tampered_recall_mind = "blocked / CLI exit 2 / 基准指纹不一致 recall_mind_sha256"
+history_fingerprint_mismatch = "miss / 指纹不一致 recall_mind_sha256"
+history_partial = "miss / 运行状态 partial 不可复用"
+
+[commands]
+real_run = "python -m recsys.experiments.history_first_agent --experiment-dir experiments/2026-11-08-kuasar_small-history-first-agent --quota 30/70"
+self_check = "python -m recsys.experiments.history_first_agent --self-check"
+regression_miss = "python -m recsys.experiments.history_first_agent --regression-miss"
+regression_timeout_history = "python -m recsys.experiments.history_first_agent --regression-timeout history"
+regression_timeout_evaluation = "python -m recsys.experiments.history_first_agent --regression-timeout evaluation"
+check_cache = "python -m recsys.experiments.history_first_agent --check-cache --cache-dir <dir>"
+old_single_tool = "python -m recsys.experiments.llm_tool_call --experiment-dir experiments/2026-11-08-kuasar_small-langgraph-tool-call"
+note = "未安装 editable 包时，在仓库根目录先执行 $env:PYTHONPATH = \"src\""
+
+[artifacts]
+experiment = "experiments/2026-11-08-kuasar_small-history-first-agent/"
+events = "experiments/2026-11-08-kuasar_small-history-first-agent/events.jsonl"
+metrics = "experiments/2026-11-08-kuasar_small-history-first-agent/metrics.json"
+decision = "experiments/2026-11-08-kuasar_small-history-first-agent/decision.json"
+baseline = "experiments/2026-11-08-kuasar_small-history-first-agent/baseline.json"
+self_check = "experiments/2026-11-08-kuasar_small-history-first-agent/self_check.json"
+local_checks = "experiments/2026-11-08-kuasar_small-history-first-agent/local_checks.json"
+cache_dir_checks = "experiments/2026-11-08-kuasar_small-history-first-agent/cache_dir_check/"
+history_source = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/30_70.json"
+history_candidates = "artifacts/kuasar_small/quota_agent/cache_eval/30_70/fusion.json"
+real_run_candidates = "无（命中历史，评测 0 次，未写候选工件）"

@@ -548,6 +548,65 @@ baseline / report）；候选明细在 `artifacts/kuasar_small/llm_tool_call/cac
 
 ---
 
+### 2.26 Phase 11.2：多工具注册与历史实验复用（2026-11-08，通过）
+
+**目标**：扩展 LangGraph Agent 为「先查历史，未命中才评测」；历史与当前输入/口径一致时
+直接复用并停止。同时修复 `--cache-dir` 不生效：显式目录必须贯穿基准校验、历史匹配和融合评测。
+
+- [x] **工具注册表** `src/recsys/experiments/agent_tools.py`：集中维护
+      `search_experiment_history` / `evaluate_fusion_quota` 的名称、schema、校验与执行函数；
+      参数只允许 `two_tower_quota` / `mind_quota` 两个整数，路径/命令/自定义脚本一律拒绝；
+      LangGraph 只通过注册表执行注册过的工具
+- [x] **历史匹配** `src/recsys/experiments/experiment_history.py`：核对数据集/验证切分、
+      128 固定用户与两路候选缓存文件 sha256、模型 checkpoint sha256、目标配额、
+      每用户 100 候选预算、融合顺序/去重/补位/来源与指标口径；并核对 `fusion.json` 工件的
+      配额、预算、池大小和逐用户统计。旧 run 无规则版本字段时，用同一实验目录的
+      `config.toml` + 工件确认兼容（`legacy_record: true`）；`partial`/失败/证据不足返回 `miss`
+- [x] **历史优先工作流** `src/recsys/experiments/history_first_agent.py`：
+      `load_baseline → request_history → execute_history → send_history_result`；
+      命中直接 `finish`；未命中且模型选择评测才进入 `execute_eval → send_eval_result → finish`。
+      第一次请求只开放历史工具，命中后评测工具不开放；程序校验请求/查询/评测次数与同 ID 回传
+- [x] **真实 LLM 运行通过（1 次）**：deepseek-chat 返回 1 条原生 `tool_calls`
+      （`call_00_EYwK4whr6AYjR48lZIYM3943`，30/70），程序命中 Phase 11 已落盘记录并用同 ID 回传；
+      模型引用 **5 个命中、Recall@100 0.013672**（基准 50/50 为 4 / 0.011719，多 1 个目标）后停止。
+      `decision: reuse_history`、**评测 0 次**、2 次请求 / 1 次历史查询 / 2.21 s
+- [x] **未命中分支（本地模拟）**：临时历史目录无 30/70 记录时，图允许一次评测、同 ID 回传并收尾
+      （verified / evaluated / 3 请求 / 评测 1）；`--self-check` 12 项覆盖查询前评测、未知工具、
+      夹带路径/命令/脚本、非法配额、多条 tool_calls、命中后评测、重复评测与请求上限
+- [x] **非默认缓存目录（本地检查）**：独立复制 `mvp_copy` 后，基准校验、历史查询和真实融合评测
+      全部使用该目录（`evidence.cache` 一致，评测命中 5）；缺失目录与篡改 `recall_mind.json`
+      的副本均返回 blocked + CLI 2，未回退默认缓存
+- [x] **回传失败（本地模拟）**：历史命中后最终请求超时、评测成功后最终请求超时，均为
+      `partial`、模拟 CLI 2、工具结果保留、不写 `verified`
+- [x] **旧入口保留**：`python -m recsys.experiments.llm_tool_call --experiment-dir ...` 调用方式不变；
+      该模块的 `--cache-dir` 也改为从 CLI 状态贯穿基准校验与工具执行
+- 范围：训练 0、重新召回 0、推荐全链路 0、测试集评估 0；未覆盖旧缓存/旧实验
+
+**交付**：`experiments/2026-11-08-kuasar_small-history-first-agent/`
+（config / events / metrics / decision / baseline / local_checks / report；
+未命中与超时回归在 `regression_miss/`、`regression_timeout_*/`；
+缓存目录检查在 `cache_dir_check/`）。
+
+**复现**：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m recsys.experiments.history_first_agent `
+  --experiment-dir experiments/2026-11-08-kuasar_small-history-first-agent --quota 30/70
+python -m recsys.experiments.history_first_agent --self-check
+python -m recsys.experiments.history_first_agent --regression-miss
+python -m recsys.experiments.history_first_agent --regression-timeout history
+python -m recsys.experiments.history_first_agent --regression-timeout evaluation
+```
+
+证据：[report.md](experiments/2026-11-08-kuasar_small-history-first-agent/report.md)、
+[metrics.json](experiments/2026-11-08-kuasar_small-history-first-agent/metrics.json)、
+[events.jsonl](experiments/2026-11-08-kuasar_small-history-first-agent/events.jsonl)、
+[decision.json](experiments/2026-11-08-kuasar_small-history-first-agent/decision.json)、
+[local_checks.json](experiments/2026-11-08-kuasar_small-history-first-agent/local_checks.json)。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -609,7 +668,9 @@ baseline / report）；候选明细在 `artifacts/kuasar_small/llm_tool_call/cac
       同 `tool_call_id` 回传，2 次请求 / 1 次工具 / 3.05 s，见 2.24）
 - [x] Phase 11 LangGraph 工作流：**真实运行 + 失败路径回归通过**（见 2.25）；
       误报修复：第二次请求失败不再写 `verified`
-- [ ] Phase 11 完整版：更多工具注册、RAG、Agent 对照实验
+- [x] Phase 11.2 多工具注册 + 历史实验复用：**真实运行通过**（30/70 命中历史，
+      5 个命中 / Recall@100 0.013672，评测 0 次，见 2.26）；`--cache-dir` 已贯穿全流程
+- [ ] Phase 11 完整版：RAG、Agent 对照实验（工具注册与历史复用已完成）
 - [ ] Phase 12–13 RAG、Agent 对照实验
 
 ---

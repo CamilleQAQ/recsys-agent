@@ -1,0 +1,218 @@
+{
+  "self_check": {
+    "passed": true,
+    "checks": [
+      "查询前评测被拦截（blocked，拒绝执行）",
+      "未知工具被拒绝",
+      "路径/命令/自定义脚本参数被拒绝",
+      "历史查询参数与任务目标不一致被拒绝",
+      "历史命中：verified / reuse_history / 评测 0 次",
+      "未命中：一次评测 + 同 ID 回传 + 最终回复（3 次请求）",
+      "未命中时模型可说明原因停止（评测 0 次）",
+      "多条 tool_calls 被拒绝（未执行评测）",
+      "历史命中后请求工具不落成功分支（partial，评测 0 次）",
+      "命中历史后评测守卫生效",
+      "重复评测守卫生效",
+      "模型请求次数上限生效（未发出额外请求）"
+    ]
+  },
+  "regression_miss": {
+    "mode": "local_miss_then_evaluate",
+    "history_root": "experiments\\2026-11-08-kuasar_small-history-first-agent\\regression_miss\\history_miss",
+    "cache_dir": "artifacts\\kuasar_small\\mvp",
+    "real_eval": false,
+    "status": "verified",
+    "decision": "evaluated",
+    "request_count": 3,
+    "history_query_count": 1,
+    "evaluation_count": 1,
+    "chat_calls": 3,
+    "fake_eval_calls": 1,
+    "history_reason": "历史实验目录里没有 30/70 的落盘记录",
+    "checks": {
+      "status_verified": true,
+      "decision_evaluated": true,
+      "history_query_once": true,
+      "history_miss": true,
+      "evaluation_once": true,
+      "request_count_3": true,
+      "history_call_id_returned": true,
+      "eval_call_id_returned": true,
+      "eval_result_kept": true,
+      "tool_order_history_first": true,
+      "cache_dir_used_by_eval": true,
+      "no_verified_on_partial_path": true
+    },
+    "passed": true,
+    "metrics_file": "experiments\\2026-11-08-kuasar_small-history-first-agent\\regression_miss\\metrics.json"
+  },
+  "regression_timeout_history": {
+    "mode": "final_request_timeout_after_history",
+    "cache_dir": "artifacts\\kuasar_small\\mvp",
+    "status": "partial",
+    "simulated_cli_exit": 2,
+    "request_count": 2,
+    "history_query_count": 1,
+    "evaluation_count": 0,
+    "error": "第 2 次模型请求失败：simulated timeout on final request (history)",
+    "checks": {
+      "status_partial": true,
+      "simulated_cli_exit_2": true,
+      "request_count_expected": true,
+      "history_query_once": true,
+      "not_verified": true,
+      "error_recorded": true,
+      "history_result_kept": true,
+      "tool_result_kept": true,
+      "history_hit": true,
+      "evaluation_count_0": true
+    },
+    "passed": true,
+    "metrics_file": "experiments\\2026-11-08-kuasar_small-history-first-agent\\regression_timeout_history\\metrics.json"
+  },
+  "regression_timeout_evaluation": {
+    "mode": "final_request_timeout_after_evaluation",
+    "cache_dir": "artifacts\\kuasar_small\\mvp",
+    "status": "partial",
+    "simulated_cli_exit": 2,
+    "request_count": 3,
+    "history_query_count": 1,
+    "evaluation_count": 1,
+    "error": "第 3 次模型请求失败：simulated timeout on final request (evaluation)",
+    "checks": {
+      "status_partial": true,
+      "simulated_cli_exit_2": true,
+      "request_count_expected": true,
+      "history_query_once": true,
+      "not_verified": true,
+      "error_recorded": true,
+      "history_result_kept": true,
+      "tool_result_kept": true,
+      "evaluation_count_1": true,
+      "eval_result_kept": true
+    },
+    "passed": true,
+    "metrics_file": "experiments\\2026-11-08-kuasar_small-history-first-agent\\regression_timeout_evaluation\\metrics.json"
+  },
+  "cache_check": {
+    "status": "ok",
+    "cache_dir": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\mvp_copy",
+    "cache_dir_source": "cli",
+    "input_hashes": {
+      "dataset": "kuasar_small",
+      "users": 2000,
+      "items": 454717,
+      "split_strategy": "per_user_last_two_requests",
+      "split_sha256": {
+        "train": "c62df14cbc3e0aacd96b9b57793876d3248c0dbc6677daad3aeacc9e0f5dbd91",
+        "validation": "000681165b44f89984629f87c4d82b16e7b926070794f9805805cf802037119e",
+        "test": "d6b5c0e8a96bef2164ce723b97925b2f15e0ee59f1acd4f84e135eae70cd6dc0"
+      },
+      "id_mapping_sha256": "b7d230622f6b690a8c816cdb6dc6885d43f4715818335bd13582ca2e00094517",
+      "checkpoints": {
+        "two_tower": {
+          "path": "artifacts\\kuasar_small\\two_tower_features.pt",
+          "sha256": "784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b"
+        },
+        "mind": {
+          "path": "artifacts\\kuasar_small\\mind20.pt",
+          "sha256": "eba017182142a8d09183ccf93de99d53535b32830de0a27bbdfad70d40ff9dac"
+        }
+      },
+      "routing_seed": 1234,
+      "k_recall": 100,
+      "users_file_sha256": "df9e25e3c274aa12f3c3a2d959ce5bef95ca66db71afa23f2ca30fbb18bfaef5",
+      "recall_two_tower_sha256": "787f9edb65b7377d7d1ea3bc5460ccdeb2a97dfda5ac76a90f81b79b6fc397f9",
+      "recall_mind_sha256": "58bc654950a079b3b167f0a190262335d5bf3f823c09e040af74b0168a75d52c"
+    },
+    "baseline": {
+      "quota": {
+        "two_tower": 50,
+        "mind": 50
+      },
+      "users": 128,
+      "targets": 362,
+      "hits": 4,
+      "recall_at_100": 0.011719,
+      "coverage": 0.026843,
+      "candidates_total": 12800
+    },
+    "evidence": {
+      "run": "experiments\\2026-11-08-kuasar_small-fusion-quota-agent\\runs\\50_50.json",
+      "fusion": "artifacts\\kuasar_small\\quota_agent\\cache_eval\\50_50\\fusion.json",
+      "cache": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\mvp_copy"
+    }
+  },
+  "cache_missing": {
+    "status": "blocked",
+    "cache_dir": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\does_not_exist",
+    "cache_dir_source": "cli",
+    "error": "缓存目录不存在：artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\does_not_exist"
+  },
+  "cache_tampered": {
+    "status": "blocked",
+    "cache_dir": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\mvp_tampered",
+    "cache_dir_source": "cli",
+    "error": "基准指纹与当前缓存不一致：['recall_mind_sha256']"
+  },
+  "cache_dir_real_eval": {
+    "mode": "local_miss_then_evaluate",
+    "history_root": "experiments\\2026-11-08-kuasar_small-history-first-agent\\cache_dir_check\\regression_miss\\history_miss",
+    "cache_dir": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\mvp_copy",
+    "real_eval": true,
+    "status": "verified",
+    "decision": "evaluated",
+    "request_count": 3,
+    "history_query_count": 1,
+    "evaluation_count": 1,
+    "chat_calls": 3,
+    "fake_eval_calls": 0,
+    "history_reason": "历史实验目录里没有 30/70 的落盘记录",
+    "checks": {
+      "status_verified": true,
+      "decision_evaluated": true,
+      "history_query_once": true,
+      "history_miss": true,
+      "evaluation_once": true,
+      "request_count_3": true,
+      "history_call_id_returned": true,
+      "eval_call_id_returned": true,
+      "eval_result_kept": true,
+      "tool_order_history_first": true,
+      "cache_dir_used_by_eval": true,
+      "no_verified_on_partial_path": true,
+      "real_eval_hits_5": true,
+      "real_eval_evidence_under_output": true
+    },
+    "passed": true,
+    "metrics_file": "experiments\\2026-11-08-kuasar_small-history-first-agent\\cache_dir_check\\regression_miss\\metrics.json"
+  },
+  "history_matching": {
+    "fingerprint_mismatch": {
+      "status": "miss",
+      "reason": "找到 1 条 30/70 记录，但没有一条同时满足缓存文件哈希、候选预算与融合/指标口径",
+      "rejected": [
+        {
+          "run": "experiments\\2026-11-08-kuasar_small-history-first-agent\\cache_dir_check\\history_fingerprint_mismatch\\runs\\30_70.json",
+          "reasons": [
+            "指纹不一致 recall_mind_sha256",
+            "工件指纹与 run 记录不一致"
+          ]
+        }
+      ]
+    },
+    "partial": {
+      "status": "miss",
+      "reason": "找到 1 条 30/70 记录，但没有一条同时满足缓存文件哈希、候选预算与融合/指标口径",
+      "rejected": [
+        {
+          "run": "experiments\\2026-11-08-kuasar_small-history-first-agent\\cache_dir_check\\history_partial\\runs\\30_70.json",
+          "reasons": [
+            "运行状态不可复用：partial",
+            "运行记录了错误：simulated partial"
+          ]
+        }
+      ]
+    }
+  }
+}

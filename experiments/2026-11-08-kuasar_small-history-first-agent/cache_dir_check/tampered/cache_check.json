@@ -1,0 +1,6 @@
+{
+  "status": "blocked",
+  "cache_dir": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\mvp_tampered",
+  "cache_dir_source": "cli",
+  "error": "基准指纹与当前缓存不一致：['recall_mind_sha256']"
+}

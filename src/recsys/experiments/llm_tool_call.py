@@ -156,12 +156,15 @@ def extract_single_tool_call(response: dict, *, baseline_quota: tuple[int, int])
     return {"id": call["id"], "name": TOOL_NAME, "quota": quota, "message": message}
 
 
-def load_baseline() -> tuple[dict, dict]:
-    """读取已落盘的 50/50 基准，并核对缓存指纹仍与当前一致。"""
+def load_baseline(cache_dir: Path = DEFAULT_CACHE) -> tuple[dict, dict]:
+    """读取已落盘的 50/50 基准，并核对 CLI 指定目录的缓存指纹仍与当前一致。"""
+    cache_dir = Path(cache_dir)
+    if not cache_dir.exists():
+        raise VerificationError(f"缓存目录不存在：{cache_dir}")
     if not BASELINE_RUN.exists():
         raise VerificationError(f"缺少基准文件：{BASELINE_RUN}（先跑 2.23 的本地 Agent）")
     baseline = json.loads(BASELINE_RUN.read_text(encoding="utf-8"))
-    context = load_context(DEFAULT_CACHE)
+    context = load_context(cache_dir)
     current = context.fingerprints
     recorded = baseline.get("evidence", {}).get("fingerprints", {})
     keys = ("users", "items", "split_strategy", "split_sha256", "id_mapping_sha256", "routing_seed", "k_recall")
@@ -177,6 +180,7 @@ def load_baseline() -> tuple[dict, dict]:
         "users": baseline["users"],
         "targets": baseline["targets"],
         "fingerprints_verified": True,
+        "cache_dir": str(cache_dir),
     }
     return based_on, current
 
@@ -228,6 +232,7 @@ class AgentState(TypedDict, total=False):
     started: float
     deadline: float
     config: dict
+    cache_dir: str
     baseline: dict
     fingerprints: dict
     request_count: int
@@ -244,7 +249,7 @@ class AgentState(TypedDict, total=False):
 
 ChatFn = Callable[..., dict]
 EvalFn = Callable[..., dict]
-BaselineFn = Callable[[], tuple[dict, dict]]
+BaselineFn = Callable[[Path], tuple[dict, dict]]
 
 
 def _remaining(state: AgentState) -> float:
@@ -281,15 +286,29 @@ def node_load_baseline(state: AgentState, baseline_fn: BaselineFn) -> AgentState
         state["error"] = "缺少真实 LLM 配置"
         _event(state, {"event": "blocked", "reason": state["error"]})
         return _leave(state, "load_baseline")
+    cache_dir = state.get("cache_dir")
+    if not cache_dir:
+        state["status"] = "blocked"
+        state["error"] = "缺少缓存目录状态"
+        _event(state, {"event": "blocked", "reason": state["error"]})
+        return _leave(state, "load_baseline")
     try:
-        baseline, fingerprints = baseline_fn()
+        baseline, fingerprints = baseline_fn(Path(cache_dir))
     except (VerificationError, QuotaError) as error:
         state["status"] = "blocked"
         state["error"] = str(error)
-        _event(state, {"event": "blocked", "reason": str(error)})
+        _event(state, {"event": "blocked", "reason": str(error), "cache_dir": cache_dir})
         return _leave(state, "load_baseline")
     state["baseline"] = baseline
     state["fingerprints"] = fingerprints
+    _event(
+        state,
+        {
+            "event": "cache_identity",
+            "cache_dir": cache_dir,
+            "input_hashes": fingerprints,
+        },
+    )
     _event(state, {"event": "baseline_loaded", "baseline": baseline})
     return _leave(state, "load_baseline")
 
@@ -360,7 +379,7 @@ def node_execute_tool(state: AgentState, eval_fn: EvalFn) -> AgentState:
         result = eval_fn(
             quota[0],
             quota[1],
-            cache_dir=DEFAULT_CACHE,
+            cache_dir=Path(state["cache_dir"]),
             output_dir=OUTPUT_ROOT,
             tag=f"{quota[0]}_{quota[1]}",
         )
@@ -550,6 +569,10 @@ def _finalize(state: AgentState, experiment_dir: Path) -> dict:
         "tool_calls": int(state.get("tool_calls", 0)),
         "response_ids": state.get("response_ids", {}),
         "tool_call_id": state.get("tool_call_id"),
+        "cache": {
+            "dir": state.get("cache_dir"),
+            "fingerprints": state.get("fingerprints"),
+        },
         "baseline": state.get("baseline"),
         "chosen": state.get("tool_result"),
         "conclusion": state.get("conclusion"),
@@ -582,6 +605,7 @@ def run(experiment_dir: Path, *, cache_dir: Path = DEFAULT_CACHE) -> dict:
             "events": [{"event": "blocked", "reason": f"缺少真实 LLM 配置：{', '.join(missing)}"}],
             "started": started,
             "deadline": started + BUDGET_SECONDS,
+            "cache_dir": str(cache_dir),
             "request_count": 0,
             "tool_calls": 0,
             "response_ids": {},
@@ -597,6 +621,7 @@ def run(experiment_dir: Path, *, cache_dir: Path = DEFAULT_CACHE) -> dict:
         "started": started,
         "deadline": started + BUDGET_SECONDS,
         "config": config,
+        "cache_dir": str(cache_dir),
         "request_count": 0,
         "tool_calls": 0,
         "response_ids": {},
@@ -678,12 +703,17 @@ def run_regression(experiment_dir: Path) -> dict:
         "started": started,
         "deadline": started + BUDGET_SECONDS,
         "config": {"model": "fake-model", "base_url": "http://127.0.0.1", "api_key": "fake"},
+        "cache_dir": "fake-cache",
         "baseline": baseline,
         "request_count": 0,
         "tool_calls": 0,
         "response_ids": {},
     }
-    graph = build_graph(chat_fn=fake_chat, eval_fn=fake_eval, baseline_fn=lambda: (baseline, {}))
+    graph = build_graph(
+        chat_fn=fake_chat,
+        eval_fn=fake_eval,
+        baseline_fn=lambda cache_dir: (baseline, {}),
+    )
     final_state = graph.invoke(state)
     summary = _finalize(final_state, experiment_dir)
 

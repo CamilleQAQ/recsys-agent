@@ -1,0 +1,49 @@
+# Phase 11 Research Agent MVP：融合配额对照（2026-11-08）
+
+[task]
+question = "每个用户最多保留 100 个候选时，双塔和 MIND 怎么分配配额才能保留更多验证目标？"
+dataset = "kuasar_small"
+fixed_users = 128
+validation_targets = 362
+candidate_budget_per_user = 100
+objective = "命中目标数优先，Recall@100 次之；持平时保留基准"
+
+[inputs]
+cache_dir = "artifacts/kuasar_small/mvp"
+users = "users.json（原始 user_id，经映射核对为 128 个内部 user_idx）"
+two_tower_recall = "recall_two_tower.json（Top-100，内部 item_idx）"
+mind_recall = "recall_mind.json（Top-100，内部 item_idx）"
+fingerprints = "run_meta.json + 逐文件 sha256（见每次评测的 evidence.fingerprints）"
+
+[fusion_rule]
+order = ["two_tower", "mind"]
+quota_consumption = "只有成功加入新物品才消耗该通道配额；重复项跳过且不消耗配额"
+fill_rule = "一路配额用尽/耗尽时另一路补位，记录 fills"
+source_trace = "每个候选记录所有通道的原始名次；不跨通道比较分数"
+max_candidates = 100
+
+[allowed_quotas]
+pairs = [[50, 50], [70, 30], [30, 70], [80, 20], [20, 80]]
+
+[budget]
+max_evals = 3
+seconds = 180
+actual = { evals = 3, elapsed_s = 1.37 }
+
+[agent]
+first_run = "50/50（协议强制，不由 LLM 决定）"
+decision_source = "local_policy"
+llm_configured = false
+llm_env = ["DSH_AGENT_LLM_BASE_URL", "DSH_AGENT_LLM_API_KEY", "DSH_AGENT_LLM_MODEL"]
+llm_status = "工具闭环与 LLM 调用路径已实现；本机未配置 LLM，真实 LLM 决策轨迹待验收"
+
+[commands]
+tool = "python -m recsys.experiments.fusion_quota --two-tower 50 --mind 50"
+agent = "python -m recsys.experiments.quota_agent --experiment-dir experiments/2026-11-08-kuasar_small-fusion-quota-agent --budget-seconds 180"
+self_check = "python -m recsys.experiments.quota_agent --self-check"
+
+[artifacts]
+candidate_details = "artifacts/kuasar_small/quota_agent/cache_eval/<quota>/fusion.json"
+per_run_metrics = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/*.json"
+decision_log = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/events.jsonl"
+agent_result = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/metrics.json"

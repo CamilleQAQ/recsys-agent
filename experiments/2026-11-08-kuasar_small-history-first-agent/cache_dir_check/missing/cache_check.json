@@ -1,0 +1,6 @@
+{
+  "status": "blocked",
+  "cache_dir": "artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\does_not_exist",
+  "cache_dir_source": "cli",
+  "error": "缓存目录不存在：artifacts\\kuasar_small\\history_first_agent\\cache_dir_check\\does_not_exist"
+}
