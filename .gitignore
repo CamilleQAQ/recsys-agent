@@ -15,6 +15,11 @@ dist/
 venv/
 env/
 
+# 本地密钥与运行时配置（LLM API key 等），只提交模板
+.env
+.env.*
+!.env.example
+
 # 运行时数据与实验产物（目录结构保留在 data/README.md、artifacts/README.md）
 data/raw/
 data/processed/

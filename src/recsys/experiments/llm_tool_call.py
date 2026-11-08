@@ -58,6 +58,27 @@ def sha_json(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+def load_dotenv(path: Path | None = None) -> bool:
+    """读取仓库根目录的 ``.env``（若存在），只补未设置的环境变量。
+
+    只用于本地开发便利：不覆盖已存在的环境变量，不打印任何值。
+    返回是否成功读取到文件。
+    """
+    env_path = path or Path(__file__).resolve().parents[3] / ".env"
+    if not env_path.exists():
+        return False
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+    return True
+
+
 def llm_config() -> dict[str, str] | None:
     values = {name: os.environ.get(name, "").strip() for name in LLM_ENV}
     if not all(values.values()):
@@ -286,6 +307,7 @@ def run(experiment_dir: Path, *, cache_dir: Path = DEFAULT_CACHE) -> dict:
     def remaining() -> float:
         return BUDGET_SECONDS - (time.perf_counter() - started)
 
+    load_dotenv()  # 本地 .env 只补未设置的环境变量
     config = llm_config()
     if config is None:
         missing = [name for name in LLM_ENV if not os.environ.get(name)]

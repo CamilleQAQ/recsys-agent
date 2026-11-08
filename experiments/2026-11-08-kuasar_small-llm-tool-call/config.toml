@@ -20,8 +20,10 @@ not_sent_to_model = ["原始 user_id / item_id", "候选明细", "验证标签",
 
 [llm]
 env = ["DSH_AGENT_LLM_BASE_URL", "DSH_AGENT_LLM_API_KEY", "DSH_AGENT_LLM_MODEL"]
+dotenv = ".env（仓库根目录，已 gitignore；.env.example 是模板）"
+dotenv_rule = "只补未设置的环境变量，优先使用进程环境变量，不打印值"
 configured = false
-status = "blocked: 缺少上述环境变量，未发起任何网络请求"
+status = "blocked: 缺少 API key，未发起任何网络请求"
 
 [tool]
 name = "evaluate_fusion_quota"

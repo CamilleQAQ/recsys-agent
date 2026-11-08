@@ -52,12 +52,23 @@
 
 ## 配置密钥后的运行方式
 
+推荐直接填仓库根目录的 `.env`（已被 `.gitignore` 忽略，不会提交；模板见 `.env.example`）：
+
+```powershell
+# 编辑 .env：把 DSH_AGENT_LLM_API_KEY= 后面填上 key
+python -m recsys.experiments.llm_tool_call --experiment-dir experiments/2026-11-08-kuasar_small-llm-tool-call
+```
+
+也可以临时用环境变量（优先于 `.env`）：
+
 ```powershell
 $env:DSH_AGENT_LLM_BASE_URL='https://api.deepseek.com/v1'
 $env:DSH_AGENT_LLM_API_KEY='<你的 key>'
 $env:DSH_AGENT_LLM_MODEL='deepseek-chat'
 python -m recsys.experiments.llm_tool_call --experiment-dir experiments/2026-11-08-kuasar_small-llm-tool-call
 ```
+
+入口会读取 `.env`，只补未设置的环境变量、不打印值；日志只记录 model 名与 endpoint host。
 
 成功时 `metrics.json` 会包含：`status: verified`、`response_ids`、`tool_call_id`、
 `baseline` 与 `chosen` 的命中数 / Recall@100 / Coverage、`delta_*`、模型最终回复与预算使用情况。

@@ -1,6 +1,6 @@
 {
   "status": "blocked",
-  "reason": "缺少真实 LLM 配置：DSH_AGENT_LLM_BASE_URL, DSH_AGENT_LLM_API_KEY, DSH_AGENT_LLM_MODEL",
+  "reason": "缺少真实 LLM 配置：DSH_AGENT_LLM_API_KEY",
   "llm_env": [
     "DSH_AGENT_LLM_BASE_URL",
     "DSH_AGENT_LLM_API_KEY",
