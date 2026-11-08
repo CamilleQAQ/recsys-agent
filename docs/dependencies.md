@@ -21,6 +21,7 @@
 | G Linux 多卡 | 3.10+ | torch>=2.6, verl, vllm, ray | OpenOneRec、generative-recommenders | 上游 README，需外部权重 |
 | H 生成式（genrec） | 3.9+ | torch==2.6, transformers==4.57, gin_config, wandb, sentence_transformers | TIGER/RPG/COBRA/LC-Rec | 上游 README，需物品 embedding |
 | **I torch-rechub** | 3.10+ | torch>=2.6, numpy<3, pandas, scikit-learn, tqdm | **MIND**（本机已跑通）；DIN/DIEN/DCNv2/DSSM 等 30+ 模型可按需接入 | `pip install torch-rechub==1.0.0` + `requirements/optional-rechub.txt` |
+| **J Agent（LangGraph）** | 3.10+ | langgraph==1.2.20, langchain-core | Phase 11 工具调用工作流（`llm_tool_call`） | `requirements/optional-agent.txt`；不装时入口报缺依赖 |
 
 ## 版本冲突与处理
 

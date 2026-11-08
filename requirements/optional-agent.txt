@@ -1,0 +1,2 @@
+# Agent 工作流（Phase 11）：LangGraph。只有真实 LLM 工具调用验收才需要。
+langgraph==1.2.20

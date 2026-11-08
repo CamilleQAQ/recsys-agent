@@ -66,6 +66,7 @@ experiments/
 | 2026-11-08 | [kuasar_small-recsys-mvp](2026-11-08-kuasar_small-recsys-mvp/report.md) | kuasar_small（128 验证用户） | 双路召回→名次融合→LightGBM→类目重排全链路跑通，10.0 s / 1,379 MiB；Top-20 指标为 0（样本量），Top-100 命中 9 用于核对链路 |
 | 2026-11-08 | [kuasar_small-fusion-quota-agent](2026-11-08-kuasar_small-fusion-quota-agent/report.md) | kuasar_small（128 验证用户） | Phase 11 Agent MVP：配额 50/50→30/70→20/80 三组实评，30/70 命中 5（基准 4）；本地策略跑通，真实 LLM 待验收 |
 | 2026-11-08 | [kuasar_small-llm-tool-call](2026-11-08-kuasar_small-llm-tool-call/report.md) | kuasar_small（128 验证用户） | 真实 LLM 原生 tool_calls **验收通过**：deepseek-chat 选 70/30，程序评测（命中 3 vs 基准 4）并同 `tool_call_id` 回传；2 请求/1 工具/3.05 s |
+| 2026-11-08 | [kuasar_small-langgraph-tool-call](2026-11-08-kuasar_small-langgraph-tool-call/report.md) | kuasar_small（128 验证用户） | LangGraph 状态图接入：真实运行通过（节点顺序可核对、同 ID 回传、70/30 命中 3 vs 基准 4）；第二次请求失败回归得 `partial` + 非零，修复误报 |
 
 权重不入库，只记路径 / sha256 / provenance（见各目录的 `checkpoint.txt`）。
 下一个实验按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。

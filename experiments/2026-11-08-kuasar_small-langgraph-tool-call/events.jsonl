@@ -1,0 +1,19 @@
+{"event": "llm_config", "model": "deepseek-chat", "endpoint_host": "https://api.deepseek.com"}
+{"event": "node_start", "node": "load_baseline"}
+{"event": "baseline_loaded", "baseline": {"quota": {"two_tower": 50, "mind": 50}, "hits": 4, "recall_at_100": 0.011719, "coverage": 0.026843, "candidates_total": 12800, "users": 128, "targets": 362, "fingerprints_verified": true}}
+{"event": "node_end", "node": "load_baseline", "status": "running"}
+{"event": "node_start", "node": "request_tool_call"}
+{"event": "llm_request", "request": 1, "timeout_s": 30.0, "tools": true}
+{"event": "llm_response", "request": 1, "response_id": "1eac8b8c-fa61-472a-928c-89787993f022", "tool_calls": [{"id": "call_00_QJo2I5RFwJnSMQZrg8Ru7198", "type": "function", "name": "evaluate_fusion_quota", "arguments": "{\"two_tower_quota\": 70, \"mind_quota\": 30}"}], "content_preview": ""}
+{"event": "tool_call_accepted", "tool_call_id": "call_00_QJo2I5RFwJnSMQZrg8Ru7198", "quota": [70, 30]}
+{"event": "node_end", "node": "request_tool_call", "status": "running"}
+{"event": "node_start", "node": "execute_tool"}
+{"event": "tool_executed", "tool_call_id": "call_00_QJo2I5RFwJnSMQZrg8Ru7198", "quota": {"two_tower": 70, "mind": 30}, "result": {"users": 128, "targets": 362, "candidates_total": 12800, "candidates_mean": 100.0, "fills_total": 0, "hits": 3, "recall_at_100": 0.009115, "coverage": 0.026905, "elapsed_s": 0.42}, "tool_elapsed_s": 0.44, "evidence": "artifacts\\kuasar_small\\langgraph_tool_call\\cache_eval\\70_30\\fusion.json"}
+{"event": "node_end", "node": "execute_tool", "status": "running"}
+{"event": "node_start", "node": "send_result"}
+{"event": "tool_result_sent", "tool_call_id": "call_00_QJo2I5RFwJnSMQZrg8Ru7198", "request": 2, "timeout_s": 30.0}
+{"event": "llm_final", "response_id": "8804ca67-39ac-4a35-ae06-a72265396c2c", "content": "双塔 70 / MIND 30 的命中数为 3，低于基准的 4，Recall@100 为 0.009115，也低于基准的 0.011719，因此不如基准，停止评测。"}
+{"event": "node_end", "node": "send_result", "status": "running"}
+{"event": "node_start", "node": "finish"}
+{"event": "finish", "status": "verified", "error": null}
+{"event": "node_end", "node": "finish", "status": "verified"}

@@ -528,6 +528,26 @@ baseline / report）；候选明细在 `artifacts/kuasar_small/llm_tool_call/cac
 
 ---
 
+### 2.25 Phase 11：LangGraph 接入与失败路径回归（2026-11-08，通过）
+
+- [x] `llm_tool_call.py` 改为 LangGraph 状态图：`load_baseline → request_tool_call → execute_tool →
+      send_result → finish`，条件边按 `status/error` 分流，失败分支直接进 `finish`；CLI 调用方式不变
+- [x] 依赖：`requirements/optional-agent.txt`（`langgraph==1.2.20`），作为 Agent 可选依赖
+- [x] **修复误报**：只有「合法 tool_call → 工具执行成功 → 同 ID 回传 → 收到非空且不再请求工具的最终回复」
+      才写 `verified`；第二次请求失败/空回复/再次请求工具写 `partial` 并返回非零
+- [x] **真实 LangGraph 运行通过**：deepseek-chat 返回 1 条 `tool_calls`（70/30），
+      2 次请求 / 1 次工具执行 / 2.81 s；节点顺序与 `tool_call_id` 回传均在 `events.jsonl` 可核对；
+      结果：70/30 命中 3 vs 基准 4（Recall@100 0.009115 vs 0.011719），保留基准
+- [x] **失败路径回归通过**（不联网、不读缓存）：注入「第二次请求超时」，
+      得到 `status: partial`、模拟 CLI 退出码 2、请求计数 2、工具执行 1、工具结果保留、无 `verified`
+- [x] 调试记录：首次真实运行因 assistant 消息缺 `role` 被服务商 422 拒绝，被正确记为 `partial`；
+      修复后重跑成功。候选工件改写到独立目录 `artifacts/kuasar_small/langgraph_tool_call/`，不覆盖 2.24
+
+**交付**：`experiments/2026-11-08-kuasar_small-langgraph-tool-call/`
+（config / metrics / events / baseline / report / regression_second_request_timeout/）。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -587,7 +607,9 @@ baseline / report）；候选明细在 `artifacts/kuasar_small/llm_tool_call/cac
       3 组评测，见 2.23）
 - [x] Phase 11 真实 LLM tool-calling：**已验收**（deepseek-chat 返回 1 条 `tool_calls`，
       同 `tool_call_id` 回传，2 次请求 / 1 次工具 / 3.05 s，见 2.24）
-- [ ] Phase 11 完整版：LangGraph 工作流、更多工具注册
+- [x] Phase 11 LangGraph 工作流：**真实运行 + 失败路径回归通过**（见 2.25）；
+      误报修复：第二次请求失败不再写 `verified`
+- [ ] Phase 11 完整版：更多工具注册、RAG、Agent 对照实验
 - [ ] Phase 12–13 RAG、Agent 对照实验
 
 ---
@@ -685,6 +707,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-08 | **离线 MVP** | 新增 `recsys_mvp`：128 用户双路召回（双塔 + MIND）→ 名次融合（≤100，来源可追溯）→ LightGBM（父 train 工件 9,997 行 / 20 轮）→ 类目重排（每类 ≤5）；自动断言全过；10.0 s / 1,379 MiB；Top-20 指标为 0（样本量限制），Top-100 命中 9 记录在 diagnostics | `src/recsys/experiments/recsys_mvp.py`、`src/recsys/adapters/ranking.py`、`experiments/2026-11-08-kuasar_small-recsys-mvp/` |
 | 2026-11-08 | **Phase 11 Agent MVP** | 新增 `evaluate_fusion_quota` 工具与 `quota_agent`：先 50/50 基准，再按上下文选 30/70、20/80；3 组评测 1.37 s；结论 30/70（命中 5 vs 基准 4）；工具/决策/候选明细全落盘；真实 LLM 待配置 | `src/recsys/experiments/fusion_quota.py`、`src/recsys/experiments/quota_agent.py`、`experiments/2026-11-08-kuasar_small-fusion-quota-agent/` |
 | 2026-11-08 | **Phase 11 验收（LLM）** | 真实 tool_calls 验收**通过**：deepseek-chat 返回 1 条 `tool_calls`（70/30），程序执行评测并同 ID 回传，模型判其输给基准；2 请求/1 工具/3.05 s；前两次尝试因代码 bug 与并行 tool_calls 被拒（未执行工具） | `src/recsys/experiments/llm_tool_call.py`、`experiments/2026-11-08-kuasar_small-llm-tool-call/` |
+| 2026-11-08 | **Phase 11 LangGraph** | 入口改为 LangGraph 状态图；修复第二次请求失败仍写 verified 的误报（改为 partial + 非零退出）；真实运行通过（70/30，2 请求/1 工具/2.81 s）；失败路径回归通过（partial、请求 2、工具 1、无 verified） | `src/recsys/experiments/llm_tool_call.py`、`requirements/optional-agent.txt`、`experiments/2026-11-08-kuasar_small-langgraph-tool-call/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。

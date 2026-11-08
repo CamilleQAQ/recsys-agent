@@ -1,0 +1,69 @@
+# Phase 11：LangGraph 工具调用验收（2026-11-08）
+
+[task]
+goal = "把真实 LLM tool_calls 流程接入 LangGraph，并修复第二次请求失败仍写 verified 的误报"
+dataset = "kuasar_small"
+fixed_users = 128
+validation_targets = 362
+candidate_budget_per_user = 100
+baseline = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/50_50.json（50/50，已核对指纹）"
+allowed_after_baseline = [[70, 30], [30, 70], [80, 20], [20, 80]]
+
+[graph]
+engine = "langgraph==1.2.20"
+nodes = ["load_baseline", "request_tool_call", "execute_tool", "send_result", "finish"]
+edges = "每个节点按状态走条件边；blocked/partial/failed 直接进入 finish，不落成功分支"
+state = ["status", "stage", "nodes", "events", "config", "baseline", "request_count",
+         "tool_calls", "response_ids", "tool_call_id", "quota", "tool_result",
+         "final_reply", "error", "conclusion"]
+
+[status_rules]
+verified = "合法 tool_call → 工具执行成功 → 同 tool_call_id 回传 → 收到非空且不再请求工具的最终回复"
+partial = "工具已执行，但第 2 次请求超时/报错/空回复/再次请求工具"
+blocked = "缺配置、基准不符、无合法 tool_calls、非法配额"
+failed = "工具执行本身失败"
+cli_exit = "verified=0，其余=2"
+
+[real_run]
+status = "verified"
+model = "deepseek-chat"
+response_ids = { tool_call = "1eac8b8c-fa61-472a-928c-89787993f022",
+                 final = "8804ca67-39ac-4a35-ae06-a72265396c2c" }
+tool_call_id = "call_00_QJo2I5RFwJnSMQZrg8Ru7198"
+quota = [70, 30]
+request_count = 2
+tool_calls = 1
+elapsed_s = 2.81
+baseline = { hits = 4, recall_at_100 = 0.011719 }
+chosen = { hits = 3, recall_at_100 = 0.009115, coverage = 0.026905, candidates_total = 12800 }
+delta = { hits = -1, recall_at_100 = -0.002604 }
+winner = "baseline"
+
+[regression_second_request_timeout]
+status = "partial"
+simulated_cli_exit = 2
+request_count = 2
+tool_calls = 1
+error = "第 2 次模型请求失败：simulated timeout on second request"
+checks_all_passed = true
+network = "0 次（fake chat/eval，不访问缓存）"
+
+[budget]
+limit = { model_requests = 2, tool_calls = 1, seconds = 180 }
+actual = { model_requests = 2, tool_calls = 1, seconds = 2.81 }
+training = 0
+re_recall = 0
+
+[dependencies]
+optional = "requirements/optional-agent.txt（langgraph==1.2.20）"
+
+[artifacts]
+experiment = "experiments/2026-11-08-kuasar_small-langgraph-tool-call/"
+candidates = "artifacts/kuasar_small/langgraph_tool_call/cache_eval/70_30/"
+regression = "experiments/2026-11-08-kuasar_small-langgraph-tool-call/regression_second_request_timeout/"
+events = "experiments/2026-11-08-kuasar_small-langgraph-tool-call/events.jsonl"
+
+[commands]
+run = "python -m recsys.experiments.llm_tool_call --experiment-dir experiments/2026-11-08-kuasar_small-langgraph-tool-call"
+regression = "python -m recsys.experiments.llm_tool_call --regression-partial --experiment-dir experiments/2026-11-08-kuasar_small-langgraph-tool-call/regression_second_request_timeout"
+self_check = "python -m recsys.experiments.llm_tool_call --self-check"
