@@ -1,0 +1,18 @@
+checkpoint: artifacts/kuasar_small/two_tower_features.pt
+sha256:     784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b
+sha256(本仓库记录) 与实验记录一致；未重训
+
+checkpoint: artifacts/kuasar_small/mind20.pt
+sha256:     eba017182142a8d09183ccf93de99d53535b32830de0a27bbdfad70d40ff9dac
+路由种子: 1234；未重训
+
+ranker: artifacts/kuasar_small/mvp/lgbm_ranker.txt
+sha256:     a79d9d451d3833460f3160fe4d76c32f76a1aee49458aa8ab9d252510cf1ac60
+训练: LambdaRank, 20 轮, 9,997 行 / 2,418 请求, seed 42
+
+users: artifacts/kuasar_small/mvp/users.json （128 个验证用户，seed 42）
+sha256: df9e25e3c274aa12…
+
+final: artifacts/kuasar_small/mvp/final.json
+fusion: artifacts/kuasar_small/mvp/fusion.json（含来源与名次）
+samples: experiments/2026-11-08-kuasar_small-recsys-mvp/samples.json

@@ -1,0 +1,44 @@
+{
+  "stages": {
+    "two_tower_top20": {
+      "Recall@20": 0.0,
+      "NDCG@20": 0.0,
+      "HitRate@20": 0.0,
+      "Precision@20": 0.0,
+      "Coverage": 0.005566
+    },
+    "fusion_top20": {
+      "Recall@20": 0.0,
+      "NDCG@20": 0.0,
+      "HitRate@20": 0.0,
+      "Precision@20": 0.0,
+      "Coverage": 0.005557
+    },
+    "lgbm_top20": {
+      "Recall@20": 0.0,
+      "NDCG@20": 0.0,
+      "HitRate@20": 0.0,
+      "Precision@20": 0.0,
+      "Coverage": 0.005395
+    },
+    "rerank_top20": {
+      "Recall@20": 0.0,
+      "NDCG@20": 0.0,
+      "HitRate@20": 0.0,
+      "Precision@20": 0.0,
+      "Coverage": 0.005412
+    }
+  },
+  "diagnostics": {
+    "users": 128,
+    "targets": 362,
+    "hits": {
+      "two_tower@100": 2,
+      "mind@100": 7,
+      "union@100": 9,
+      "fusion@20": 0,
+      "rerank@20": 0
+    },
+    "note": "128 用户以内验证样本，Top-20 命中为 0 属样本量限制；Top-100 命中用于核对链路"
+  }
+}

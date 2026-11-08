@@ -62,6 +62,8 @@ experiments/
 | 2026-11-07 | [kuasar_small-two-tower-features](2026-11-07-kuasar_small-two-tower-features/report.md) | kuasar_small（2,000 用户） | 物品侧特征入塔：Recall@10 **翻倍**（0.0016 → 0.0032）、Recall@20 +26.9%；验证/测试在 Recall@10 上结论不一致，需多 seed |
 | 2026-11-07 | [kuasar_small-two-tower-sweep](2026-11-07-kuasar_small-two-tower-sweep/report.md) | kuasar_small（2,000 用户） | 超参扫描：选定 d64/b2048/lr1e-2；**8 epoch 扫描把 d128 排第一，20 epoch 后两者只差 6% 且 NDCG 反转**——短预算选参不可靠 |
 | 2026-11-07 | [kuasar_small-mind](2026-11-07-kuasar_small-mind/report.md) | kuasar_small（2,000 用户） | MIND（torch-rechub）作为第二路召回：测试 Recall@20 **0.005675**，比双塔 +28.8%；20 epochs 未收敛，训练贵 3 倍 |
+| 2026-11-08 | [kuasar_small-mind-phase3](2026-11-08-kuasar_small-mind-phase3/report.md) | kuasar_small（2,000 用户 / 128 用户分群） | 修复 MIND 路由随机性；分群：mid 组 +0.0058、high 组 −0.0040；收敛/多 seed 未完成（P1 止损） |
+| 2026-11-08 | [kuasar_small-recsys-mvp](2026-11-08-kuasar_small-recsys-mvp/report.md) | kuasar_small（128 验证用户） | 双路召回→名次融合→LightGBM→类目重排全链路跑通，10.0 s / 1,379 MiB；Top-20 指标为 0（样本量），Top-100 命中 9 用于核对链路 |
 
 权重不入库，只记路径 / sha256 / provenance（见各目录的 `checkpoint.txt`）。
 下一个实验按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。

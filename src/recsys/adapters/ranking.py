@@ -59,10 +59,12 @@ class LightGBMRankerAdapter(RankingAdapter):
         labels: np.ndarray,
         *,
         groups: np.ndarray | None = None,
+        num_boost_round: int = 50,
     ) -> None:
         """``groups`` 给定时按排序目标（Lambdarank）训练，否则按二分类训练。
 
         排序时 ``groups`` 必须是连续的分组长度（一个用户/一个请求为一段候选）。
+        ``num_boost_round`` 默认 50（保持既有调用行为），小样本冒烟时可调小。
         """
         lightgbm = _import_lightgbm()
         matrix = _as_matrix(features)
@@ -95,7 +97,7 @@ class LightGBMRankerAdapter(RankingAdapter):
             "num_threads": 2,
             **self.params,
         }
-        self.booster = lightgbm.train(params, dataset, num_boost_round=50)
+        self.booster = lightgbm.train(params, dataset, num_boost_round=num_boost_round)
 
     def predict(self, features: Mapping[str, np.ndarray] | np.ndarray) -> np.ndarray:
         if self.booster is None:

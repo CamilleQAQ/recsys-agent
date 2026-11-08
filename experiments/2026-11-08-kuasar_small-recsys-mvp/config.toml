@@ -1,0 +1,56 @@
+# offline MVP run config（2026-11-08，kuasar_small）
+
+[dataset]
+name = "kuasar_small"
+users = 2000
+items = 454717
+split_strategy = "per_user_last_two_requests"
+split_sha256 = { train = "c62df14cbc3e…", validation = "000681165b44…", test = "d6b5c0e8a96b…" }
+id_mapping_sha256 = "b7d230622f6b…"
+
+[recall]
+two_tower_checkpoint = "artifacts/kuasar_small/two_tower_features.pt"
+two_tower_sha256 = "784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b"
+mind_checkpoint = "artifacts/kuasar_small/mind20.pt"
+mind_sha256 = "eba017182142a8d09183ccf93de99d53535b32830de0a27bbdfad70d40ff9dac"
+routing_seed = 1234
+k_recall = 100
+history = "验证输入只用训练历史；曝光过滤 seen_items_for_split(validation)"
+
+[fusion]
+strategy = "名次轮流（two_tower 先） + 物品去重"
+limit = 100
+trace = "每个候选记录来源通道与原始名次；two_tower 保留原始分数，MIND 分数缺失不补造"
+
+[ranking]
+source = "data/kuasar/processed/ranking/（父数据集 train 工件，只读 mmap）"
+alignment = "父物品/用户索引 → 原始 ID → 子集索引"
+request_rule = "保留原请求边界；过滤后重算 group；只保留同时含正负标签的完整请求"
+max_rows = 10000
+actual = { rows = 9997, requests = 2418, positives = 6387, negatives = 3610 }
+model = "LightGBMRankerAdapter（LambdaRank）"
+num_boost_round = 20
+params = { num_leaves = 31, learning_rate = 0.05, num_threads = 4, seed = 42 }
+features = [
+  "category_first_code", "category_second_code", "author_freq",
+  "item_type_code", "upload_type_code", "upload_days",
+  "upload_valid", "caption_tokens", "is_ad",
+]
+feature_dtype = "float32"
+missing_rule = "保留原始编码：类目/作者缺失为 -1，计数/标记缺失为 0"
+
+[rerank]
+k_final = 20
+category_field = "category_first_code"
+cap_per_known_category = 5
+unknown_category = "不占已知类目配额"
+fill_rule = "首遍不足 20 时按原排序补齐，并记录放宽次数"
+
+[runtime]
+threads = 4
+device = "cpu"
+budget = { users = 128, total_seconds = 900, rss_gib = 4, lgb_seconds = 120 }
+actual = { total_seconds = 10.0, peak_rss_mib = 1379.2 }
+
+[commands]
+run = "python -m recsys.experiments.recsys_mvp --dataset kuasar_small --users 128 --seed 42 --threads 4"

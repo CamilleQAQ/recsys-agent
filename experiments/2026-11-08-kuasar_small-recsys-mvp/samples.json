@@ -1,0 +1,212 @@
+[
+  {
+    "user": 664570,
+    "items": [
+      {
+        "item": 3913948,
+        "sources": {
+          "mind": {
+            "rank": 7,
+            "score": null
+          }
+        },
+        "fusion_rank": 13,
+        "lgbm_score": 0.419849,
+        "lgbm_rank": 1,
+        "final_rank": 1
+      },
+      {
+        "item": 3256736,
+        "sources": {
+          "two_tower": {
+            "rank": 36,
+            "score": 0.69144
+          }
+        },
+        "fusion_rank": 63,
+        "lgbm_score": 0.385514,
+        "lgbm_rank": 2,
+        "final_rank": 2
+      },
+      {
+        "item": 1578321,
+        "sources": {
+          "two_tower": {
+            "rank": 6,
+            "score": 0.726705
+          }
+        },
+        "fusion_rank": 10,
+        "lgbm_score": 0.305339,
+        "lgbm_rank": 3,
+        "final_rank": 3
+      },
+      {
+        "item": 246951,
+        "sources": {
+          "two_tower": {
+            "rank": 15,
+            "score": 0.720946
+          }
+        },
+        "fusion_rank": 28,
+        "lgbm_score": 0.248093,
+        "lgbm_rank": 4,
+        "final_rank": 4
+      },
+      {
+        "item": 1246953,
+        "sources": {
+          "mind": {
+            "rank": 40,
+            "score": null
+          }
+        },
+        "fusion_rank": 71,
+        "lgbm_score": 0.205014,
+        "lgbm_rank": 5,
+        "final_rank": 5
+      }
+    ]
+  },
+  {
+    "user": 2400139,
+    "items": [
+      {
+        "item": 5050304,
+        "sources": {
+          "two_tower": {
+            "rank": 48,
+            "score": 0.610914
+          }
+        },
+        "fusion_rank": 95,
+        "lgbm_score": 0.476448,
+        "lgbm_rank": 1,
+        "final_rank": 1
+      },
+      {
+        "item": 1459286,
+        "sources": {
+          "two_tower": {
+            "rank": 28,
+            "score": 0.626715
+          }
+        },
+        "fusion_rank": 55,
+        "lgbm_score": 0.42333,
+        "lgbm_rank": 2,
+        "final_rank": 2
+      },
+      {
+        "item": 3789351,
+        "sources": {
+          "mind": {
+            "rank": 31,
+            "score": null
+          }
+        },
+        "fusion_rank": 62,
+        "lgbm_score": 0.396097,
+        "lgbm_rank": 3,
+        "final_rank": 3
+      },
+      {
+        "item": 5066294,
+        "sources": {
+          "mind": {
+            "rank": 14,
+            "score": null
+          }
+        },
+        "fusion_rank": 28,
+        "lgbm_score": 0.382989,
+        "lgbm_rank": 4,
+        "final_rank": 4
+      },
+      {
+        "item": 2545610,
+        "sources": {
+          "two_tower": {
+            "rank": 46,
+            "score": 0.612419
+          }
+        },
+        "fusion_rank": 91,
+        "lgbm_score": 0.318369,
+        "lgbm_rank": 5,
+        "final_rank": 5
+      }
+    ]
+  },
+  {
+    "user": 2400210,
+    "items": [
+      {
+        "item": 1413185,
+        "sources": {
+          "two_tower": {
+            "rank": 29,
+            "score": 0.613954
+          }
+        },
+        "fusion_rank": 56,
+        "lgbm_score": 0.386041,
+        "lgbm_rank": 1,
+        "final_rank": 1
+      },
+      {
+        "item": 1938272,
+        "sources": {
+          "two_tower": {
+            "rank": 44,
+            "score": 0.601706
+          }
+        },
+        "fusion_rank": 84,
+        "lgbm_score": 0.271264,
+        "lgbm_rank": 2,
+        "final_rank": 2
+      },
+      {
+        "item": 4250503,
+        "sources": {
+          "mind": {
+            "rank": 1,
+            "score": null
+          }
+        },
+        "fusion_rank": 2,
+        "lgbm_score": 0.264647,
+        "lgbm_rank": 3,
+        "final_rank": 3
+      },
+      {
+        "item": 3328627,
+        "sources": {
+          "two_tower": {
+            "rank": 37,
+            "score": 0.605764
+          }
+        },
+        "fusion_rank": 70,
+        "lgbm_score": 0.262168,
+        "lgbm_rank": 4,
+        "final_rank": 4
+      },
+      {
+        "item": 1684837,
+        "sources": {
+          "two_tower": {
+            "rank": 31,
+            "score": 0.611745
+          }
+        },
+        "fusion_rank": 60,
+        "lgbm_score": 0.254997,
+        "lgbm_rank": 5,
+        "final_rank": 5
+      }
+    ]
+  }
+]

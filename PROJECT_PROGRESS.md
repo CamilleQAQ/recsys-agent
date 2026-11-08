@@ -459,6 +459,34 @@ MIND 的收益集中在中等活跃用户；高活跃用户因历史截断到 20
 
 ---
 
+### 2.22 离线推荐 MVP：双路召回 → 融合 → LightGBM → 类目重排（2026-11-08）
+
+**范围**：`kuasar_small` + 128 个验证用户，一次小样本端到端；只验收链路与口径，不看指标提升。
+
+- [x] 新增离线入口 `python -m recsys.experiments.recsys_mvp`（显式校验 `--dataset kuasar_small`）
+- [x] 两路召回复用现有权重：双塔 `two_tower_features.pt`、MIND `mind20.pt`（路由种子 1234），
+      各算一次 Top-100 并缓存；只对这 128 个用户打分（未对 2,000 用户全量打分）
+- [x] 名次轮流融合 + 去重，最多 100；每个候选记录来源通道与原始名次
+- [x] LightGBM 只训 1 次：从父数据集 `data/kuasar/processed/ranking/` 只读 train 工件，
+      按原始 ID 对齐父子词表，保留请求边界，**9,997 行 / 2,418 请求**（正 6,387 / 负 3,610），
+      LambdaRank 20 轮；`LightGBMRankerAdapter.fit` 增加 `num_boost_round` 参数（默认 50 不变）
+- [x] 重排：Top-20，已知一级类目每类 ≤5，补齐 0 次
+- [x] 自动断言全部通过：无重复、无曝光泄漏、来源可追溯、融合 ≤100、最终 ≤20、
+      排序/重排均来自融合池、分组长度=行数、训练/推理特征列一致、重载复验分数差 5e-07
+- [x] 实测：**总耗时 10.0 s**（召回 1.0+3.9、排序数据 1.8、训练 0.2），**峰值 RSS 1,379 MiB**，
+      4 线程；预算内完成
+
+**指标（128 用户验证样本，Top-20）**：四阶段 Recall/HitRate/NDCG 均为 0——362 个目标中，
+Top-100 候选命中 9 个（双塔 2 / MIND 7 / 并集 9），但都排在 20 名之后；属于样本量限制，
+`metrics.json` 的 `diagnostics` 记录了这些命中，用来核对链路而非下结论。
+
+**交付**：`experiments/2026-11-08-kuasar_small-recsys-mvp/`（config / metrics / run_meta / samples /
+checkpoint / report）；缓存与模型在 `artifacts/kuasar_small/mvp/`。
+
+**未完成**：完整验证/测试集评估、用户侧/交叉特征、分数校准、多路配额消融、DIN/DCNv2 对比。
+
+---
+
 ## 三、下一步（按 PROJECT_MASTER 的 Phase 顺序）
 
 ### 3.1 Phase 1：KuaiSAR 数据层（当前优先级）
@@ -498,19 +526,21 @@ MIND 的收益集中在中等活跃用户；高活跃用户因历史截断到 20
 - [x] **Phase 3 MIND**：改用 `torch-rechub` 实现（TorchEasyRec 平台受限），已训练/评测；
       **阶段分群评估完成**：测试 Recall@20 0.005044（3 路由种子均值）vs 双塔 0.004408，
       mid 组 +0.0058、high 组 −0.0040（见 2.21）
-- [ ] MIND 训练到收敛（30–40 epochs）、同预算 A/B/C 对照、训练 seed 43/44 复现
+- [ ] MIND 训练到收敛（30–40  epochs）、同预算 A/B/C 对照、训练 seed 43/44 复现
 - [ ] Phase 4 LightGCN：`PreparedData → RecBole atomic` 桥接 + 适配器
-- [ ] Phase 5 多路融合：统一「通道 → 候选（含来源与原始分数）」结构、去重、配额、消融
+- [x] Phase 5 多路融合（MVP 版）：名次轮流 + 去重 + 来源/名次可追溯，≤100 候选（见 2.22）
+- [ ] Phase 5 完整版：分数校准、各通道配额、单路/多路消融、通道贡献与重叠率
 
 ### 3.4 Phase 6–8：排序
 
 - [ ] Phase 6 SASRec 迁移到 KuaiSAR（序列截断/泄漏检查）
 - [ ] Phase 7 DIN（FuxiCTR）：依赖 1.5 特征通道
-- [ ] Phase 8 DCNv2（FuxiCTR）+ LightGBM：统一 CTR 标签与划分，产出对比表（AUC / LogLoss / 成本）
+- [x] Phase 8 LightGBM 排序（MVP）：复用 `LightGBMRankerAdapter`，train 工件 9,997 行 / 20 轮（见 2.22）
+- [ ] Phase 8 完整版：DCNv2 对比、AUC/LogLoss、叶子数/学习率调参、特征贡献分析
 
 ### 3.5 Phase 9–13：链路、生成式召回、Agent
 
-- [ ] Phase 9 召回→融合→排序→重排（MMR）端到端离线链路
+- [x] Phase 9 召回→融合→排序→重排端到端离线链路（MVP，128 用户；重排为类目配额，见 2.22）
 - [ ] Phase 10 TIGER（genrec）：物品 embedding → RQ-VAE 语义 ID → trie 约束解码
 - [ ] Phase 11–13 Research Agent、RAG、Agent 对照实验
 
@@ -606,6 +636,7 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 | 2026-11-07 | **Phase 2 超参** | 4 组 × 8 epochs 扫描 + 2 组 × 20 epochs 复核：选定 d64/b2048/lr1e-2；发现「8 轮扫描排名在 20 轮后反转」，记录短预算选参的陷阱；Phase 2 清单 12/12 | `experiments/2026-11-07-kuasar_small-two-tower-sweep/` |
 | 2026-11-07 | **Phase 3 MIND** | 因 TorchEasyRec 的 Linux-only wheel 不可用，改用 torch-rechub 1.0.0 接入 MIND（模型/训练/适配器/CLI）；测试 Recall@20 0.005675（比双塔 +28.8%），NDCG@20 略低；20 epochs 未收敛，训练约 60 分钟 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`src/recsys/adapters/rechub_mind.py`、`third_party/torch-rechub`、`experiments/2026-11-07-kuasar_small-mind/` |
 | 2026-11-08 | **Phase 3 阶段评估** | P1 止损：训练预算 0；发现并修复 MIND 评测随机性（胶囊路由 `torch.randn`），同一 checkpoint 固定种子后可逐位复现；分群评估完成（mid 组 +0.0058、high 组 −0.0040、总体 +0.0006）；旧 0.005675 解释为单次随机路由抽样；40-epoch 收敛/同预算对照/训练多 seed 留待办 | `src/recsys/models/mind.py`、`src/recsys/training/train_mind.py`、`scripts/eval_groups.py`、`experiments/2026-11-08-kuasar_small-mind-phase3/` |
+| 2026-11-08 | **离线 MVP** | 新增 `recsys_mvp`：128 用户双路召回（双塔 + MIND）→ 名次融合（≤100，来源可追溯）→ LightGBM（父 train 工件 9,997 行 / 20 轮）→ 类目重排（每类 ≤5）；自动断言全过；10.0 s / 1,379 MiB；Top-20 指标为 0（样本量限制），Top-100 命中 9 记录在 diagnostics | `src/recsys/experiments/recsys_mvp.py`、`src/recsys/adapters/ranking.py`、`experiments/2026-11-08-kuasar_small-recsys-mvp/` |
 
 > 详细到「改了哪些文件、为什么这么改、测试输出」的记录，见本文件对应小节的证据链接；
 > 结论性内容回写 [PROJECT_MASTER.md](PROJECT_MASTER.md)，本文件不重复架构说明。
