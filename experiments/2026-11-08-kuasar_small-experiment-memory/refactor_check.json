@@ -1,0 +1,30 @@
+{
+  "old_cli": "python -m recsys.experiments.history_first_agent --regression-publish-gate --experiment-dir artifacts/kuasar_small/experiment_memory/regression_publish_gate --cache-dir artifacts/kuasar_small/mvp --quota 80/20",
+  "old_cli_exit_code": 0,
+  "old_evidence_dir": "experiments\\2026-11-08-kuasar_small-experiment-memory\\regression_publish_gate",
+  "old_evidence_file_sha256": {
+    "decision.json": "6985a6acaf8a9ddbd40cd4de880d106d83ffa0e854e6fc92abd3796a83788cbd",
+    "events.jsonl": "e4109686b388c305d62d999abd280a382b56469771d62021d41354c948984bbd",
+    "metrics.json": "9a4229cffcabef3ad40591855607ba3bd5d4818cc7107c15954395f07bf1d61d",
+    "regression.json": "1dbed1f0a39a651a9dcd5aac2f7bdf5b55cca7ca28f5a1d2159958bab85219e4",
+    "regression_miss/history_miss/config.toml": "dd13831fbd70b126b022aa29f210fbdf4e4982c97d88325cedb065445d2f26ed",
+    "regression_miss/history_miss/runs/50_50.json": "fab4bf013139f03ba5b15a7402a32ca3cf7389d79fea521fbf99f6745c5238b1"
+  },
+  "old_evidence_unchanged": true,
+  "old_evidence_comparison": "before/after recursive sha256 maps matched (shell check)",
+  "marker_path": "artifacts/kuasar_small/experiment_memory/regression_publish_gate/existing_regression/marker.txt",
+  "marker_content": "preexisting-evidence-2026-11-09",
+  "marker_unchanged": true,
+  "explicit_parent": "artifacts/kuasar_small/experiment_memory/regression_publish_gate",
+  "default_output_root": "artifacts/kuasar_small/experiment_memory/regression_publish_gate",
+  "new_run_dir": "artifacts\\kuasar_small\\experiment_memory\\regression_publish_gate\\run-20261108T162817Z-10980",
+  "new_run_unique": true,
+  "new_run_count": 1,
+  "new_run_checks_passed": true,
+  "new_run_status": "partial",
+  "new_run_evaluation_count": 1,
+  "new_run_index_entry_count": 0,
+  "new_run_requery": "miss",
+  "new_run_existing_verified": "hit",
+  "note": "旧 CLI 已委托 src/recsys/experiments/regression_publish_gate.py；本次回归为一次离线运行，没有真实评测/LLM。"
+}

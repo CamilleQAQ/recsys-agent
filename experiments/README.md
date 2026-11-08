@@ -68,7 +68,7 @@ experiments/
 | 2026-11-08 | [kuasar_small-llm-tool-call](2026-11-08-kuasar_small-llm-tool-call/report.md) | kuasar_small（128 验证用户） | 真实 LLM 原生 tool_calls **验收通过**：deepseek-chat 选 70/30，程序评测（命中 3 vs 基准 4）并同 `tool_call_id` 回传；2 请求/1 工具/3.05 s |
 | 2026-11-08 | [kuasar_small-langgraph-tool-call](2026-11-08-kuasar_small-langgraph-tool-call/report.md) | kuasar_small（128 验证用户） | LangGraph 状态图接入：真实运行通过（节点顺序可核对、同 ID 回传、70/30 命中 3 vs 基准 4）；第二次请求失败回归得 `partial` + 非零，修复误报 |
 | 2026-11-08 | [kuasar_small-history-first-agent](2026-11-08-kuasar_small-history-first-agent/report.md) | kuasar_small（128 验证用户） | 工具注册表 + 历史优先：真实 LLM 先查历史并命中 30/70（5 命中 / Recall@100 0.013672，基准 4），评测 0 次；`--cache-dir` 独立目录、未命中/超时/partial 分支本地验证 |
-| 2026-11-08 | [kuasar_small-experiment-memory](2026-11-08-kuasar_small-experiment-memory/report.md) | kuasar_small（128 验证用户） | Phase 12 实验记忆 MVP：80/20 首轮真实评测（2 命中 / 0.005208）并自动入库，第二轮独立进程命中同一实验键、评测 0 次；指纹/规则/工件安全校验 5/5；2026-11-09 修复发布时机，失败结果不发布回归通过 |
+| 2026-11-08 | [kuasar_small-experiment-memory](2026-11-08-kuasar_small-experiment-memory/report.md) | kuasar_small（128 验证用户） | Phase 12 实验记忆 MVP：80/20 首轮真实评测（2 命中 / 0.005208）并自动入库，第二轮独立进程命中同一实验键、评测 0 次；指纹/规则/工件安全校验 5/5；2026-11-09 修复发布时机，失败结果不发布；发布回归迁移到独立脚本、每次写唯一目录，旧证据保留 |
 
 权重不入库，只记路径 / sha256 / provenance（见各目录的 `checkpoint.txt`）。
 下一个实验按上面的结构建目录，并把一句话结论回写到 `docs/models/<id>.md` 的「实验记录」表。

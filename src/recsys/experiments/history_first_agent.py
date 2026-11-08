@@ -70,13 +70,9 @@ from recsys.experiments.agent_tools import (
 from recsys.experiments.experiment_history import (
     DEFAULT_HISTORY_ROOT,
     model_view as history_model_view,
-    search_experiment_history,
 )
 from recsys.experiments.experiment_memory import (
     audit_quotas,
-    build_identity,
-    identity_key,
-    load_index,
     run_memory_safety_checks,
     save_evaluation,
 )
@@ -97,8 +93,6 @@ from recsys.experiments.llm_tool_call import (
 EXPERIMENT_DEFAULT = Path("experiments/2026-11-08-kuasar_small-history-first-agent")
 BASELINE_RUN = Path("experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/50_50.json")
 OUTPUT_ROOT = Path("artifacts/kuasar_small/history_first_agent")
-PHASE12_MEMORY_DIR = Path("experiments/2026-11-08-kuasar_small-experiment-memory/memory")
-REGRESSION_FIXTURE = Path("artifacts/kuasar_small/experiment_memory/cache_eval/80_20/metrics.json")
 
 MAX_MODEL_REQUESTS = 3
 MAX_HISTORY_QUERIES = 1
@@ -1314,6 +1308,7 @@ def run(
     memory_dir: Path | None = None,
     policy: str = "llm",
     chat_fn: ChatFn | None = None,
+    registry: ToolRegistry | None = None,
 ) -> dict:
     target_quota = validate_quota(*target_quota)
     if policy not in {"llm", "local"}:
@@ -1380,7 +1375,7 @@ def run(
     )
     if chat_fn is None:
         chat_fn = local_policy_chat(target_quota) if policy == "local" else post_chat
-    final_state = build_graph(chat_fn=chat_fn).invoke(state)
+    final_state = build_graph(chat_fn=chat_fn, registry=registry).invoke(state)
     summary = _finalize(final_state, experiment_dir)
     (experiment_dir / "baseline.json").write_text(
         json.dumps(summary.get("baseline") or {}, indent=2, ensure_ascii=False),
@@ -1742,172 +1737,6 @@ def run_regression_timeout(
     return result
 
 
-def run_regression_publish_gate(
-    experiment_dir: Path,
-    *,
-    cache_dir: Path,
-    cache_dir_source: str,
-    target_quota: tuple[int, int] = (80, 20),
-) -> dict:
-    """本地回归：评测成功但最终回复超时，索引不得发布；随后查询必须仍 miss。
-
-    真实 LangGraph + 真实历史查询/index 读取；评测工具返回已落盘的
-    ``80_20/metrics.json`` 只读夹具，不执行真实评测，也不请求真实 LLM。
-    """
-    target_quota = validate_quota(*target_quota)
-    run_dir = Path(experiment_dir) / "regression_publish_gate"
-    if run_dir.exists():
-        shutil.rmtree(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    history_root = _prepare_miss_history_root(run_dir)
-    memory_dir = run_dir / "memory"
-    output_dir = run_dir / "output"
-
-    fixture_path = _artifact_path(str(REGRESSION_FIXTURE))
-    if fixture_path is None or not fixture_path.exists():
-        raise AssertionError(f"缺少只读评测夹具：{REGRESSION_FIXTURE}")
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    if (fixture.get("quota") or {}) != {
-        "two_tower": target_quota[0],
-        "mind": target_quota[1],
-    }:
-        raise AssertionError("夹具配额与回归目标不一致")
-    if not (fixture.get("evidence") or {}).get("fusion"):
-        raise AssertionError("夹具缺少候选证据路径")
-
-    fake_config = {"model": "fake-model", "base_url": "http://127.0.0.1", "api_key": "fake"}
-    calls = {"chat": 0, "eval": 0}
-    script = [
-        _fake_call(
-            "call-gate-history",
-            TOOL_SEARCH_HISTORY,
-            {"two_tower_quota": target_quota[0], "mind_quota": target_quota[1]},
-        ),
-        _fake_call(
-            "call-gate-eval",
-            TOOL_EVALUATE,
-            {"two_tower_quota": target_quota[0], "mind_quota": target_quota[1]},
-        ),
-    ]
-
-    def fake_chat(config, messages, *, tools, timeout):
-        calls["chat"] += 1
-        if script:
-            return script.pop(0)
-        raise TimeoutError("simulated timeout after evaluation result")
-
-    def fake_eval(arguments, context: ToolContext) -> dict:
-        calls["eval"] += 1
-        return json.loads(json.dumps(fixture, ensure_ascii=False))
-
-    registry = build_registry(evaluate_execute=fake_eval)
-    state = _initial_state(
-        config=fake_config,
-        cache_dir=cache_dir,
-        cache_dir_source=cache_dir_source,
-        history_root=history_root,
-        output_dir=output_dir,
-        target_quota=target_quota,
-        memory_dir=memory_dir,
-        experiment_dir=run_dir,
-        policy="local",
-    )
-    final_state = build_graph(
-        chat_fn=fake_chat, baseline_fn=load_baseline, registry=registry
-    ).invoke(state)
-    summary = _finalize(final_state, run_dir)
-    events = [
-        json.loads(line)
-        for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    event_names = [event.get("event") for event in events]
-    index, index_path = load_index(memory_dir)
-    context = load_context(cache_dir)
-    key = identity_key(build_identity(context, target_quota))
-    evaluation = summary.get("evaluation") or {}
-    memory = summary.get("memory") or {}
-
-    requery = search_experiment_history(
-        target_quota[0],
-        target_quota[1],
-        cache_dir=cache_dir,
-        history_root=history_root,
-        memory_dir=memory_dir,
-    )
-    existing = search_experiment_history(
-        target_quota[0],
-        target_quota[1],
-        cache_dir=cache_dir,
-        history_root=DEFAULT_HISTORY_ROOT,
-        memory_dir=PHASE12_MEMORY_DIR,
-    )
-
-    checks = {
-        "status_partial": summary["status"] == "partial",
-        "simulated_cli_exit_2": (0 if summary["status"] == "verified" else 2) == 2,
-        "evaluation_executed_once": summary["evaluation_count"] == 1,
-        "tool_result_kept": bool(evaluation.get("quota")),
-        "candidate_evidence_kept": bool((evaluation.get("evidence") or {}).get("fusion")),
-        "timeout_reason_kept": "simulated timeout" in str(summary.get("error") or ""),
-        "no_memory_saved_event": "memory_saved" not in event_names,
-        "memory_publish_skipped_event": "memory_publish_skipped" in event_names,
-        "memory_not_saved": memory.get("saved") is False,
-        "memory_publish_skipped": memory.get("publish") == "skipped",
-        "eval_result_not_returned": memory.get("eval_result_returned") is False,
-        "index_empty": index["entries"] == {},
-        "key_not_indexed": key not in index["entries"],
-        "requery_miss": requery.get("status") == "miss",
-        "requery_without_second_eval": calls["eval"] == 1,
-        "existing_verified_hit": existing.get("status") == "hit",
-        "existing_verified_source": existing.get("source") == "memory_index",
-        "existing_verified_key": bool(existing.get("memory_key")),
-    }
-    result = {
-        "mode": "publish_gate_final_timeout",
-        "policy": "local-deterministic",
-        "fixture": str(fixture_path),
-        "cache_dir": str(cache_dir),
-        "history_root": str(history_root),
-        "memory_dir": str(memory_dir),
-        "status": summary["status"],
-        "simulated_cli_exit": 0 if summary["status"] == "verified" else 2,
-        "request_count": summary["request_count"],
-        "history_query_count": summary["history_query_count"],
-        "evaluation_count": summary["evaluation_count"],
-        "error": summary.get("error"),
-        "evaluation": {
-            "quota": evaluation.get("quota"),
-            "hits": evaluation.get("hits"),
-            "recall_at_100": evaluation.get("recall_at_100"),
-            "evidence": evaluation.get("evidence"),
-        },
-        "memory": memory,
-        "key": key,
-        "index_path": str(index_path),
-        "index_entry_count": len(index["entries"]),
-        "events": event_names,
-        "requery": {
-            "status": requery.get("status"),
-            "source": requery.get("source"),
-            "reason": requery.get("reason"),
-        },
-        "existing_verified": {
-            "status": existing.get("status"),
-            "source": existing.get("source"),
-            "memory_key": existing.get("memory_key"),
-        },
-        "fake_eval_calls": calls["eval"],
-        "fake_chat_calls": calls["chat"],
-        "checks": checks,
-        "passed": all(checks.values()),
-        "metrics_file": str(run_dir / "metrics.json"),
-        "events_file": str(run_dir / "events.jsonl"),
-    }
-    _write_json(run_dir / "regression.json", result)
-    return result
-
-
 def _synthetic_history(hit: bool, quota: tuple[int, int]) -> dict:
     base = {
         "tool": TOOL_SEARCH_HISTORY,
@@ -2222,6 +2051,11 @@ def _cache_selection(args: argparse.Namespace) -> tuple[Path, str]:
     return Path(args.cache_dir), "cli"
 
 
+def _explicit_option(argv: list[str] | None, name: str) -> bool:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    return any(arg == name or arg.startswith(f"{name}=") for arg in raw)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     cache_dir, cache_source = _cache_selection(args)
@@ -2257,13 +2091,25 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return 0 if result["passed"] else 1
         if args.regression_publish_gate:
-            result = run_regression_publish_gate(
-                args.experiment_dir,
-                cache_dir=cache_dir,
-                cache_dir_source=cache_source,
-                target_quota=args.quota,
+            from recsys.experiments.regression_publish_gate import run as run_publish_gate
+
+            parent = (
+                args.experiment_dir
+                if _explicit_option(argv, "--experiment-dir")
+                else None
             )
+            try:
+                result = run_publish_gate(
+                    parent,
+                    cache_dir=cache_dir,
+                    cache_dir_source=cache_source,
+                    target_quota=args.quota,
+                )
+            except Exception as error:  # noqa: BLE001 - 保留旧 CLI 的非零失败语义
+                print(f"[regression] {error}", file=sys.stderr)
+                return 1
             print(json.dumps(result, indent=2, ensure_ascii=False))
+            print(f"[evidence] {result['evidence_dir']}")
             return 0 if result["passed"] else 1
         if args.regression_miss:
             result = run_regression_miss(

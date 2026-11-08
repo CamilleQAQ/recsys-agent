@@ -97,9 +97,11 @@ real_evaluation_runs = 0
 evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json"
 
 [publish_gate]
-command = "python -m recsys.experiments.history_first_agent --regression-publish-gate --experiment-dir experiments/2026-11-08-kuasar_small-experiment-memory --cache-dir artifacts/kuasar_small/mvp --quota 80/20"
+command = "python -m recsys.experiments.history_first_agent --regression-publish-gate --experiment-dir artifacts/kuasar_small/experiment_memory/regression_publish_gate --cache-dir artifacts/kuasar_small/mvp --quota 80/20"
+script = "src/recsys/experiments/regression_publish_gate.py（旧 CLI 仅委托）"
+output_behavior = "每次创建唯一 run-<UTC>-<pid>/；省略 --experiment-dir 时默认 artifacts/kuasar_small/experiment_memory/regression_publish_gate；移除 shutil.rmtree"
 kind = "local regression（隔离记忆目录 + 只读 80_20/metrics.json 夹具；不执行真实评测/LLM）"
-regression_status = "partial（预期，CLI 非零）"
+regression_status = "partial（预期，被测 Agent CLI 非零；回归命令自身通过时退出 0）"
 simulated_cli_exit = 2
 request_count = 3
 evaluation_count = 1
@@ -113,7 +115,9 @@ requery = "miss"
 existing_verified_record = "hit（memory_index，只读）"
 checks = 18
 passed = true
-evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/"
+evidence = "artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/"
+old_evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/（保留，未改写）"
+refactor_check = "experiments/2026-11-08-kuasar_small-experiment-memory/refactor_check.json"
 
 [scope]
 training = 0
@@ -140,7 +144,10 @@ run1 = "experiments/2026-11-08-kuasar_small-experiment-memory/run1/"
 run2 = "experiments/2026-11-08-kuasar_small-experiment-memory/run2/"
 two_run_check = "experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json"
 safety = "experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json"
-publish_gate = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/"
+publish_gate = "artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/"
+publish_gate_script = "src/recsys/experiments/regression_publish_gate.py"
+publish_gate_refactor_check = "experiments/2026-11-08-kuasar_small-experiment-memory/refactor_check.json"
+publish_gate_old_evidence = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/"
 self_check = "experiments/2026-11-08-kuasar_small-experiment-memory/self_check.json"
 compat_regression = "experiments/2026-11-08-kuasar_small-experiment-memory/regression_compat/regression_miss/regression_miss.json"
 candidates = "artifacts/kuasar_small/experiment_memory/cache_eval/80_20/"

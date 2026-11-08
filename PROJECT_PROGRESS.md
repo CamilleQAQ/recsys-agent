@@ -644,12 +644,19 @@ python -m recsys.experiments.history_first_agent --regression-timeout evaluation
       重查历史。回归结果 `partial`、模拟 CLI 2、工具结果/证据/超时原因保留、
       **无 `memory_saved` 事件、索引 0 条、重查仍 `miss`**；现有 80/20 verified 记录仍 hit。
       **失败结果不发布，Phase 12 实验记忆 MVP 验收完成。**
+- [x] **发布回归整理（2026-11-09）**：将 `run_regression_publish_gate` 移到独立脚本
+      `src/recsys/experiments/regression_publish_gate.py`；旧 CLI 仅委托，参数/退出码保留。
+      每次在 `--experiment-dir` 父目录下创建唯一 `run-<UTC>-<pid>/`，省略时默认
+      `artifacts/kuasar_small/experiment_memory/regression_publish_gate/`；移除
+      `shutil.rmtree`。旧 `experiments/.../regression_publish_gate/` 递归 sha256 前后一致、
+      预置 marker 未变；新回归 18/18 通过
 
 **两次运行总墙钟 11.51 s**（预算 120 s）；索引 1 条记录，第二轮零评测。
 
 **交付**：`experiments/2026-11-08-kuasar_small-experiment-memory/`
 （config / precheck / memory/index.json / memory/runs/*.json / run1 / run2 /
-two_run_check / memory_safety_checks / regression_publish_gate / report）。
+two_run_check / memory_safety_checks / regression_publish_gate / refactor_check / report）；
+独立回归脚本 `src/recsys/experiments/regression_publish_gate.py`。
 
 **复现**：
 
@@ -674,7 +681,12 @@ python -m recsys.experiments.history_first_agent --memory-safety-check `
   --cache-dir artifacts/kuasar_small/mvp --quota 80/20
 
 python -m recsys.experiments.history_first_agent --regression-publish-gate `
-  --experiment-dir $exp --cache-dir artifacts/kuasar_small/mvp --quota 80/20
+  --experiment-dir artifacts/kuasar_small/experiment_memory/regression_publish_gate `
+  --cache-dir artifacts/kuasar_small/mvp --quota 80/20
+
+# 独立脚本入口（同一实现）
+python -m recsys.experiments.regression_publish_gate `
+  --cache-dir artifacts/kuasar_small/mvp --quota 80/20
 ```
 
 证据：[report.md](experiments/2026-11-08-kuasar_small-experiment-memory/report.md)、
@@ -683,7 +695,9 @@ python -m recsys.experiments.history_first_agent --regression-publish-gate `
 [run2/metrics.json](experiments/2026-11-08-kuasar_small-experiment-memory/run2/metrics.json)、
 [two_run_check.json](experiments/2026-11-08-kuasar_small-experiment-memory/two_run_check.json)、
 [memory_safety_checks.json](experiments/2026-11-08-kuasar_small-experiment-memory/memory_safety_checks.json)、
-[regression.json](experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/regression.json)。
+[regression.json](experiments/2026-11-08-kuasar_small-experiment-memory/regression_publish_gate/regression.json)、
+[refactor_check.json](experiments/2026-11-08-kuasar_small-experiment-memory/refactor_check.json)、
+[新回归](artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/regression.json)。
 
 ---
 
@@ -752,7 +766,7 @@ python -m recsys.experiments.history_first_agent --regression-publish-gate `
       5 个命中 / Recall@100 0.013672，评测 0 次，见 2.26）；`--cache-dir` 已贯穿全流程
 - [x] Phase 12 实验记忆 MVP：新实验自动入库 + 第二次独立进程零评测复用
       （80/20，2 命中 / Recall@100 0.005208，见 2.27）；**失败结果不发布**
-      （发布时机修复 + `--regression-publish-gate`，验收完成）
+      （发布时机修复 + 独立回归脚本 + 唯一输出目录，验收完成）
 - [ ] Phase 11 完整版：RAG、Agent 对照实验（工具注册与历史复用已完成）
 - [ ] Phase 12–13 完整 RAG、Agent 对照实验
 

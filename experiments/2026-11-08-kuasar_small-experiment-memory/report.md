@@ -125,11 +125,34 @@ python -m recsys.experiments.history_first_agent --regression-publish-gate `
 | 重新查历史 | **miss**（未触发第二次评测） |
 | 现有 80/20 verified 记录 | **hit**（`memory_index`，只读检查） |
 
-18 项检查全部通过。现有 Phase 12 的 `run1`/`run2` 记录与索引未改写；本回归只新增
-`regression_publish_gate/`。证据：
-[regression.json](regression_publish_gate/regression.json)、
-[metrics.json](regression_publish_gate/metrics.json)、
-[events.jsonl](regression_publish_gate/events.jsonl)。
+18 项检查全部通过。上一轮修复回归产物保留在 `regression_publish_gate/`，未改写。
+迁移后的复现命令与唯一输出目录见下节。
+
+## 回归迁移（2026-11-09）
+
+发布回归已从 `history_first_agent.py` 移到
+[regression_publish_gate.py](../../src/recsys/experiments/regression_publish_gate.py)；旧 CLI
+`--regression-publish-gate` 仅做委托，参数与退出码语义不变。回归每次创建唯一目录：
+省略 `--experiment-dir` 时默认写到 `artifacts/kuasar_small/experiment_memory/regression_publish_gate/`；
+显式传入时把它作为输出父目录，再创建 `run-<UTC>-<pid>/` 子目录，并打印实际证据路径。
+不再使用 `shutil.rmtree`，不会删除或覆盖旧验收证据。
+
+本次实际命令（显式父目录，且父目录预置了 `existing_regression/marker.txt`）：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m recsys.experiments.history_first_agent --regression-publish-gate `
+  --experiment-dir artifacts/kuasar_small/experiment_memory/regression_publish_gate `
+  --cache-dir artifacts/kuasar_small/mvp --quota 80/20
+```
+
+实际证据目录：
+`artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/`。
+回归检查 18/18 通过；被测 Agent 运行仍为 `partial`（模拟 CLI 2），回归命令自身退出 0。
+旧 `regression_publish_gate/` 递归 sha256 前后一致，预置 marker 内容未变，新结果写入另一个
+唯一目录。证据：[refactor_check.json](refactor_check.json)、
+[新回归 regression.json](../../artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/regression.json)、
+[新回归 metrics.json](../../artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/metrics.json)。
 
 ## 匹配安全检查（不运行评测）
 
