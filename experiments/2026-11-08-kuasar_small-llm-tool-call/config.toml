@@ -1,4 +1,4 @@
-# Phase 11 验收：真实 LLM 原生 tool_calls（2026-11-08）
+# Phase 11 验收：真实 LLM 原生 tool_calls（2026-11-08，已通过）
 
 [task]
 goal = "让真实 LLM 通过原生 tool_calls 选择一组融合配额，调用已有评测工具，读回结果并结束实验"
@@ -22,8 +22,11 @@ not_sent_to_model = ["原始 user_id / item_id", "候选明细", "验证标签",
 env = ["DSH_AGENT_LLM_BASE_URL", "DSH_AGENT_LLM_API_KEY", "DSH_AGENT_LLM_MODEL"]
 dotenv = ".env（仓库根目录，已 gitignore；.env.example 是模板）"
 dotenv_rule = "只补未设置的环境变量，优先使用进程环境变量，不打印值"
-configured = false
-status = "blocked: 缺少 API key，未发起任何网络请求"
+configured = true
+model = "deepseek-chat"
+endpoint_host = "https://api.deepseek.com"
+tool_choice = "auto"
+parallel_tool_calls = false
 
 [tool]
 name = "evaluate_fusion_quota"
@@ -31,18 +34,29 @@ schema = "src/recsys/experiments/fusion_quota.py::tool_schema()"
 execution = "程序按 tool_calls[0].function.arguments 执行；同 tool_call_id 回传结果"
 guards = ["普通文本 JSON 拒绝", "tool_calls 数量必须为 1", "未知工具拒绝", "非法配额拒绝", "重复基准拒绝"]
 
+[result]
+baseline_quota = [50, 50]
+baseline_hits = 4
+baseline_recall_at_100 = 0.011719
+chosen_quota = [70, 30]
+chosen_hits = 3
+chosen_recall_at_100 = 0.009115
+chosen_coverage = 0.026905
+delta_hits = -1
+delta_recall_at_100 = -0.002604
+winner = "baseline（新配额输给基准，按规则保留基准）"
+
 [budget_actual]
-model_requests = 0
-tool_calls = 0
-elapsed_s = 0.0
-reason = "缺少 LLM 配置，入口在发请求前显式失败（exit 2）"
+model_requests = 2
+tool_calls = 1
+elapsed_s = 3.05
+limit_seconds = 180
 
 [artifacts]
 experiment = "experiments/2026-11-08-kuasar_small-llm-tool-call/"
-baseline_copy = "baseline.json（基准存在时写入）"
-candidate_details = "artifacts/kuasar_small/llm_tool_call/cache_eval/<quota>/（未产生，因为未调用工具）"
+candidate_details = "artifacts/kuasar_small/llm_tool_call/cache_eval/70_30/"
+evidence_chain = "events.jsonl（10 条事件，含两个 response_id 与 tool_call_id）"
 
 [commands]
 verify = "python -m recsys.experiments.llm_tool_call --experiment-dir experiments/2026-11-08-kuasar_small-llm-tool-call"
 self_check = "python -m recsys.experiments.llm_tool_call --self-check"
-powershell = "$env:DSH_AGENT_LLM_BASE_URL='https://api.deepseek.com/v1'; $env:DSH_AGENT_LLM_API_KEY='<key>'; $env:DSH_AGENT_LLM_MODEL='deepseek-chat'; python -m recsys.experiments.llm_tool_call --experiment-dir experiments/2026-11-08-kuasar_small-llm-tool-call"

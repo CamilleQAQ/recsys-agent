@@ -110,6 +110,8 @@ def post_chat(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+        # 本轮要求恰好一次工具调用；支持该参数的 OpenAI 兼容服务会禁止并行调用。
+        payload["parallel_tool_calls"] = False
     request = urllib.request.Request(
         f"{config['base_url'].rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
@@ -255,6 +257,31 @@ def run_self_check() -> dict:
     return based_on, current
 
 
+def load_baseline() -> tuple[dict, dict]:
+    """读取已落盘的 50/50 基准，并核对缓存指纹仍与当前一致。"""
+    if not BASELINE_RUN.exists():
+        raise VerificationError(f"缺少基准文件：{BASELINE_RUN}（先跑 2.23 的本地 Agent）")
+    baseline = json.loads(BASELINE_RUN.read_text(encoding="utf-8"))
+    context = load_context(DEFAULT_CACHE)  # 会重新核对 128 用户 / 362 目标与缓存完整性
+    current = context.fingerprints
+    recorded = baseline.get("evidence", {}).get("fingerprints", {})
+    keys = ("users", "items", "split_strategy", "split_sha256", "id_mapping_sha256", "routing_seed", "k_recall")
+    mismatched = [key for key in keys if recorded.get(key) != current.get(key)]
+    if mismatched:
+        raise VerificationError(f"基准指纹与当前缓存不一致：{mismatched}")
+    based_on = {
+        "quota": baseline["quota"],
+        "hits": baseline["hits"],
+        "recall_at_100": baseline["recall_at_100"],
+        "coverage": baseline["coverage"],
+        "candidates_total": baseline["candidates_total"],
+        "users": baseline["users"],
+        "targets": baseline["targets"],
+        "fingerprints_verified": True,
+    }
+    return based_on, current
+
+
 def build_messages(baseline: dict) -> list[dict]:
     """只发送配置与聚合指标：无用户 ID、无候选明细、无标签、无密钥。"""
     return [
@@ -263,6 +290,8 @@ def build_messages(baseline: dict) -> list[dict]:
             "content": (
                 "你是推荐系统研究 Agent。你必须调用提供的工具来评测一组融合配额，"
                 "不要用普通文本代替工具调用。"
+                "本轮只允许发起 1 次工具调用，参数只能是一组配额（two_tower_quota 与 mind_quota），"
+                "禁止并行多个 tool_calls。"
             ),
         },
         {
@@ -418,7 +447,7 @@ def run(experiment_dir: Path, *, cache_dir: Path = DEFAULT_CACHE) -> dict:
     )
 
     followup = messages + [
-        {"role": "assistant", "content": message.get("content") or "", "tool_calls": tool_calls},
+        {"role": "assistant", "content": raw_message.get("content") or "", "tool_calls": raw_calls},
         {
             "role": "tool",
             "tool_call_id": call_id,

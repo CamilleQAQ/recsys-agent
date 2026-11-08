@@ -1,0 +1,13 @@
+{
+  "quota": {
+    "two_tower": 50,
+    "mind": 50
+  },
+  "hits": 4,
+  "recall_at_100": 0.011719,
+  "coverage": 0.026843,
+  "candidates_total": 12800,
+  "users": 128,
+  "targets": 362,
+  "fingerprints_verified": true
+}
