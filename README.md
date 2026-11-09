@@ -23,6 +23,7 @@
 | 数据主线 | **KuaiSAR 2.0**：下载 → 全量画像 → processed npy 存储 → `PreparedData` 接入（Phase 1.1–1.4 完成）；KuaiRec 为流程模板/辅助线 |
 | 搜索 MVP | 2026-11-09：核验 `keyword`/`caption` 共用 KuaiSAR token ID；30 会话 / 120 物品 BM25 索引 + 查询 CLI；只跑一次冒烟（9/9 通过），见 [docs/search.md](docs/search.md) |
 | Search Agent | 2026-11-09：`search_bm25` 原生工具调用 + 一次反馈决策；真实工作流 1 次，2 请求 / 1 检索后主动停止，verified，见 [docs/search-agent.md](docs/search-agent.md) |
+| Search Agent 修复 | 2026-11-09：候选/模型自由文本不落盘；`--tokens` 支持样本外查询；本地替身回归 45/45，旧证据哈希不变 |
 | 累计清理 | 400.7 MB → 108.8 MB（第三方部分），详见 [docs/cleanup-report.md](docs/cleanup-report.md) |
 
 模型清单见 [docs/model-zoo.md](docs/model-zoo.md)（由 [models/zoo.toml](models/zoo.toml) 生成）。
@@ -90,6 +91,8 @@ python -m recsys.search.smoke --top-k 5   # 有匹配 / 空查询 / 无匹配一
 
 # 6. Search Agent：复用上面的 BM25 索引（真实运行会调用 LLM，最多 3 次请求）
 python -m recsys.experiments.search_agent --self-check       # 本地 12 项，不联网
+python -m recsys.experiments.search_agent `
+    --regression --tokens 2                                  # 本地替身回归，不联网
 python -m recsys.experiments.search_agent `
     --tokens "3538762,3181091,4061567,3525929"
 ```

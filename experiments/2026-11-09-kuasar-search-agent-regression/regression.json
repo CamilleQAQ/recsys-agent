@@ -1,0 +1,269 @@
+{
+  "format": "recsys.search_agent.regression.v1",
+  "generated_at": "2026-11-09T16:24:35+0800",
+  "output_dir": "artifacts\\search_agent_regression_tokens\\regression-20261109T082434Z-17568",
+  "passed": true,
+  "checks": [
+    {
+      "id": "self_check",
+      "status": "pass",
+      "detail": "12 项本地自检"
+    },
+    {
+      "id": "matched_session.verified",
+      "status": "pass",
+      "detail": "status=verified"
+    },
+    {
+      "id": "matched_session.query_session",
+      "status": "pass",
+      "detail": "session_id='11208'"
+    },
+    {
+      "id": "matched_session.query_source",
+      "status": "pass",
+      "detail": "source='config_default_session'"
+    },
+    {
+      "id": "matched_session.first_query_original",
+      "status": "pass",
+      "detail": "首查参数的 query_tokens 与输入一致"
+    },
+    {
+      "id": "matched_session.tool_call_id",
+      "status": "pass",
+      "detail": "tool_call_id='call-regression-matched_session'"
+    },
+    {
+      "id": "matched_session.return_count",
+      "status": "pass",
+      "detail": "count=5"
+    },
+    {
+      "id": "matched_session.return_nonzero",
+      "status": "pass",
+      "detail": "expected_nonzero=True, count=5"
+    },
+    {
+      "id": "matched_session.stop_status",
+      "status": "pass",
+      "detail": "stop_code='model_stop'"
+    },
+    {
+      "id": "matched_session.stop_summary",
+      "status": "pass",
+      "detail": "停止摘要是程序生成的"
+    },
+    {
+      "id": "matched_session.no_model_text_rule",
+      "status": "pass",
+      "detail": "trace rules 标记 model_free_text_persisted=false"
+    },
+    {
+      "id": "matched_session.no_content_preview",
+      "status": "pass",
+      "detail": "轨迹 response 不含模型正文"
+    },
+    {
+      "id": "matched_session.raw_reply_absent",
+      "status": "pass",
+      "detail": "模型原始回复不在序列化工件中"
+    },
+    {
+      "id": "matched_session.candidate_ids_absent",
+      "status": "pass",
+      "detail": "候选 5 个，落盘泄漏 0 个"
+    },
+    {
+      "id": "matched_session.tool_result_sent_to_model",
+      "status": "pass",
+      "detail": "第二次请求通过同一 tool_call_id 收到工具返回"
+    },
+    {
+      "id": "out_of_sample_hit.verified",
+      "status": "pass",
+      "detail": "status=verified"
+    },
+    {
+      "id": "out_of_sample_hit.query_session",
+      "status": "pass",
+      "detail": "session_id=None"
+    },
+    {
+      "id": "out_of_sample_hit.query_source",
+      "status": "pass",
+      "detail": "source='cli_tokens_out_of_sample'"
+    },
+    {
+      "id": "out_of_sample_hit.first_query_original",
+      "status": "pass",
+      "detail": "首查参数的 query_tokens 与输入一致"
+    },
+    {
+      "id": "out_of_sample_hit.tool_call_id",
+      "status": "pass",
+      "detail": "tool_call_id='call-regression-out_of_sample_hit'"
+    },
+    {
+      "id": "out_of_sample_hit.return_count",
+      "status": "pass",
+      "detail": "count=1"
+    },
+    {
+      "id": "out_of_sample_hit.return_nonzero",
+      "status": "pass",
+      "detail": "expected_nonzero=True, count=1"
+    },
+    {
+      "id": "out_of_sample_hit.stop_status",
+      "status": "pass",
+      "detail": "stop_code='model_stop'"
+    },
+    {
+      "id": "out_of_sample_hit.stop_summary",
+      "status": "pass",
+      "detail": "停止摘要是程序生成的"
+    },
+    {
+      "id": "out_of_sample_hit.no_model_text_rule",
+      "status": "pass",
+      "detail": "trace rules 标记 model_free_text_persisted=false"
+    },
+    {
+      "id": "out_of_sample_hit.no_content_preview",
+      "status": "pass",
+      "detail": "轨迹 response 不含模型正文"
+    },
+    {
+      "id": "out_of_sample_hit.raw_reply_absent",
+      "status": "pass",
+      "detail": "模型原始回复不在序列化工件中"
+    },
+    {
+      "id": "out_of_sample_hit.candidate_ids_absent",
+      "status": "pass",
+      "detail": "候选 1 个，落盘泄漏 0 个"
+    },
+    {
+      "id": "out_of_sample_hit.tool_result_sent_to_model",
+      "status": "pass",
+      "detail": "第二次请求通过同一 tool_call_id 收到工具返回"
+    },
+    {
+      "id": "out_of_sample_no_match.verified",
+      "status": "pass",
+      "detail": "status=verified"
+    },
+    {
+      "id": "out_of_sample_no_match.query_session",
+      "status": "pass",
+      "detail": "session_id=None"
+    },
+    {
+      "id": "out_of_sample_no_match.query_source",
+      "status": "pass",
+      "detail": "source='cli_tokens_out_of_sample'"
+    },
+    {
+      "id": "out_of_sample_no_match.first_query_original",
+      "status": "pass",
+      "detail": "首查参数的 query_tokens 与输入一致"
+    },
+    {
+      "id": "out_of_sample_no_match.tool_call_id",
+      "status": "pass",
+      "detail": "tool_call_id='call-regression-out_of_sample_no_match'"
+    },
+    {
+      "id": "out_of_sample_no_match.return_count",
+      "status": "pass",
+      "detail": "count=0"
+    },
+    {
+      "id": "out_of_sample_no_match.return_nonzero",
+      "status": "pass",
+      "detail": "expected_nonzero=False, count=0"
+    },
+    {
+      "id": "out_of_sample_no_match.stop_status",
+      "status": "pass",
+      "detail": "stop_code='model_stop'"
+    },
+    {
+      "id": "out_of_sample_no_match.stop_summary",
+      "status": "pass",
+      "detail": "停止摘要是程序生成的"
+    },
+    {
+      "id": "out_of_sample_no_match.no_model_text_rule",
+      "status": "pass",
+      "detail": "trace rules 标记 model_free_text_persisted=false"
+    },
+    {
+      "id": "out_of_sample_no_match.no_content_preview",
+      "status": "pass",
+      "detail": "轨迹 response 不含模型正文"
+    },
+    {
+      "id": "out_of_sample_no_match.raw_reply_absent",
+      "status": "pass",
+      "detail": "模型原始回复不在序列化工件中"
+    },
+    {
+      "id": "out_of_sample_no_match.candidate_ids_absent",
+      "status": "pass",
+      "detail": "候选 0 个，落盘泄漏 0 个"
+    },
+    {
+      "id": "out_of_sample_no_match.tool_result_sent_to_model",
+      "status": "pass",
+      "detail": "第二次请求通过同一 tool_call_id 收到工具返回"
+    },
+    {
+      "id": "session_token_mismatch.blocked",
+      "status": "pass",
+      "detail": "--session-id 与 --tokens 不一致时被拒绝"
+    },
+    {
+      "id": "old_evidence.unchanged",
+      "status": "pass",
+      "detail": "索引/样本/旧真实工件/旧 self_check 哈希前后一致"
+    }
+  ],
+  "cases": {
+    "matched_session": {
+      "status": "pass",
+      "session_id": "11208"
+    },
+    "out_of_sample_hit": {
+      "status": "pass",
+      "session_id": null,
+      "query_token_count": 1
+    },
+    "out_of_sample_no_match": {
+      "status": "pass",
+      "session_id": null
+    }
+  },
+  "self_check": {
+    "passed": true,
+    "total": 12
+  },
+  "old_evidence": {
+    "unchanged": true,
+    "hashes": {
+      "index": "3ae2b858d456eab4c4c21ed356812cd44260b56dd596639588a53fb1a6a52690",
+      "sample": "12a46f3c3a614a715e52f4a790ccac93eb0fc7519ab5ff4a0826ceace58a7daf",
+      "real_trace": "05fd04386872e769544e2ae6717354e7c5b6ff719f993e9ad50cb5eff08ff14d",
+      "real_metrics": "f96a39f3ec88f6ffb747dc044cda82c1bd272fb65c8da76157eed90340cb9f34",
+      "real_run_meta": "48a074126b9da34242768f62756f0a03635d71fedec0c8fdccfa3b0f1f12be0f",
+      "old_self_check": "041c55d28fed406e058ef74cece2775c6b15508d06e3fa53c7e5da7b7b1af9b2"
+    }
+  },
+  "scope": {
+    "real_llm_requests": 0,
+    "index_rebuild": 0,
+    "real_smoke_rerun": 0,
+    "candidate_details_persisted": false
+  }
+}

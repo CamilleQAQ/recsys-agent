@@ -55,6 +55,8 @@ result = tool.search([3538762, 3181091, 4061567, 3525929], top_k=5)
 | --- | --- |
 | 第一次查询 | 必须与 `original_query_tokens` **完全一致**（顺序也不能变） |
 | 第二次查询 | 非空；只能使用原查询里的 token（multiset 子集）；必须至少去掉一个 token；不能与之前查询相同 |
+| 样本外查询 | 只传 `--tokens` 时直接查现有索引；匹配不到样本会话也继续，`session_id=null`；匹配到时补充元信息 |
+| 会话绑定 | `--session-id` 仍从样本加载；同时传 `--tokens` 时仍校验两者一致 |
 | 工具参数 | `query_tokens` 非空、正整数、最多 64 个；`top_k` 1–5；未知字段拒绝 |
 | BM25 查询预算 | 最多 **2** 次；执行前检查 |
 | 模型请求预算 | 最多 **3** 次；每次调用前计数 |
@@ -90,6 +92,11 @@ $env:PYTHONPATH = "src"
 # 不联网的本地自检（12 项，合成响应）
 python -m recsys.experiments.search_agent --self-check
 
+# 本地替身回归：候选不落盘、样本外查询、旧证据不变（不调用真实 LLM）
+python -m recsys.experiments.search_agent `
+  --regression --tokens 2 `
+  --output-root artifacts/search_agent_regression_tokens
+
 # 真实工作流（本轮只应启动一次；重复执行会创建新的 run 目录）
 python -m recsys.experiments.search_agent `
   --tokens "3538762,3181091,4061567,3525929" `
@@ -99,7 +106,8 @@ python -m recsys.experiments.search_agent `
 python -m recsys.experiments.search_agent --session-id 11208
 ```
 
-`--tokens` 的 token 必须能匹配 Search 1 样本中的某个会话；否则 `blocked`。
+只传 `--tokens` 时不再要求命中样本会话：能匹配就补 `session_id`，匹配不到以
+`cli_tokens_out_of_sample` 继续查询。`--session-id` 仍从样本加载；两者同时传入时校验一致。
 LLM 配置从仓库根目录 `.env` / 环境变量读取，密钥不写入轨迹。
 
 ## 6. 本地 self-check（12/12）
@@ -117,9 +125,11 @@ LLM 配置从仓库根目录 `.env` / 环境变量读取，密钥不写入轨迹
 | tool_call_id 与 tool 消息一致 | pass |
 | 请求 3/3、检索 2/2 未超限 | pass |
 | 轨迹不保存候选明细 | pass |
-| 最终回复含逐条候选 → 落盘前截断 | pass |
+| 模型最终回复正文不落盘 | pass |
 
-完整结果：[self_check.json](../experiments/2026-11-09-kuasar-search-agent/self_check.json)。
+完整结果：[regression.json](../experiments/2026-11-09-kuasar-search-agent-regression/regression.json)
+的 `self_check` 字段；旧的 [self_check.json](../experiments/2026-11-09-kuasar-search-agent/self_check.json)
+按“旧证据保留”未改写。
 
 ## 7. 真实工作流结果
 
@@ -160,13 +170,22 @@ first return: 5 条（top_k=5）
 - `experiments/2026-11-09-kuasar-search-agent/run-20261109T080657Z-19556/run_meta.json`
   （sha256 `48a07412…`）
 
-## 8. 落盘边界
+> 该真实工件产生于 2026-11-09 修复前，按“旧证据保留”未改写。它不含候选 ID，
+> 但仍保留了模型停止理由文本；修复后的代码不再落盘任何模型自由文本，见 §10。
 
-模型最终回复原始长度 **503 字符**，其中附带了逐条候选列表。按本轮交付边界，
-落盘前只保留停止理由，候选列表被截断；原始回复只保留 sha256
-`bc0963cef562925b1ed65ef0ae1e68f6dd3918b73ef9c13cfcd0bdec285171fb`，
-不保存原文。轨迹中的 `tool_return` 只有 `count`、`top_k`、`query_tokens` 和预算，
-没有逐条候选；`candidates_persisted=false`、`final_reply_redacted=true`。
+## 8. 落盘边界（修复后）
+
+- 候选/工具结果仍通过 `role=tool` 的消息回传给模型，供其决定停止或再查；
+- 轨迹 `response` 只保留 `content_chars`、`content_present`、`finish_reason`、`tool_calls`，
+  不写 `content_preview` / `content` / `final_reply`；
+- 最终摘要只写 `stop_code`、`stop_type`、程序生成的 `stop_summary`、
+  `final_reply_status`、`final_reply_chars`、返回数量和预算；
+- `trace.json` / `metrics.json` / `run_meta.json` 标记
+  `candidates_persisted=false`、`model_free_text_persisted=false`；
+- 模型正文只在内存中用于 `finish_reason=stop` + 非空判断，随后丢弃；
+  超时、截断、空回复仍走原有 `partial` 路径。
+
+旧真实工件（sha256 见 §7）保持原样；新的回归工件写在 Git 忽略的 `artifacts/`。
 
 ## 9. 已知限制与下一步
 
@@ -175,3 +194,29 @@ first return: 5 条（top_k=5）
 - 未做中文文本输入、query→token 编码、向量检索、排序/重排。
 - 本轮只读 Search 1 索引与样本；未重建索引、未扫原始 CSV。
 - 后续可把 `SearchBM25Tool` 接到更大的索引，或扩展为多轮反馈/多路召回。
+
+## 10. 2026-11-09 修复回归（本地替身）
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m recsys.experiments.search_agent `
+  --regression --tokens 2 `
+  --output-root artifacts/search_agent_regression_tokens
+```
+
+结果：**45/45** 检查通过，self-check **12/12**；真实 LLM 请求、索引重建、真实冒烟重跑均为 0。
+
+| 用例 | session | 返回数量 | 结果 |
+| --- | --- | ---: | --- |
+| 样本会话 11208 | `11208` | 5 | verified |
+| 样本外 token `[2]` | `null` | 1 | verified |
+| 样本外无匹配 `[1000000000000]` | `null` | 0 | verified |
+| `--session-id` + 不一致 token | — | — | blocked |
+
+回归检查了实际序列化的 `trace.json` / `metrics.json` / `run_meta.json`：
+候选 ID、模型原始回复均未出现；调用 ID、返回数量、停止类型与预算仍可核对。
+旧真实工件与索引/样本哈希前后一致。
+
+证据：[regression report](../experiments/2026-11-09-kuasar-search-agent-regression/report.md)、
+[regression.json](../experiments/2026-11-09-kuasar-search-agent-regression/regression.json)
+（sha256 `b2a24887…`）。

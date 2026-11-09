@@ -55,9 +55,9 @@ from recsys.search.tool import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs" / "experiments" / "search_agent.toml"
+DEFAULT_REGRESSION_ROOT = PROJECT_ROOT / "artifacts" / "search_agent_regression"
 SCHEMA_VERSION = 1
 TRACE_FORMAT = "recsys.search_agent.trace.v1"
-MAX_ASSISTANT_PREVIEW = 300
 
 
 class AgentBlocked(RuntimeError):
@@ -123,13 +123,14 @@ def _session_by_id(sessions: Sequence[Mapping[str, Any]], session_id: str) -> Ma
     raise AgentBlocked(f"样本里找不到 session_id={session_id}")
 
 
-def _session_by_tokens(
+def _find_session_by_tokens(
     sessions: Sequence[Mapping[str, Any]], tokens: Sequence[int]
-) -> Mapping[str, Any]:
+) -> Mapping[str, Any] | None:
+    """能在样本中遇到同 query 时会话就返回；样本外查询返回 None。"""
     for session in sessions:
         if [int(token) for token in session.get("keyword", [])] == list(tokens):
             return session
-    raise AgentBlocked("查询 token 不属于 Search 1 样本中的任何一个会话；请使用已有 KuaiSAR 查询")
+    return None
 
 
 class SearchContext:
@@ -144,7 +145,7 @@ class SearchContext:
         index_sha256: str,
         sample_sha256: str,
         query_tokens: list[int],
-        session_id: str,
+        session_id: str | None,
         query_source: str,
         clicked_items_count: int,
         clicked_joined_count: int,
@@ -213,6 +214,7 @@ def load_context(
         raise AgentBlocked("sample.json 里没有 sessions")
 
     explicit_tokens = list(tokens) if tokens is not None else None
+    session: Mapping[str, Any] | None = None
     if session_id and explicit_tokens is not None:
         session = _session_by_id(sessions, session_id)
         if [int(token) for token in session.get("keyword", [])] != explicit_tokens:
@@ -223,9 +225,15 @@ def load_context(
         explicit_tokens = [int(token) for token in session.get("keyword", [])]
         query_source = "sample_session"
     elif explicit_tokens is not None:
-        session = _session_by_tokens(sessions, explicit_tokens)
-        session_id = str(session.get("session_id"))
-        query_source = "cli_tokens"
+        # 只传 --tokens：先用输入查索引；能遇到同样 query 的样本会话就补充元信息，
+        # 样本外查询也继续执行，不再 blocked。
+        session = _find_session_by_tokens(sessions, explicit_tokens)
+        if session is not None:
+            session_id = str(session.get("session_id"))
+            query_source = "cli_tokens_matched_session"
+        else:
+            session_id = None
+            query_source = "cli_tokens_out_of_sample"
     else:
         session_id = str(search_cfg.get("default_session_id") or "")
         if not session_id:
@@ -251,10 +259,10 @@ def load_context(
         index_sha256=index_sha,
         sample_sha256=sample_sha,
         query_tokens=query_tokens,
-        session_id=str(session_id),
+        session_id=session_id,
         query_source=query_source,
-        clicked_items_count=len(session.get("clicked_items") or []),
-        clicked_joined_count=len(session.get("clicked_joined_items") or []),
+        clicked_items_count=len((session or {}).get("clicked_items") or []),
+        clicked_joined_count=len((session or {}).get("clicked_joined_items") or []),
     )
 
 
@@ -355,34 +363,31 @@ def _reply_status(response: Mapping[str, Any]) -> tuple[str, str, str]:
     return "ok", content, finish_reason
 
 
-def _sanitize_reply(text: str) -> tuple[str, bool]:
-    """去掉模型最终回复里附带的逐条候选列表，只保留停止理由。
-
-    候选只在本次工具返回与模型决策中传递，默认不落盘；模型若在最终回复里
-    复述 item_id 列表，落盘前截断到列表之前。
-    """
-    stripped = str(text or "").strip()
-    if not stripped:
-        return "", False
-    kept: list[str] = []
-    for line in stripped.splitlines():
-        lower = line.lower()
-        if "item_id" in lower or "最终结果" in line or "最终候选" in line or "结果列表" in line:
-            break
-        kept.append(line)
-    sanitized = "\n".join(kept).strip()
-    if not sanitized:
-        sanitized = "模型选择停止（候选明细未落盘）。"
-    return sanitized, sanitized != stripped
+def _record_final_reply_status(
+    state: "AgentState", *, reply_status: str, content: str
+) -> None:
+    """只记录完成状态和长度，不保存模型自由文本。"""
+    state["final_reply_status"] = reply_status
+    state["final_reply_chars"] = len(content)
 
 
-def _remember_final_reply(state: "AgentState", content: str) -> str:
-    sanitized, redacted = _sanitize_reply(content)
-    state["final_reply"] = _safe_text(sanitized, 1000)
-    state["final_reply_redacted"] = redacted
-    state["final_reply_raw_chars"] = len(content)
-    state["final_reply_raw_sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    return state["final_reply"]
+def _stop_summary(state: "AgentState", *, stop_type: str) -> str:
+    """程序生成的停止摘要；不引用模型自由文本。"""
+    search_calls = int(state.get("search_calls", 0))
+    counts: list[str] = []
+    if search_calls >= 1:
+        counts.append(str(int(state.get("first_result_count", 0))))
+    if search_calls >= 2:
+        counts.append(str(int(state.get("second_result_count", 0))))
+    return (
+        f"模型在 {search_calls} 次检索后停止（{stop_type}）；"
+        f"模型请求 {int(state.get('request_count', 0))}/"
+        f"{int(state.get('max_model_requests', 3))}，"
+        f"BM25 查询 {search_calls}/{int(state.get('max_search_calls', 2))}，"
+        f"各次返回数量 {'/'.join(counts) if counts else '0'}；"
+        f"最终回复状态 {state.get('final_reply_status', 'missing')}"
+        f"（{int(state.get('final_reply_chars', 0))} 字符，正文不落盘）。"
+    )
 
 
 def _response_summary(response: Mapping[str, Any]) -> dict[str, Any]:
@@ -398,12 +403,11 @@ def _response_summary(response: Mapping[str, Any]) -> dict[str, Any]:
             }
         )
     content = _message_content(response)
-    preview, _ = _sanitize_reply(content)
     return {
         "id": response.get("id"),
         "finish_reason": _finish_reason(response),
         "content_chars": len(content),
-        "content_preview": _safe_text(preview, MAX_ASSISTANT_PREVIEW),
+        "content_present": bool(content.strip()),
         "tool_calls": calls,
     }
 
@@ -476,7 +480,7 @@ class AgentState(TypedDict, total=False):
     context: Any
     llm_config: dict
     query_tokens: list[int]
-    session_id: str
+    session_id: str | None
     request_count: int
     search_calls: int
     max_search_calls: int
@@ -495,11 +499,11 @@ class AgentState(TypedDict, total=False):
     current_arguments: dict
     first_result_count: int
     second_result_count: int
-    final_reply: str
-    final_reply_redacted: bool
-    final_reply_raw_chars: int
-    final_reply_raw_sha256: str
+    final_reply_status: str
+    final_reply_chars: int
     stop_code: str
+    stop_type: str
+    stop_summary: str
     stop_reason: str
     error: str
     summary: dict
@@ -568,6 +572,8 @@ def _shutdown(
 ) -> AgentState:
     state["status"] = status
     state["stop_code"] = code
+    state["stop_type"] = code
+    state["stop_summary"] = reason
     state["stop_reason"] = reason
     state["error"] = error or reason
     steps = state.get("trace_steps", [])
@@ -575,7 +581,8 @@ def _shutdown(
     updates: dict[str, Any] = {
         "stop": {
             "code": code,
-            "reason": reason,
+            "stop_type": code,
+            "summary": reason,
             "status": status,
         }
     }
@@ -897,29 +904,49 @@ def node_request_feedback(state: AgentState, chat_fn: ChatFn) -> AgentState:
     if not _message_tool_calls(response):
         reply_status, content, finish_reason = _reply_status(response)
         if reply_status == "ok":
-            final_reply = _remember_final_reply(state, content)
+            _record_final_reply_status(state, reply_status="ok", content=content)
+            search_calls = int(state.get("search_calls", 0))
+            stop_type = (
+                "model_stop_after_first_search"
+                if search_calls <= 1
+                else "model_stop_after_second_search"
+            )
+            stop_summary = _stop_summary(state, stop_type=stop_type)
             state["stop_code"] = "model_stop"
-            state["stop_reason"] = final_reply
+            state["stop_type"] = stop_type
+            state["stop_summary"] = stop_summary
+            state["stop_reason"] = stop_summary
             state["status"] = "verified"
             _update_last_step(
                 state,
-                decision={"action": "stop", "reason": final_reply},
+                decision={"action": "stop", "reason": stop_summary, "stop_type": stop_type},
                 stop={
                     "code": "model_stop",
-                    "reason": final_reply,
+                    "stop_type": stop_type,
+                    "summary": stop_summary,
                     "status": "verified",
                     "finish_reason": finish_reason,
                     "reply_status": "ok",
                 },
             )
-            _event(state, {"event": "model_stop", "request": state.get("request_count"), "reason": state["final_reply"]})
+            _event(
+                state,
+                {
+                    "event": "model_stop",
+                    "request": state.get("request_count"),
+                    "stop_type": stop_type,
+                    "summary": stop_summary,
+                },
+            )
             state["route_after_feedback"] = "finish"
             return _leave(state, "request_feedback")
+        _record_final_reply_status(state, reply_status=reply_status, content=content)
         code = (
             "reply_truncated"
             if reply_status == "truncated"
             else ("non_stop_finish_reason" if reply_status == "non_stop" else "empty_feedback")
         )
+        state["stop_type"] = reply_status
         reason = (
             f"第一次检索后的模型回复不可用（{reply_status}, finish_reason={finish_reason or 'missing'}）；"
             f"已保留 {state.get('search_calls', 0)} 次检索。"
@@ -970,12 +997,11 @@ def node_request_feedback(state: AgentState, chat_fn: ChatFn) -> AgentState:
     state["current_top_k"] = parsed["top_k"]
     state["current_arguments"] = parsed["arguments"]
     state.setdefault("tool_call_ids", []).append(parsed["id"])
-    preview = _safe_text(_message_content(response), MAX_ASSISTANT_PREVIEW)
     _update_last_step(
         state,
         decision={
             "action": "search",
-            "reason": preview or "model_requested_second_query",
+            "reason": "model_issued_second_query_after_first_result",
             "query_tokens": parsed["query_tokens"],
         },
         tool_call={
@@ -1091,6 +1117,9 @@ def node_request_final(state: AgentState, chat_fn: ChatFn) -> AgentState:
     state["dialogue"] = [*state["dialogue"], _assistant_message(response)]
     calls = _message_tool_calls(response)
     if calls:
+        _record_final_reply_status(
+            state, reply_status="tool_calls", content=_message_content(response)
+        )
         call = calls[0]
         function = call.get("function") or {}
         _update_last_step(
@@ -1120,24 +1149,39 @@ def node_request_final(state: AgentState, chat_fn: ChatFn) -> AgentState:
 
     reply_status, content, finish_reason = _reply_status(response)
     if reply_status == "ok":
-        final_reply = _remember_final_reply(state, content)
+        _record_final_reply_status(state, reply_status="ok", content=content)
+        stop_type = "budget_exhausted_final"
+        stop_summary = _stop_summary(state, stop_type=stop_type)
         state["stop_code"] = "budget_exhausted_final"
-        state["stop_reason"] = final_reply
+        state["stop_type"] = stop_type
+        state["stop_summary"] = stop_summary
+        state["stop_reason"] = stop_summary
         state["status"] = "verified"
         _update_last_step(
             state,
-            decision={"action": "stop", "reason": final_reply},
+            decision={"action": "stop", "reason": stop_summary, "stop_type": stop_type},
             stop={
                 "code": "budget_exhausted_final",
-                "reason": final_reply,
+                "stop_type": stop_type,
+                "summary": stop_summary,
                 "status": "verified",
                 "finish_reason": finish_reason,
                 "reply_status": "ok",
             },
         )
-        _event(state, {"event": "model_final", "request": state.get("request_count"), "reason": state["final_reply"]})
+        _event(
+            state,
+            {
+                "event": "model_final",
+                "request": state.get("request_count"),
+                "stop_type": stop_type,
+                "summary": stop_summary,
+            },
+        )
         return _leave(state, "request_final")
 
+    _record_final_reply_status(state, reply_status=reply_status, content=content)
+    state["stop_type"] = reply_status
     code = (
         "reply_truncated"
         if reply_status == "truncated"
@@ -1165,7 +1209,7 @@ def node_finish(state: AgentState) -> AgentState:
     if state.get("status", "running") == "running":
         if (
             int(state.get("search_calls", 0)) >= 1
-            and state.get("final_reply")
+            and state.get("final_reply_status") == "ok"
             and state.get("stop_code") in {"model_stop", "budget_exhausted_final"}
         ):
             state["status"] = "verified"
@@ -1227,8 +1271,9 @@ def node_finish(state: AgentState) -> AgentState:
         isinstance(step.get("tool_return"), dict) and "results" in step["tool_return"]
         for step in state.get("trace_steps", [])
     )
-    reply_has_item_id = any(
-        "item_id" in str((step.get("decision") or {}).get("reason") or "").lower()
+    trace_has_model_text = any(
+        isinstance(step.get("response"), dict)
+        and any(key in step["response"] for key in ("content_preview", "content", "final_reply"))
         for step in state.get("trace_steps", [])
     )
     checks = {
@@ -1241,8 +1286,9 @@ def node_finish(state: AgentState) -> AgentState:
         "request_budget_ok": request_count <= max_requests,
         "search_budget_ok": search_calls <= max_searches,
         "second_query_rule_ok": second_query_valid,
-        "final_reply_ok": state.get("status") == "verified" and bool(state.get("final_reply")),
-        "no_candidate_dump": not trace_has_results and not reply_has_item_id,
+        "final_reply_ok": state.get("status") == "verified"
+        and state.get("final_reply_status") == "ok",
+        "no_candidate_dump": not trace_has_results and not trace_has_model_text,
     }
     state["checks"] = checks
     state["summary"] = {
@@ -1252,11 +1298,10 @@ def node_finish(state: AgentState) -> AgentState:
         "max_model_requests": max_requests,
         "max_search_calls": max_searches,
         "stop_code": state.get("stop_code"),
-        "stop_reason": state.get("stop_reason"),
-        "final_reply": state.get("final_reply", ""),
-        "final_reply_redacted": bool(state.get("final_reply_redacted")),
-        "final_reply_raw_chars": int(state.get("final_reply_raw_chars", 0)),
-        "final_reply_raw_sha256": state.get("final_reply_raw_sha256", ""),
+        "stop_type": state.get("stop_type"),
+        "stop_summary": state.get("stop_summary") or state.get("stop_reason", ""),
+        "final_reply_status": state.get("final_reply_status", "missing"),
+        "final_reply_chars": int(state.get("final_reply_chars", 0)),
         "queries_used": queries_used,
         "return_counts": return_counts,
         "index_sha256_before": context.index_sha256,
@@ -1267,7 +1312,8 @@ def node_finish(state: AgentState) -> AgentState:
         state,
         stop={
             "code": state.get("stop_code"),
-            "reason": state.get("stop_reason"),
+            "stop_type": state.get("stop_type"),
+            "summary": state.get("stop_summary") or state.get("stop_reason", ""),
             "status": state.get("status"),
         },
     )
@@ -1368,11 +1414,11 @@ def run_workflow(
         "route_after_feedback": "finish",
         "first_result_count": 0,
         "second_result_count": 0,
-        "final_reply": "",
-        "final_reply_redacted": False,
-        "final_reply_raw_chars": 0,
-        "final_reply_raw_sha256": "",
+        "final_reply_status": "",
+        "final_reply_chars": 0,
         "stop_code": "",
+        "stop_type": "",
+        "stop_summary": "",
         "stop_reason": "",
         "error": "",
         "chat_fn": chat_fn,  # type: ignore[typeddict-unknown-key]
@@ -1429,11 +1475,10 @@ def _finalize(
         "max_model_requests": int(state.get("max_model_requests", 3)),
         "max_search_calls": int(state.get("max_search_calls", 2)),
         "stop_code": state.get("stop_code"),
-        "stop_reason": state.get("stop_reason"),
-        "final_reply": state.get("final_reply", ""),
-        "final_reply_redacted": bool(state.get("final_reply_redacted")),
-        "final_reply_raw_chars": int(state.get("final_reply_raw_chars", 0)),
-        "final_reply_raw_sha256": state.get("final_reply_raw_sha256", ""),
+        "stop_type": state.get("stop_type"),
+        "stop_summary": state.get("stop_summary") or state.get("stop_reason", ""),
+        "final_reply_status": state.get("final_reply_status", "missing"),
+        "final_reply_chars": int(state.get("final_reply_chars", 0)),
         "queries_used": [list(query) for query in state.get("queries_used", [])],
         "return_counts": [],
         "index_sha256_before": context.index_sha256 if context else None,
@@ -1470,14 +1515,16 @@ def _finalize(
             "first_query": "must_equal_original",
             "second_query": "non_empty_true_subset_of_original_and_different",
             "candidates_persisted": False,
+            "model_free_text_persisted": False,
         },
         "steps": state.get("trace_steps", []),
         "checks": checks,
         "summary": summary,
         "candidates_persisted": False,
-        "final_reply_redacted": bool(summary.get("final_reply_redacted")),
+        "model_free_text_persisted": False,
         "persistence_note": (
-            "候选只在本次工具返回与模型决策中传递；落盘只保留数量、停止理由与哈希。"
+            "候选只通过工具消息回传模型；落盘只保留程序生成的调用 ID、查询 token、"
+            "返回数量、停止类型、预算和状态。"
         ),
         "error": state.get("error"),
     }
@@ -1504,9 +1551,10 @@ def _finalize(
         "checks": checks,
         "summary": summary,
         "candidates_persisted": False,
-        "final_reply_redacted": bool(summary.get("final_reply_redacted")),
+        "model_free_text_persisted": False,
         "persistence_note": (
-            "候选只在本次工具返回与模型决策中传递；落盘只保留数量、停止理由与哈希。"
+            "候选只通过工具消息回传模型；落盘只保留程序生成的调用 ID、查询 token、"
+            "返回数量、停止类型、预算和状态。"
         ),
         "error": state.get("error"),
         "scope": dict(config.get("scope") or {}),
@@ -1531,6 +1579,7 @@ def _finalize(
         "trace_file": _display_path(run_dir / "trace.json"),
         "metrics_file": _display_path(run_dir / "metrics.json"),
         "candidates_persisted": False,
+        "model_free_text_persisted": False,
     }
     (run_dir / "trace.json").write_text(
         json.dumps(trace, ensure_ascii=False, indent=2),
@@ -1561,11 +1610,11 @@ def _blocked_state(reason: str, config: Mapping[str, Any]) -> AgentState:
         "queries_used": [],
         "tool_call_ids": [],
         "tool_result_ids": [],
-        "final_reply": "",
-        "final_reply_redacted": False,
-        "final_reply_raw_chars": 0,
-        "final_reply_raw_sha256": "",
+        "final_reply_status": "missing",
+        "final_reply_chars": 0,
         "stop_code": "blocked",
+        "stop_type": "blocked",
+        "stop_summary": reason,
         "stop_reason": reason,
         "error": reason,
     }
@@ -1621,11 +1670,10 @@ def run(
             "max_model_requests": int(config["search_agent"]["max_model_requests"]),
             "max_search_calls": int(config["search_agent"]["max_search_calls"]),
             "stop_code": "blocked",
-            "stop_reason": reason,
-            "final_reply": "",
-            "final_reply_redacted": False,
-            "final_reply_raw_chars": 0,
-            "final_reply_raw_sha256": "",
+            "stop_type": "blocked",
+            "stop_summary": reason,
+            "final_reply_status": "missing",
+            "final_reply_chars": 0,
             "queries_used": [],
             "return_counts": [],
             "index_sha256_before": context.index_sha256,
@@ -1763,7 +1811,8 @@ def run_self_check(config: Mapping[str, Any], *, output_root: Path) -> dict[str,
         assert final["summary"]["search_calls"] == 1, final["summary"]
         assert final["summary"]["request_count"] == 2, final["summary"]
         assert final["summary"]["return_counts"] == [final["first_result_count"]]
-        assert final["final_reply"]
+        assert final["final_reply_status"] == "ok"
+        assert final["stop_summary"]
         return "一次检索 + 模型主动停止 → verified；2 次请求 / 1 次检索"
 
     def two_query_then_final() -> str:
@@ -1912,21 +1961,31 @@ def run_self_check(config: Mapping[str, Any], *, output_root: Path) -> dict[str,
         assert final["checks"]["no_candidate_dump"] is True
         return "轨迹只保留数量，不保存候选明细"
 
-    def candidate_reply_redacted() -> str:
+    def model_text_not_persisted() -> str:
+        # 普通句子列出两个候选 ID，正文没有 item_id / 结果列表等标记。
         final, _ = _fake_run(
             context,
             config,
             [
                 _tool_response("call-first", context.query_tokens),
-                _text_response("相关性足够，停止。\n\n最终结果：\n1. item_id 123 — demo（9.9）"),
+                _text_response("相关性足够，停止。返回的物品编号是 987654321、987654322。"),
             ],
         )
         assert final["status"] == "verified", final["status"]
-        assert final["final_reply_redacted"] is True
-        assert "item_id" not in final["final_reply"].lower()
+        assert final["final_reply_status"] == "ok", final["final_reply_status"]
+        assert final["final_reply_chars"] > 0
+        assert final["stop_summary"]
+        assert "final_reply" not in final
+        persisted = json.dumps(
+            {"steps": final["trace_steps"], "summary": final["summary"]},
+            ensure_ascii=False,
+        )
+        assert "987654321" not in persisted
+        assert "987654322" not in persisted
+        assert "相关性足够" not in persisted
+        assert "content_preview" not in final["trace_steps"][1]["response"]
         assert final["checks"]["no_candidate_dump"] is True
-        assert final["final_reply_raw_sha256"]
-        return "最终回复里的逐条候选在落盘前被截断，只保留停止理由"
+        return "模型最终回复只在内存中判断完成状态；轨迹/状态不含正文或候选 ID"
 
     _check(checks, "one_query_stop", one_query_stop)
     _check(checks, "two_query_then_final", two_query_then_final)
@@ -1939,7 +1998,7 @@ def run_self_check(config: Mapping[str, Any], *, output_root: Path) -> dict[str,
     _check(checks, "tool_call_id_roundtrip", tool_call_id_roundtrip)
     _check(checks, "budget_limits", budget_limits)
     _check(checks, "no_candidate_dump", no_candidate_dump)
-    _check(checks, "candidate_reply_redacted", candidate_reply_redacted)
+    _check(checks, "model_text_not_persisted", model_text_not_persisted)
 
     result = {
         "format": "recsys.search_agent.self_check.v1",
@@ -1961,6 +2020,354 @@ def run_self_check(config: Mapping[str, Any], *, output_root: Path) -> dict[str,
         encoding="utf-8",
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# 本地替身回归（不联网，不写旧证据）
+# ---------------------------------------------------------------------------
+
+
+class CandidateRepeatingChat:
+    """替身模型：首轮原查询，次轮用普通句子复述工具返回的候选 ID。"""
+
+    def __init__(self, call_id: str) -> None:
+        self.call_id = call_id
+        self.calls: list[dict[str, Any]] = []
+        self.final_text = ""
+
+    def __call__(self, config, messages, *, tools, timeout):
+        self.calls.append(
+            {
+                "messages": copy.deepcopy(messages),
+                "tools": copy.deepcopy(tools),
+                "timeout": timeout,
+            }
+        )
+        if len(self.calls) == 1:
+            user = next(
+                (item for item in reversed(messages) if item.get("role") == "user"),
+                None,
+            )
+            payload = json.loads(user["content"]) if user else {}
+            original = payload.get("original_query_tokens") or []
+            return _tool_response(self.call_id, original)
+        tool_messages = [item for item in messages if item.get("role") == "tool"]
+        candidate_ids: list[str] = []
+        if tool_messages:
+            try:
+                payload = json.loads(tool_messages[-1]["content"])
+            except (KeyError, TypeError, json.JSONDecodeError):
+                payload = {}
+            candidate_ids = [
+                str(item.get("item_id"))
+                for item in payload.get("results", [])
+                if item.get("item_id") is not None
+            ]
+        if candidate_ids:
+            self.final_text = (
+                "相关性足够，停止。返回的物品编号是 "
+                + "、".join(candidate_ids)
+                + "。"
+            )
+        else:
+            self.final_text = "没有返回物品，停止。"
+        return _text_response(self.final_text)
+
+
+def _sample_query_tokens(context: SearchContext) -> set[int]:
+    sample = json.loads(context.sample_path.read_text(encoding="utf-8"))
+    return {
+        int(token)
+        for session in sample.get("sessions", [])
+        for token in (session.get("keyword") or [])
+    }
+
+
+def _find_out_of_sample_hit_token(context: SearchContext) -> int:
+    sample_tokens = _sample_query_tokens(context)
+    index_tokens = {
+        token for item in context.index.items for token in item.caption_tokens
+    }
+    for token in sorted(index_tokens - sample_tokens):
+        hits = context.index.search([token], top_k=5)
+        if hits and all(hit.item_id != token for hit in hits):
+            return token
+    raise AgentBlocked("找不到「不在样本查询中且能命中索引」的合法 token")
+
+
+def _read_case_artifacts(case_dir: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
+    trace = json.loads((case_dir / "trace.json").read_text(encoding="utf-8"))
+    metrics = json.loads((case_dir / "metrics.json").read_text(encoding="utf-8"))
+    run_meta = json.loads((case_dir / "run_meta.json").read_text(encoding="utf-8"))
+    serialized = "\n".join(
+        (case_dir / name).read_text(encoding="utf-8")
+        for name in ("trace.json", "metrics.json", "run_meta.json")
+    )
+    return trace, metrics, run_meta, serialized
+
+
+def _run_regression_case(
+    name: str,
+    context: SearchContext,
+    config: Mapping[str, Any],
+    root: Path,
+    *,
+    expected_session_id: str | None,
+    expected_source: str,
+    expected_nonzero: bool,
+) -> list[dict[str, Any]]:
+    case_dir = root / name
+    chat = CandidateRepeatingChat(f"call-regression-{name}")
+    started = time.perf_counter()
+    state = run_workflow(
+        context,
+        config,
+        llm_cfg={"model": "fake-model", "base_url": "http://127.0.0.1", "api_key": "fake-key"},
+        chat_fn=chat,
+        started_at=started,
+    )
+    _finalize(
+        state,
+        run_dir=case_dir,
+        config=config,
+        context=context,
+        command=f"regression:{name}",
+        started_wall=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        elapsed_s=time.perf_counter() - started,
+    )
+    trace, metrics, _run_meta, serialized = _read_case_artifacts(case_dir)
+
+    checks: list[dict[str, Any]] = []
+
+    def add(check_id: str, passed: bool, detail: str) -> None:
+        checks.append({"id": f"{name}.{check_id}", "status": "pass" if passed else "fail", "detail": detail})
+
+    add("verified", state.get("status") == "verified", f"status={state.get('status')}")
+    add(
+        "query_session",
+        trace.get("query", {}).get("session_id") == expected_session_id,
+        f"session_id={trace.get('query', {}).get('session_id')!r}",
+    )
+    add(
+        "query_source",
+        trace.get("query", {}).get("source") == expected_source,
+        f"source={trace.get('query', {}).get('source')!r}",
+    )
+    first_step = (trace.get("steps") or [{}])[0]
+    tool_call = first_step.get("tool_call") or {}
+    tool_return = first_step.get("tool_return") or {}
+    add(
+        "first_query_original",
+        tool_call.get("arguments", {}).get("query_tokens") == list(context.query_tokens),
+        "首查参数的 query_tokens 与输入一致",
+    )
+    add(
+        "tool_call_id",
+        tool_call.get("id") == f"call-regression-{name}",
+        f"tool_call_id={tool_call.get('id')!r}",
+    )
+    count = int(tool_return.get("count", -1))
+    add("return_count", count == int(state.get("first_result_count", -1)), f"count={count}")
+    add(
+        "return_nonzero",
+        (count > 0) if expected_nonzero else (count == 0),
+        f"expected_nonzero={expected_nonzero}, count={count}",
+    )
+    add(
+        "stop_status",
+        (trace.get("summary") or {}).get("stop_code") == "model_stop",
+        f"stop_code={(trace.get('summary') or {}).get('stop_code')!r}",
+    )
+    add(
+        "stop_summary",
+        bool((trace.get("summary") or {}).get("stop_summary")),
+        "停止摘要是程序生成的",
+    )
+    add(
+        "no_model_text_rule",
+        trace.get("rules", {}).get("model_free_text_persisted") is False,
+        "trace rules 标记 model_free_text_persisted=false",
+    )
+    second_step = (trace.get("steps") or [{}, {}])[1]
+    response = second_step.get("response") or {}
+    add(
+        "no_content_preview",
+        "content_preview" not in response and "content" not in response,
+        "轨迹 response 不含模型正文",
+    )
+    raw_text_present = bool(chat.final_text) and chat.final_text in serialized
+    add("raw_reply_absent", not raw_text_present, "模型原始回复不在序列化工件中")
+    # 候选 ID 只用于断言，不写入 summary/报告。
+    tool_messages = [
+        item for item in (chat.calls[1]["messages"] if len(chat.calls) > 1 else [])
+        if item.get("role") == "tool"
+    ]
+    candidate_ids: list[str] = []
+    if tool_messages:
+        payload = json.loads(tool_messages[-1]["content"])
+        candidate_ids = [str(item.get("item_id")) for item in payload.get("results", [])]
+    leaked = [item_id for item_id in candidate_ids if item_id in serialized]
+    add(
+        "candidate_ids_absent",
+        not leaked,
+        f"候选 {len(candidate_ids)} 个，落盘泄漏 {len(leaked)} 个",
+    )
+    second_context = second_step.get("tool_result_in_context") or {}
+    add(
+        "tool_result_sent_to_model",
+        second_context.get("sent") is True
+        and second_context.get("call_id") == tool_call.get("id")
+        and int(second_context.get("count", -1)) == count,
+        "第二次请求通过同一 tool_call_id 收到工具返回",
+    )
+    return checks
+
+
+def run_local_regression(
+    config: Mapping[str, Any],
+    *,
+    output_root: Path,
+    tokens: Sequence[int] | None = None,
+) -> dict[str, Any]:
+    """本地替身回归，不调用 LLM；写入 artifacts/ 下的独立目录。"""
+    root = output_root / f"regression-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}"
+    root.mkdir(parents=True, exist_ok=True)
+
+    old_evidence_paths = {
+        "index": PROJECT_ROOT / "artifacts/search/kuasar_bm25/index.json",
+        "sample": PROJECT_ROOT / "artifacts/search/kuasar_bm25/sample.json",
+        "real_trace": PROJECT_ROOT / "experiments/2026-11-09-kuasar-search-agent/run-20261109T080657Z-19556/trace.json",
+        "real_metrics": PROJECT_ROOT / "experiments/2026-11-09-kuasar-search-agent/run-20261109T080657Z-19556/metrics.json",
+        "real_run_meta": PROJECT_ROOT / "experiments/2026-11-09-kuasar-search-agent/run-20261109T080657Z-19556/run_meta.json",
+        "old_self_check": PROJECT_ROOT / "experiments/2026-11-09-kuasar-search-agent/self_check.json",
+    }
+    old_before = {name: _sha256_file(path) for name, path in old_evidence_paths.items()}
+
+    self_check = run_self_check(config, output_root=root / "self_check")
+    checks: list[dict[str, Any]] = [
+        {
+            "id": "self_check",
+            "status": "pass" if self_check.get("passed") else "fail",
+            "detail": f"{self_check.get('total')} 项本地自检",
+        }
+    ]
+
+    matched_context = load_context(config, tokens=None, session_id=None)
+    checks.extend(
+        _run_regression_case(
+            "matched_session",
+            matched_context,
+            config,
+            root,
+            expected_session_id=str(config["search_agent"]["default_session_id"]),
+            expected_source="config_default_session",
+            expected_nonzero=True,
+        )
+    )
+
+    if tokens is None:
+        out_tokens = [_find_out_of_sample_hit_token(matched_context)]
+    else:
+        out_tokens = list(tokens)
+    out_context = load_context(config, tokens=out_tokens, session_id=None)
+    if out_context.session_id is not None:
+        raise AgentBlocked("回归要求样本外查询，但输入 token 命中了样本会话")
+    checks.extend(
+        _run_regression_case(
+            "out_of_sample_hit",
+            out_context,
+            config,
+            root,
+            expected_session_id=None,
+            expected_source="cli_tokens_out_of_sample",
+            expected_nonzero=True,
+        )
+    )
+
+    no_match_context = load_context(config, tokens=[10**12], session_id=None)
+    checks.extend(
+        _run_regression_case(
+            "out_of_sample_no_match",
+            no_match_context,
+            config,
+            root,
+            expected_session_id=None,
+            expected_source="cli_tokens_out_of_sample",
+            expected_nonzero=False,
+        )
+    )
+
+    try:
+        load_context(config, tokens=out_tokens, session_id=str(config["search_agent"]["default_session_id"]))
+    except AgentBlocked:
+        checks.append(
+            {
+                "id": "session_token_mismatch.blocked",
+                "status": "pass",
+                "detail": "--session-id 与 --tokens 不一致时被拒绝",
+            }
+        )
+    else:
+        checks.append(
+            {
+                "id": "session_token_mismatch.blocked",
+                "status": "fail",
+                "detail": "--session-id 与 --tokens 不一致时未拒绝",
+            }
+        )
+
+    old_after = {name: _sha256_file(path) for name, path in old_evidence_paths.items()}
+    old_unchanged = old_before == old_after
+    checks.append(
+        {
+            "id": "old_evidence.unchanged",
+            "status": "pass" if old_unchanged else "fail",
+            "detail": "索引/样本/旧真实工件/旧 self_check 哈希前后一致",
+        }
+    )
+
+    passed = all(item["status"] == "pass" for item in checks)
+    summary = {
+        "format": "recsys.search_agent.regression.v1",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "output_dir": _display_path(root),
+        "passed": passed,
+        "checks": checks,
+        "cases": {
+            "matched_session": {
+                "status": "pass" if all(c["status"] == "pass" for c in checks if c["id"].startswith("matched_session.")) else "fail",
+                "session_id": str(config["search_agent"]["default_session_id"]),
+            },
+            "out_of_sample_hit": {
+                "status": "pass" if all(c["status"] == "pass" for c in checks if c["id"].startswith("out_of_sample_hit.")) else "fail",
+                "session_id": None,
+                "query_token_count": len(out_tokens),
+            },
+            "out_of_sample_no_match": {
+                "status": "pass" if all(c["status"] == "pass" for c in checks if c["id"].startswith("out_of_sample_no_match.")) else "fail",
+                "session_id": None,
+            },
+        },
+        "self_check": {
+            "passed": bool(self_check.get("passed")),
+            "total": self_check.get("total"),
+        },
+        "old_evidence": {
+            "unchanged": old_unchanged,
+            "hashes": old_after,
+        },
+        "scope": {
+            "real_llm_requests": 0,
+            "index_rebuild": 0,
+            "real_smoke_rerun": 0,
+            "candidate_details_persisted": False,
+        },
+    }
+    (root / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -1986,6 +2393,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--session-id", default=None, help="从 Search 1 样本加载查询会话，例如 11208")
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--self-check", action="store_true", help="本地合成响应检查，不调用真实 LLM")
+    parser.add_argument(
+        "--regression",
+        action="store_true",
+        help="本地替身回归：候选不落盘、样本外查询、旧证据不变；不调用真实 LLM",
+    )
     return parser.parse_args(argv)
 
 
@@ -1995,7 +2407,7 @@ def main(argv: list[str] | None = None) -> int:
     output_root = (
         _resolve_path(args.output_root)
         if args.output_root is not None
-        else _resolve_path(config["search_agent"]["output_root"])
+        else (DEFAULT_REGRESSION_ROOT if args.regression else _resolve_path(config["search_agent"]["output_root"]))
     )
     if args.self_check:
         result = run_self_check(config, output_root=output_root)
@@ -2008,6 +2420,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.tokens is not None and not tokens:
         print("[error] --tokens 不能为空；省略则使用 --session-id 或配置默认会话", file=sys.stderr)
         return 2
+    if args.regression:
+        try:
+            result = run_local_regression(config, output_root=output_root, tokens=tokens)
+        except (AgentBlocked, OSError, ValueError, json.JSONDecodeError) as error:
+            print(f"[regression blocked] {_safe_error(error)}", file=sys.stderr)
+            return 2
+        print(
+            json.dumps(
+                {
+                    "passed": result["passed"],
+                    "cases": result["cases"],
+                    "self_check": result["self_check"],
+                    "old_evidence_unchanged": result["old_evidence"]["unchanged"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        for item in result["checks"]:
+            print(f"[regression] {item['id']}: {item['status']} — {item['detail']}")
+        return 0 if result["passed"] else 1
+
     command = " ".join(["python -m recsys.experiments.search_agent", *sys.argv[1:]]) if argv is None else "python -m recsys.experiments.search_agent"
     summary = run(
         config,
@@ -2025,7 +2459,9 @@ def main(argv: list[str] | None = None) -> int:
                 "request_count": metrics["budget"]["request_count"],
                 "search_calls": metrics["budget"]["search_calls"],
                 "stop_code": metrics["summary"].get("stop_code"),
-                "stop_reason": metrics["summary"].get("stop_reason"),
+                "stop_type": metrics["summary"].get("stop_type"),
+                "stop_summary": metrics["summary"].get("stop_summary"),
+                "final_reply_status": metrics["summary"].get("final_reply_status"),
                 "return_counts": metrics["summary"].get("return_counts"),
                 "run_dir": metrics["run"]["output_dir"],
             },
