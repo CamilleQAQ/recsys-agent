@@ -1,0 +1,235 @@
+{
+  "format": "recsys.search.build_manifest.v1",
+  "generated_at": "2026-11-09T15:34:37+0800",
+  "elapsed_s": 8.322,
+  "config_fingerprint": "f336327940caccaf26aedba5b4b0bd63bd3590b3a9c23e0a4562ceafd057beaa",
+  "source": {
+    "dataset": "kuasar",
+    "raw_root": "data\\kuasar\\raw\\KuaiSAR_v2",
+    "src_inter": {
+      "path": "data\\kuasar\\raw\\KuaiSAR_v2\\src_inter.csv",
+      "size_bytes": 553388618,
+      "src_rows_scanned": 200000,
+      "src_scan_cap_rows": 200000,
+      "src_truncated": true,
+      "sessions_scanned": 17036,
+      "partial_sessions_dropped": 0,
+      "keyword_mismatch_sessions": 0,
+      "keyword_mismatch_rows": 0
+    },
+    "item_features": {
+      "path": "data\\kuasar\\raw\\KuaiSAR_v2\\item_features.csv",
+      "size_bytes": 2008531649,
+      "item_rows_scanned": 500000,
+      "item_scan_cap_rows": 500000,
+      "item_truncated": true,
+      "catalog_items_with_caption": 20407,
+      "empty_caption_rows": 0,
+      "wanted_items": 163902,
+      "wanted_items_found": 20407,
+      "caption_token_universe_size": 666385
+    }
+  },
+  "sampling": {
+    "src_inter": "src_inter.csv",
+    "item_features": "item_features.csv",
+    "src_scan_rows": 200000,
+    "item_scan_rows": 500000,
+    "max_sessions": 30,
+    "max_items": 1000,
+    "min_unique_items": 2,
+    "min_item_coverage": 0.5,
+    "require_clicked_join": false,
+    "baseline_items": 5000,
+    "baseline_seed": 42
+  },
+  "counts": {
+    "src_rows_scanned": 200000,
+    "src_scan_cap_rows": 200000,
+    "src_truncated": true,
+    "sessions_scanned": 17036,
+    "partial_sessions_dropped": 0,
+    "keyword_mismatch_sessions": 0,
+    "keyword_mismatch_rows": 0,
+    "sessions_candidates": 190,
+    "sessions_selected": 30,
+    "session_limit_hit": true,
+    "sessions_with_clicked_join": 30,
+    "items_selected": 120,
+    "items_truncated": false,
+    "item_rows_scanned": 500000,
+    "item_scan_cap_rows": 500000,
+    "item_truncated": true,
+    "catalog_items_with_caption": 20407,
+    "empty_caption_rows": 0,
+    "wanted_items": 163902,
+    "wanted_items_found": 20407,
+    "caption_token_universe_size": 666385,
+    "exposure_rows": 215,
+    "exposure_rows_joined": 120,
+    "exposure_row_coverage": 0.55814,
+    "unique_exposure_items": 215,
+    "unique_items_joined": 120,
+    "unique_item_coverage": 0.55814,
+    "clicked_rows": 60,
+    "clicked_rows_joined": 43,
+    "clicked_unique_items": 60,
+    "clicked_unique_items_joined": 43,
+    "indexed_items": 120,
+    "catalog_items": 20407
+  },
+  "coverage": {
+    "session_coverage_mean": 0.569713,
+    "session_coverage_min": 0.5,
+    "session_coverage_max": 0.8,
+    "sessions_fully_covered": 0,
+    "sessions_ge_50pct": 30
+  },
+  "vocab_evidence": {
+    "conclusion": "shared_token_space",
+    "decision": "use_kuasar_token_ids",
+    "confidence": "high",
+    "sources": [
+      {
+        "kind": "paper",
+        "url": "https://arxiv.org/html/2306.07705v4",
+        "section": "3.2 Data Construction",
+        "quote": "Textual information, such as queries and video titles, underwent word segmentation and sensitive word removal. Furthermore, terms in texts were randomly hashed into integers.",
+        "interpretation": "query 与 video title 使用同一套分词/哈希流程，token 是整数哈希值；archive 没有单独提供词表文件。"
+      },
+      {
+        "kind": "archive",
+        "detail": "KuaiSAR_v2.zip 只有 item_features / rec_inter / src_inter / social_network / user_features 五个 CSV，没有 vocab/dictionary 元信息。"
+      }
+    ],
+    "token_space": {
+      "keyword_unique": 15339,
+      "caption_unique": 666385,
+      "intersection": 13747,
+      "jaccard": 0.02058,
+      "keyword_min": 22,
+      "keyword_max": 4233695,
+      "caption_min": 2,
+      "caption_max": 4233996,
+      "keyword_tokens_absent_from_caption_sample": 1592,
+      "expected_intersection_uniform": 2414.36,
+      "observed_vs_expected": 5.69
+    },
+    "session_overlap": {
+      "baseline_items": 5000,
+      "baseline_seed": 42,
+      "clicked_pairs": 43,
+      "clicked_pairs_with_hit": 22,
+      "clicked_hit_rate": 0.511628,
+      "clicked_mean_hits": 0.8837,
+      "exposed_pairs": 120,
+      "exposed_pairs_with_hit": 74,
+      "exposed_hit_rate": 0.616667,
+      "exposed_mean_hits": 1.025,
+      "random_mean_hits": 0.012053,
+      "clicked_vs_random_ratio": 73.32,
+      "per_session_clicked_vs_random": {
+        "wins": 19,
+        "ties": 2,
+        "losses": 9
+      }
+    },
+    "examples": [
+      {
+        "session_id": "8490",
+        "item_id": 8402,
+        "query_tokens": [
+          3930586
+        ],
+        "caption_prefix": [
+          3703285,
+          3930586,
+          22
+        ],
+        "hit_tokens": [
+          3930586
+        ],
+        "category": "Appearance value / beauty"
+      },
+      {
+        "session_id": "11208",
+        "item_id": 80675,
+        "query_tokens": [
+          3538762,
+          3181091,
+          4061567,
+          3525929
+        ],
+        "caption_prefix": [
+          3538762,
+          3181091,
+          4061567,
+          3525929,
+          3856867,
+          3879942,
+          22,
+          3181091,
+          22,
+          3879942,
+          22
+        ],
+        "hit_tokens": [
+          3181091,
+          3525929,
+          3538762,
+          4061567
+        ],
+        "category": "science / Experimental Invention"
+      },
+      {
+        "session_id": "4402",
+        "item_id": 460513,
+        "query_tokens": [
+          3837442,
+          3163922,
+          3578264
+        ],
+        "caption_prefix": [
+          3837442,
+          3578264,
+          22,
+          3326732,
+          4090691,
+          3157614,
+          3620774,
+          22
+        ],
+        "hit_tokens": [
+          3578264,
+          3837442
+        ],
+        "category": "game / Game teaching"
+      }
+    ],
+    "caveat": "没有官方词表文件；token 是随机哈希后的整数，无法反解为文本。结论基于论文陈述与抽样观测的重合信号；若上游 tokenizer 变化需重新核验。"
+  },
+  "index": {
+    "path": "artifacts\\search\\kuasar_bm25\\index.json",
+    "sha256": "3ae2b858d456eab4c4c21ed356812cd44260b56dd596639588a53fb1a6a52690",
+    "size_bytes": 76077,
+    "format": "recsys.bm25.v1",
+    "num_docs": 120,
+    "vocab_size": 823,
+    "avgdl": 16.266667,
+    "k1": 1.5,
+    "b": 0.75,
+    "total_tokens": 1952,
+    "min_doc_len": 1,
+    "max_doc_len": 79
+  },
+  "sample": {
+    "path": "artifacts\\search\\kuasar_bm25\\sample.json",
+    "sha256": "12a46f3c3a614a715e52f4a790ccac93eb0fc7519ab5ff4a0826ceace58a7daf",
+    "size_bytes": 54651
+  },
+  "notes": [
+    "只扫描 src_inter / item_features 的前缀；两个 truncated 标记见 source 字段。",
+    "样本最多 30 个会话、1,000 个物品；本轮实际计数见 counts。",
+    "点击只用于覆盖率与证据检查，BM25 排序只使用 caption token。"
+  ]
+}

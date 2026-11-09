@@ -1,0 +1,93 @@
+{
+  "format": "recsys.search.smoke.v1",
+  "generated_at": "2026-11-09T15:35:18+0800",
+  "passed": true,
+  "checks": {
+    "index_loaded": true,
+    "match_found": true,
+    "top_k_respected": true,
+    "rank_contiguous": true,
+    "score_order": true,
+    "tie_order": true,
+    "fields_present": true,
+    "empty_query": true,
+    "no_match": true
+  },
+  "index": {
+    "path": "artifacts\\search\\kuasar_bm25\\index.json",
+    "num_docs": 120,
+    "vocab_size": 823,
+    "avgdl": 16.266667,
+    "k1": 1.5,
+    "b": 0.75
+  },
+  "match": {
+    "session_id": "11208",
+    "query_tokens": [
+      3538762,
+      3181091,
+      4061567,
+      3525929
+    ],
+    "top_k": 5,
+    "available_matches": 7,
+    "clicked_items": [
+      80675,
+      350728
+    ],
+    "clicked_in_top_k": true,
+    "clicked_best_rank": 1,
+    "results": [
+      {
+        "rank": 1,
+        "item_id": 80675,
+        "score": 17.86405127570893,
+        "category": "science / Experimental Invention",
+        "category_zh": "科学 / 实验发明",
+        "item_type": "NORMAL"
+      },
+      {
+        "rank": 2,
+        "item_id": 135989,
+        "score": 12.73822136931529,
+        "category": "High tech digital / Technology digital products",
+        "category_zh": "高新数码 / 科技数码产品",
+        "item_type": "NORMAL"
+      },
+      {
+        "rank": 3,
+        "item_id": 209624,
+        "score": 8.432907090834146,
+        "category": "High tech digital / Technology digital products",
+        "category_zh": "高新数码 / 科技数码产品",
+        "item_type": "NORMAL"
+      },
+      {
+        "rank": 4,
+        "item_id": 350728,
+        "score": 7.958621939912353,
+        "category": "High tech digital / Technology digital products / Technology surrounding / Charging transfer",
+        "category_zh": "高新数码 / 科技数码产品 / 科技周边 / 充电转接",
+        "item_type": "NORMAL"
+      },
+      {
+        "rank": 5,
+        "item_id": 135058,
+        "score": 7.6127397735266396,
+        "category": "High tech digital / High tech digital teaching",
+        "category_zh": "高新数码 / 高新数码教学",
+        "item_type": "NORMAL"
+      }
+    ]
+  },
+  "empty_query": {
+    "query_tokens": [],
+    "results": []
+  },
+  "no_match": {
+    "query_tokens": [
+      1000000000000
+    ],
+    "results": []
+  }
+}

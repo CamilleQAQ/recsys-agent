@@ -1,0 +1,43 @@
+# Search MVP：KuaiSAR 搜索会话小样本 + BM25 索引
+#
+# 这一轮只做「数据准备 → BM25 建索引 → 查询接口/CLI」。
+# 不做 Search Agent、向量检索、排序或重排；不作全量检索评测。
+#
+# 词表结论见 docs/search.md：archive 里没有单独的词表文件，但论文说明
+# query 与 video title 都经过分词后「随机哈希成整数」，且本轮抽样中
+# keyword 与 caption 的 token ID 范围/重合/点击物品命中率足以确认共用 token 空间。
+# 因此索引直接使用 KuaiSAR 原始 token ID，不做任何重新编码。
+
+[search]
+name = "kuasar_search_bm25"
+dataset = "kuasar"
+description = "KuaiSAR src_inter 查询 + item_features caption 的 BM25 小样本检索"
+source_root = "data/kuasar/raw/KuaiSAR_v2"
+artifact_root = "artifacts/search/kuasar_bm25"
+index_file = "index.json"
+sample_file = "sample.json"
+manifest_file = "manifest.json"
+
+[sampling]
+# 输入扫描上限：先定死，达到上限即停；不扫全量。
+# src_inter 200,000 行 / item_features 500,000 行都只覆盖数据的一小部分。
+src_inter = "src_inter.csv"
+item_features = "item_features.csv"
+src_scan_rows = 200000
+item_scan_rows = 500000
+# 样本上限：最多 30 个搜索会话、1,000 个物品。
+max_sessions = 30
+max_items = 1000
+# 会话至少有 2 个不同曝光物品；已关联 caption 的物品占比至少 50%。
+min_unique_items = 2
+min_item_coverage = 0.5
+# 优先选择「有可关联点击物品」的会话，但不强制（避免因样本截断而无会话可用）。
+require_clicked_join = false
+# 词表证据中的随机 caption 基线：固定 seed，可复现。
+baseline_items = 5000
+baseline_seed = 42
+
+[bm25]
+k1 = 1.5
+b = 0.75
+default_top_k = 10

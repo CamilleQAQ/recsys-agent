@@ -140,6 +140,12 @@ keyword, item_id, click_cnt, item_type, time
 - `click_cnt`：**88.4% 为 0**（曝光未点击），11.0% 为 1，0.6% ≥2；
 - 每用户搜索行数：中位 68、p99 1,742、最大 16,083。
 
+**Search MVP 词表核验（2026-11-09）**：`keyword` 与 `item_features.caption` 都是整数 token。
+本轮用论文 §3.2（query / video title 分词后随机哈希）+ 前 200k 搜索行/500k 物品行的观测
+（token 范围 22–4,233,695 vs 2–4,233,996；交集 13,747，是均匀独立基线的 5.69×；
+点击物品 token 重合率 51.16%，是随机 caption 的 73.32×）确认两边共用 KuaiSAR token ID。
+没有官方词表文件，token 无法反解为文本；完整证据与限制见 [search.md](search.md)。
+
 ### 4.5 数据质量清单
 
 | 问题 | 规模 | 处理 |

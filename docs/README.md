@@ -14,7 +14,8 @@
 9. [kuairec.md](kuairec.md) —— KuaiRec 流程模板：口径、命令、坑；
 10. [kuasar-roadmap.md](kuasar-roadmap.md) —— Phase 1：接入 KuaiSAR 的工作清单；
 11. [kuasar.md](kuasar.md) —— KuaiSAR 字段说明、文件清单与样本统计（数据说明）；
-12. [cleanup-report.md](cleanup-report.md) —— 仓库整理与清理账目。
+12. [search.md](search.md) —— Search MVP：keyword/caption 词表核验、30 会话小样本、BM25 接口与 CLI；
+13. [cleanup-report.md](cleanup-report.md) —— 仓库整理与清理账目。
 
 ## 写文档的规矩
 

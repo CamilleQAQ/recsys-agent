@@ -12,15 +12,16 @@
 - **工件溯源**：checkpoint 带数据指纹、ID 映射摘要、代码指纹、依赖版本
 - **第三方代码只读**：`third_party/` 保留原始源码与许可证，要改就放 `patches/`
 
-## 现状（2026-11-05）
+## 现状（2026-11-09）
 
 | 项目 | 状态 |
 | --- | --- |
-| 开发阶段 | **Phase 0 收尾完成**（审计 + Model Zoo + 接口/工件/指标对齐），下一步 Phase 1（KuaiSAR 数据层） |
+| 开发阶段 | **Phase 11/12 MVP 已验收**；Phase 13 离线回放/Agent 验证完成；**Search MVP 第一轮完成**（见 [docs/search.md](docs/search.md)）；完整 Phase 13 正式实验待办 |
 | 第三方仓库 | 13 个，来源见 [third_party/SOURCES.toml](third_party/SOURCES.toml) |
 | 纳入索引的模型 | 24 个：12 召回 / 9 排序 / 3 基础设施 |
 | 已接入统一接口 | 4 个召回模型（popularity、MF、Two-Tower、SASRec）+ FAISS 索引封装 |
 | 数据主线 | **KuaiSAR 2.0**：下载 → 全量画像 → processed npy 存储 → `PreparedData` 接入（Phase 1.1–1.4 完成）；KuaiRec 为流程模板/辅助线 |
+| 搜索 MVP | 2026-11-09：核验 `keyword`/`caption` 共用 KuaiSAR token ID；30 会话 / 120 物品 BM25 索引 + 查询 CLI；只跑一次冒烟（9/9 通过），见 [docs/search.md](docs/search.md) |
 | 累计清理 | 400.7 MB → 108.8 MB（第三方部分），详见 [docs/cleanup-report.md](docs/cleanup-report.md) |
 
 模型清单见 [docs/model-zoo.md](docs/model-zoo.md)（由 [models/zoo.toml](models/zoo.toml) 生成）。
@@ -33,9 +34,11 @@ recsys-agent/
 ├── PROJECT_PROGRESS.md        进度台账：已完成 / 待决策 / 下一步（**每轮更新这一份**）
 ├── README.md                  本文件：现状、快速开始、约定
 ├── pyproject.toml             包定义（src 布局，Python ≥3.11）
-├── configs/                   数据集与模型配置（TOML，可被脚本校验）
+├── configs/                   数据集、模型与搜索配置（TOML，可被脚本校验）
 │   ├── datasets/              kuasar.toml / kuairec.toml
-│   └── models/                已交付实验的默认超参
+│   ├── experiments/           实验配置
+│   ├── models/                已交付实验的默认超参
+│   └── search/                kuasar_search.toml（Search MVP 采样/BM25）
 ├── data/                      运行时数据（不入库）
 ├── artifacts/                 训练产物：checkpoint、指标（不入库）
 ├── docs/                      架构、数据契约、Model Zoo、依赖、KuaiSAR 差距、清理报告、模型档案
@@ -44,12 +47,13 @@ recsys-agent/
 ├── patches/                   上游补丁登记（third_party 只读）
 ├── requirements/              依赖分层（主环境 / 可选 / 遗留独立环境）
 ├── scripts/                   zoo 渲染校验、项目校验、适配层冒烟测试
-├── src/recsys/                自研代码
+├── src/recsys/                自研代码（含 search/：BM25 索引、采样、查询 CLI）
 └── third_party/               13 个第三方仓库（只读）+ 来源、许可证、审计
 ```
 
 `src/recsys/` 内部：`adapters/`（统一接口）、`data/`（读取与 `PreparedData`）、`models/`（自研模型）、
-`retrieval/`（FAISS）、`training/`（训练入口）、`evaluation/`（指标与评测）、`experiments/`（对比与定稿）、`utils/`（种子、工件溯源）。
+`retrieval/`（FAISS）、`search/`（搜索采样 + BM25 + CLI）、`training/`（训练入口）、
+`evaluation/`（指标与评测）、`experiments/`（对比与定稿）、`utils/`（种子、工件溯源）。
 
 ## 快速开始
 
@@ -77,6 +81,11 @@ python -m recsys.training.trainer  --dataset kuasar --embedding-dim 32 --output-
 python -m recsys.adapters list
 python -m recsys.adapters evaluate --model matrix_factorization `
     --checkpoint artifacts/kuasar/matrix_factorization.pt --split test
+
+# 5. 搜索 MVP：小样本 BM25（只读原始 CSV 前缀，不扫全量）
+python -m recsys.search.prepare        # 30 会话 / ≤1,000 物品，产物在 artifacts/search/
+python -m recsys.search --tokens "3538762,3181091,4061567,3525929" --top-k 5
+python -m recsys.search.smoke --top-k 5   # 有匹配 / 空查询 / 无匹配一次检查
 ```
 
 不装包时用 `$env:PYTHONPATH = "src"` 也能直接运行。校验与冒烟测试（不需要真实数据）：
@@ -116,6 +125,7 @@ python -m recsys.data.kuasar_ranking --check
 | [docs/kuairec.md](docs/kuairec.md) | KuaiRec 流程模板：口径、命令、坑 |
 | [docs/kuasar-roadmap.md](docs/kuasar-roadmap.md) | Phase 1：接入 KuaiSAR 的工作清单 |
 | [docs/kuasar.md](docs/kuasar.md) | KuaiSAR 文件、字段与行为统计（数据说明） |
+| [docs/search.md](docs/search.md) | Search MVP：词表核验、30 会话小样本、BM25 接口与 CLI |
 | [docs/cleanup-report.md](docs/cleanup-report.md) | 仓库整理与清理账目 |
 | [third_party/README.md](third_party/README.md) | 13 个仓库的来源、commit、许可、可用性 |
 

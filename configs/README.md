@@ -7,10 +7,13 @@ configs/
 ├── datasets/          数据集来源、目录布局、正反馈阈值、切分协议、评测口径
 │   ├── kuasar.toml    主数据线（Phase 1.1/1.2 完成，1.3 待接 prepare）
 │   └── kuairec.toml   流程模板 / 辅助线
-└── models/            已交付实验的默认超参（与训练脚本 dataclass 默认值一致）
-    ├── two_tower.toml
-    ├── sasrec.toml
-    └── matrix_factorization.toml
+├── experiments/       离线回放、融合验证等实验配置
+├── models/            已交付实验的默认超参（与训练脚本 dataclass 默认值一致）
+│   ├── two_tower.toml
+│   ├── sasrec.toml
+│   └── matrix_factorization.toml
+└── search/            Search MVP 采样上限与 BM25 参数
+    └── kuasar_search.toml
 ```
 
 约定：
