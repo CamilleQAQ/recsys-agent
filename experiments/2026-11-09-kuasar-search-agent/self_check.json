@@ -1,0 +1,86 @@
+{
+  "format": "recsys.search_agent.self_check.v1",
+  "generated_at": "2026-11-09T16:09:13+0800",
+  "status": "pass",
+  "passed": true,
+  "total": 12,
+  "checks": [
+    {
+      "id": "one_query_stop",
+      "status": "pass",
+      "detail": "一次检索 + 模型主动停止 → verified；2 次请求 / 1 次检索"
+    },
+    {
+      "id": "two_query_then_final",
+      "status": "pass",
+      "detail": "两次检索 + 最终回复 → verified；3 次请求 / 2 次检索"
+    },
+    {
+      "id": "first_query_mismatch",
+      "status": "pass",
+      "detail": "首查不是原查询 → 不执行工具，incomplete"
+    },
+    {
+      "id": "second_not_subset",
+      "status": "pass",
+      "detail": "第二次使用非原子 token → 拒绝，保留第一次检索"
+    },
+    {
+      "id": "second_duplicate",
+      "status": "pass",
+      "detail": "第二次与第一次相同 → 拒绝"
+    },
+    {
+      "id": "second_empty",
+      "status": "pass",
+      "detail": "第二次查询为空 → 拒绝"
+    },
+    {
+      "id": "final_tool_call_rejected",
+      "status": "pass",
+      "detail": "预算用尽后的最终回复再次调用工具 → 拒绝，保留两次检索"
+    },
+    {
+      "id": "truncated_stop_rejected",
+      "status": "pass",
+      "detail": "停止说明 finish_reason=length → partial，保留检索"
+    },
+    {
+      "id": "tool_call_id_roundtrip",
+      "status": "pass",
+      "detail": "第二次请求包含同一 tool_call_id 的 tool 消息，返回数量一致"
+    },
+    {
+      "id": "budget_limits",
+      "status": "pass",
+      "detail": "请求 3/3、检索 2/2，预算未超限"
+    },
+    {
+      "id": "no_candidate_dump",
+      "status": "pass",
+      "detail": "轨迹只保留数量，不保存候选明细"
+    },
+    {
+      "id": "candidate_reply_redacted",
+      "status": "pass",
+      "detail": "最终回复里的逐条候选在落盘前被截断，只保留停止理由"
+    }
+  ],
+  "index": {
+    "path": "artifacts\\search\\kuasar_bm25\\index.json",
+    "sha256": "3ae2b858d456eab4c4c21ed356812cd44260b56dd596639588a53fb1a6a52690",
+    "num_docs": 120,
+    "vocab_size": 823,
+    "avgdl": 16.266667
+  },
+  "query": {
+    "session_id": "11208",
+    "tokens": [
+      3538762,
+      3181091,
+      4061567,
+      3525929
+    ],
+    "source": "config_default_session"
+  }
+}

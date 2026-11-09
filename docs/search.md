@@ -1,7 +1,8 @@
-# Search MVP：KuaiSAR 词表核验、小样本与 BM25
+# Search 1：KuaiSAR 词表核验、小样本与 BM25
 
 > **状态**：2026-11-09 第一轮完成。只做「搜索数据准备 → BM25 建索引 → 查询接口/CLI」；
-> Search Agent、向量检索、排序/重排和全量检索评测留到后续。
+> Search Agent 已在 [search-agent.md](search-agent.md) 接入；向量检索、排序/重排和
+> 全量检索评测留到后续。
 >
 > **一句话结论**：仓库/数据包没有单独的词表文件，但论文说明 query 与 video title
 > 走同一套分词与整数哈希，且抽样观测显示 keyword 与 caption 的 token ID 范围一致、
@@ -290,8 +291,14 @@ python -m recsys.search.smoke --top-k 5 `
    若后续要提升覆盖率，可提高 `item_scan_rows` 或改为按目标 item_id 的随机访问索引。
 3. **没有全量检索评测**：本轮不计算 Recall/NDCG，也没有人工相关性标注；
    `keyword`/`caption` 是哈希 token，无法直接阅读 query 文本。
-4. **未做 Search Agent / 向量检索 / 排序重排**：这些是后续阶段；
-   本轮接口只提供 `search(query_tokens, top_k)` 与 CLI。
+4. **Search Agent 已另起一轮**：见 [search-agent.md](search-agent.md)；本轮接口只提供
+   `search(query_tokens, top_k)` 与 CLI。向量检索 / 排序重排仍未做。
 5. **词表结论依赖论文陈述与抽样观测**：若上游 tokenizer 变化，需要重新跑
    `prepare.py` 并检查 `vocab_evidence.decision` 是否仍为 `use_kuasar_token_ids`；
    若变为 `local_fixture_required`，脚本会拒绝建索引。
+
+## 9. 后续：Search Agent
+
+Search 2 复用本轮的 120 物品索引与 `BM25Index.search`，新增 `search_bm25` 原生工具调用、
+查询子集校验、2 次检索 / 3 次请求预算和一次反馈决策。真实工作流与验收证据见
+[search-agent.md](search-agent.md)。

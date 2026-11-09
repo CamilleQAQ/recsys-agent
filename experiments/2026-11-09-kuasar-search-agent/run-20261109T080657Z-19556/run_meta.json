@@ -1,0 +1,35 @@
+{
+  "format": "recsys.search_agent.run_meta.v1",
+  "command": "python -m recsys.experiments.search_agent --tokens 3538762,3181091,4061567,3525929 --output-root experiments/2026-11-09-kuasar-search-agent",
+  "started_at": "2026-11-09T16:06:57+0800",
+  "elapsed_s": 2.877,
+  "status": "verified",
+  "passed": true,
+  "model": {
+    "name": "deepseek-chat",
+    "endpoint_host": "https://api.deepseek.com"
+  },
+  "index": {
+    "path": "artifacts\\search\\kuasar_bm25\\index.json",
+    "sha256": "3ae2b858d456eab4c4c21ed356812cd44260b56dd596639588a53fb1a6a52690",
+    "num_docs": 120,
+    "vocab_size": 823,
+    "avgdl": 16.266667
+  },
+  "query": {
+    "tokens": [
+      3538762,
+      3181091,
+      4061567,
+      3525929
+    ],
+    "session_id": "11208",
+    "source": "cli_tokens",
+    "clicked_items_count": 4,
+    "clicked_joined_count": 2
+  },
+  "output_dir": "experiments\\2026-11-09-kuasar-search-agent\\run-20261109T080657Z-19556",
+  "trace_file": "experiments\\2026-11-09-kuasar-search-agent\\run-20261109T080657Z-19556\\trace.json",
+  "metrics_file": "experiments\\2026-11-09-kuasar-search-agent\\run-20261109T080657Z-19556\\metrics.json",
+  "candidates_persisted": false
+}

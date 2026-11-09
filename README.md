@@ -16,12 +16,13 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 开发阶段 | **Phase 11/12 MVP 已验收**；Phase 13 离线回放/Agent 验证完成；**Search MVP 第一轮完成**（见 [docs/search.md](docs/search.md)）；完整 Phase 13 正式实验待办 |
+| 开发阶段 | **Phase 11/12 MVP 已验收**；Phase 13 离线回放/Agent 验证完成；**Search 1 + Search Agent MVP 第一轮完成**（见 [docs/search.md](docs/search.md)、[docs/search-agent.md](docs/search-agent.md)）；完整 Phase 13 正式实验待办 |
 | 第三方仓库 | 13 个，来源见 [third_party/SOURCES.toml](third_party/SOURCES.toml) |
 | 纳入索引的模型 | 24 个：12 召回 / 9 排序 / 3 基础设施 |
 | 已接入统一接口 | 4 个召回模型（popularity、MF、Two-Tower、SASRec）+ FAISS 索引封装 |
 | 数据主线 | **KuaiSAR 2.0**：下载 → 全量画像 → processed npy 存储 → `PreparedData` 接入（Phase 1.1–1.4 完成）；KuaiRec 为流程模板/辅助线 |
 | 搜索 MVP | 2026-11-09：核验 `keyword`/`caption` 共用 KuaiSAR token ID；30 会话 / 120 物品 BM25 索引 + 查询 CLI；只跑一次冒烟（9/9 通过），见 [docs/search.md](docs/search.md) |
+| Search Agent | 2026-11-09：`search_bm25` 原生工具调用 + 一次反馈决策；真实工作流 1 次，2 请求 / 1 检索后主动停止，verified，见 [docs/search-agent.md](docs/search-agent.md) |
 | 累计清理 | 400.7 MB → 108.8 MB（第三方部分），详见 [docs/cleanup-report.md](docs/cleanup-report.md) |
 
 模型清单见 [docs/model-zoo.md](docs/model-zoo.md)（由 [models/zoo.toml](models/zoo.toml) 生成）。
@@ -86,6 +87,11 @@ python -m recsys.adapters evaluate --model matrix_factorization `
 python -m recsys.search.prepare        # 30 会话 / ≤1,000 物品，产物在 artifacts/search/
 python -m recsys.search --tokens "3538762,3181091,4061567,3525929" --top-k 5
 python -m recsys.search.smoke --top-k 5   # 有匹配 / 空查询 / 无匹配一次检查
+
+# 6. Search Agent：复用上面的 BM25 索引（真实运行会调用 LLM，最多 3 次请求）
+python -m recsys.experiments.search_agent --self-check       # 本地 12 项，不联网
+python -m recsys.experiments.search_agent `
+    --tokens "3538762,3181091,4061567,3525929"
 ```
 
 不装包时用 `$env:PYTHONPATH = "src"` 也能直接运行。校验与冒烟测试（不需要真实数据）：
@@ -125,7 +131,8 @@ python -m recsys.data.kuasar_ranking --check
 | [docs/kuairec.md](docs/kuairec.md) | KuaiRec 流程模板：口径、命令、坑 |
 | [docs/kuasar-roadmap.md](docs/kuasar-roadmap.md) | Phase 1：接入 KuaiSAR 的工作清单 |
 | [docs/kuasar.md](docs/kuasar.md) | KuaiSAR 文件、字段与行为统计（数据说明） |
-| [docs/search.md](docs/search.md) | Search MVP：词表核验、30 会话小样本、BM25 接口与 CLI |
+| [docs/search.md](docs/search.md) | Search 1：词表核验、30 会话小样本、BM25 接口与 CLI |
+| [docs/search-agent.md](docs/search-agent.md) | Search 2：`search_bm25` 工具、查询调整规则、预算与真实工作流 |
 | [docs/cleanup-report.md](docs/cleanup-report.md) | 仓库整理与清理账目 |
 | [third_party/README.md](third_party/README.md) | 13 个仓库的来源、commit、许可、可用性 |
 

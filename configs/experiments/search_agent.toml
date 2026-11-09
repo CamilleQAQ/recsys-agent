@@ -1,0 +1,45 @@
+# Search 2 · Search Agent MVP（2026-11-09）
+#
+# 复用 Search 1 的 KuaiSAR 小样本 BM25 索引；只读 index.json / sample.json，
+# 不重新采样、不重建索引、不扫原始 CSV。
+# Agent 通过原生 tool call 调用 search_bm25；最多 2 次检索、3 次模型请求。
+# 第一次必须原样使用 original_query_tokens；第二次只能从原查询里保留一部分 token。
+
+schema_version = 1
+
+[search_agent]
+phase = "Search 2 Search Agent MVP"
+description = "BM25 工具调用 + 一次反馈决策；第一次原查询，第二次可保留部分 token 再查"
+index_path = "artifacts/search/kuasar_bm25/index.json"
+sample_path = "artifacts/search/kuasar_bm25/sample.json"
+# Search 1 的产物身份：索引/样本被改动时直接 blocked，不静默换索引。
+expected_index_sha256 = "3ae2b858d456eab4c4c21ed356812cd44260b56dd596639588a53fb1a6a52690"
+expected_sample_sha256 = "12a46f3c3a614a715e52f4a790ccac93eb0fc7519ab5ff4a0826ceace58a7daf"
+expected_num_docs = 120
+expected_vocab_size = 823
+# 已有 KuaiSAR 查询：Search 1 样本中的会话 11208。
+default_session_id = "11208"
+max_results = 5
+max_search_calls = 2
+max_model_requests = 3
+max_query_tokens = 64
+tool_name = "search_bm25"
+output_root = "experiments/2026-11-09-kuasar-search-agent"
+
+[llm]
+request_timeout_s = 30.0
+total_budget_s = 180.0
+temperature = 0.0
+# 密钥只从环境变量 / 仓库根目录 .env 读取，不写入轨迹或报告。
+model_env = "DSH_AGENT_LLM_MODEL"
+base_url_env = "DSH_AGENT_LLM_BASE_URL"
+api_key_env = "DSH_AGENT_LLM_API_KEY"
+
+[scope]
+training = 0
+index_rebuild = 0
+full_evaluation = 0
+vector_search = 0
+ranking = 0
+raw_csv_scan = 0
+candidate_detail_persisted = false

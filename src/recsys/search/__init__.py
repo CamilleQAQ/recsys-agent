@@ -11,11 +11,21 @@ from recsys.search.bm25 import (
     SearchHit,
     load_index,
 )
+from recsys.search.tool import (
+    TOOL_NAME,
+    TOOL_SCHEMA,
+    SearchBM25Tool,
+    ToolRejected,
+)
 
 __all__ = [
     "INDEX_FORMAT",
     "BM25Index",
     "IndexedItem",
+    "SearchBM25Tool",
     "SearchHit",
+    "TOOL_NAME",
+    "TOOL_SCHEMA",
+    "ToolRejected",
     "load_index",
 ]
