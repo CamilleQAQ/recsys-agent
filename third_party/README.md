@@ -1,6 +1,6 @@
 # third_party：第三方原始代码
 
-13 个推荐相关开源仓库，原样导入，**只读**。
+推荐、搜索和广告相关开源代码快照，**只读**。
 
 - 不改上游代码（要打补丁请放 `patches/` 并在提交信息里说明原因）；
 - 不在这里跑训练脚本的自动安装（依赖见 `requirements/` 与 [../docs/dependencies.md](../docs/dependencies.md)）；
@@ -24,6 +24,9 @@
 | [generative-recommenders](generative-recommenders/) | [meta-recsys/generative-recommenders](https://github.com/meta-recsys/generative-recommenders) | main | `b8e6ff0` | Apache-2.0 | HSTU、DLRMv3、ULTRA、MoL | Linux + CUDA + fbgemm_gpu |
 | [OpenOneRec](OpenOneRec/) | [Kuaishou-OneRec/OpenOneRec](https://github.com/Kuaishou-OneRec/OpenOneRec) | main | `a969edc` | Apache-2.0（README 声明，**根 LICENSE 缺失**） | Qwen3 生成式推荐、ResKmeans | 多卡 Linux + 外部权重 |
 | [recommenders](recommenders/) | [tensorflow/recommenders](https://github.com/tensorflow/recommenders) | main | `a8a90ae` | Apache-2.0 | TFRS：双塔任务、Top-K 检索层 | TF2 独立环境 |
+| [torch-rechub](torch-rechub/) | [datawhalechina/torch-rechub](https://github.com/datawhalechina/torch-rechub) | main | `7ea1731` | MIT | 推荐召回和排序 | 项目已复用已安装包中的 MIND |
+| [skim-search-agent](skim-search-agent/) | [ielab/skim-search-agent](https://github.com/ielab/skim-search-agent) | main | `4794575` | Apache-2.0 | 向量编码、FAISS、混合检索、精排、搜索工具 | Phase 2 源码资产，待接入 |
+| [YieldAgent](YieldAgent/) | [TensorOpsAI/YieldAgent](https://github.com/TensorOpsAI/YieldAgent) | main | `e79fda0` | MIT | 广告 Agent 工具调用、平台适配、调用事件 | Phase 3 源码参考，待接入 |
 
 commit 在上表做了缩写。完整 SHA、分支、许可、可用性结论、本地改动见
 [SOURCES.toml](SOURCES.toml)（维护版）与 [repository_manifest.csv](repository_manifest.csv)
@@ -53,7 +56,8 @@ commit 在上表做了缩写。完整 SHA、分支、许可、可用性结论、
 2. 删除随仓库携带的大型示例语料（`BERT4Rec/data/` 与 `SASRec.pytorch/python/data/` 共 167 MB，
    清单见 [../docs/cleanup-report.md](../docs/cleanup-report.md)）；
 3. 在上述两个 `data/` 目录各放一份 3 行说明，指向数据来源；
-4. 删除 IDE 与构建缓存（`.idea`、`triton_aot/build`）。
+4. 删除 IDE 与构建缓存（`.idea`、`triton_aot/build`）；
+5. SkimSearchAgent 从固定提交 ZIP 选取核心包和接入材料，具体范围见 `SOURCES.toml`。
 
 没有任何源码文件被修改。如需修改上游实现，请在 `patches/` 存 diff 并在此处登记。
 
@@ -63,3 +67,7 @@ commit 在上表做了缩写。完整 SHA、分支、许可、可用性结论、
 - 「克隆成功」不等于「能直接训练」：TorchEasyRec/OpenOneRec/generative-recommenders 需要 Linux GPU 环境，
   LightGBM/generative-recommenders 的子模块未拉取导致本地编译不完整；
 - 各仓库许可不同（含 GPL-3.0），再分发或商用前请看 [LICENSES.md](LICENSES.md)。
+
+## 自动研究参考
+
+[autoresearch](autoresearch/) 保留研究循环参考源码；固定版本与文件哈希见 [UPSTREAM.json](autoresearch/UPSTREAM.json)。上游 README 声明 MIT，此快照没有独立 LICENSE 文件。主平台不执行其 GPU 训练脚本。

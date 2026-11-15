@@ -1,0 +1,41 @@
+{
+  "dataset": "KuaiRec 2.0 small_matrix",
+  "training": "frozen existing checkpoint; no optimizer or fitting",
+  "T0": 1597829859.597,
+  "T1": 1598418194.602,
+  "T0_utc": "2020-08-19T09:37:39.597000+00:00",
+  "T1_utc": "2020-08-26T05:03:14.602000+00:00",
+  "validation": "first exposure in (T0,T1]",
+  "test": "first exposure in (T1,last_valid_timestamp]",
+  "boundary_reason": "T0 after every old training event; T1 after all old checkpoint-selection validation events",
+  "availability": "global first valid exposure <= window start, a conservative proxy for publish time",
+  "labels": "first exposure watch_ratio>=1; discard any user-item pair with missing timestamp and ambiguous first label",
+  "seen": "all valid first exposures <= window start, including negatives; unknown-time pairs excluded from candidates",
+  "main_targets": "positive first exposures to items already in the start-of-window catalog",
+  "secondary_targets": "all window positives, including newly arriving items, counted as unavailable misses",
+  "users": "all 1411 mapped users for inference; macro metrics on users with positives, same cohort in all arms",
+  "warm": "at least one positive in original training snapshot; original train-only models and counts",
+  "cold": "no original train positive; exclude random TwoTower cold embeddings from recall",
+  "cold_order": "decreasing distinct-user first-exposure count before window start; ties item index ascending",
+  "cold_merge": "same in every arm: at rank r reserve floor(r*cold_pool_size/total_pool_size) cold positions; fill empty lane from other lane",
+  "warm_pool": "union of top100 warm-only TwoTower, ItemCF and train Popularity; fixed pool for all arms",
+  "fixed": "round-robin warm channels + shared cold merge",
+  "objective": "validation NDCG@20; strict best-so-far, no test-driven selection",
+  "agent_budget": {
+    "code_experiments": 3,
+    "llm_requests": 3,
+    "max_seconds": 240,
+    "max_tools": 8,
+    "max_history_reads": 2
+  },
+  "memory_accounting": "memory arm spends one of its three code trials on a real prior and two on continuation; no-memory uses three consecutive trials",
+  "shared_baseline": "computed once and reused in all phases, not charged as a newly generated algorithm",
+  "test_status": "exploratory re-analysis: dataset test results were inspected in previous conversations; not a new blind benchmark",
+  "weights_sha256": "3e847c7bd9dc63b1d9e4f5860aa8c2d34ca63f59126198013c9750514e39775a",
+  "original_splits_sha256": {
+    "train": "fba8fd168578262ce817b25d7ef1727cde546aab3ae1fe02da8dec050db45ab0",
+    "validation": "8d45ff79f767dfbd10f95277808713fc48209bff202ff2cd2a6ddd34420817e2",
+    "test": "139ff8d89075d08b43ffd4fc84ee7f589916e2a28669add76c4fbc309547a94d"
+  },
+  "study_rounds_fixed_before_feedback": true
+}

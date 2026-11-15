@@ -1,0 +1,269 @@
+{
+  "generated_at_utc": "2026-11-13T10:10:27.581424+00:00",
+  "environment": {
+    "python": "3.14.3",
+    "pytorch": "2.14.0+cpu",
+    "faiss": "1.15.1",
+    "device": "cpu"
+  },
+  "random_seed": 42,
+  "dataset": {
+    "name": "kuairec_small",
+    "positive_threshold": 1.0,
+    "num_users": 1411,
+    "num_items": 3317,
+    "positive_interactions": 1471862,
+    "train_interactions": 1469040,
+    "validation_interactions": 1411,
+    "test_interactions": 1411,
+    "validation_test_same_timestamp_users": 0,
+    "items_observed_in_train": 3317,
+    "items_absent_from_train": 0,
+    "validation_target_items_absent_from_train": 0,
+    "test_target_items_absent_from_train": 0
+  },
+  "evaluation_protocol": {
+    "split_strategy": "per_user_last_two_strict_timestamp_v2",
+    "ordering": "strict train < validation < test timestamps; ambiguous users remain in train",
+    "catalog_definition": "all positive-interaction item IDs before splitting",
+    "validation_use": "hyperparameter selection and checkpoint selection only",
+    "test_use": "evaluation after configurations and checkpoints are locked",
+    "id_only_seen_filter": "all observed item exposures strictly before target time (including validation at test time)",
+    "sasrec_validation_history": "train interactions",
+    "sasrec_standard_test_history": "train + validation interactions",
+    "sasrec_standard_test_seen_filter": "all observed item exposures strictly before target time",
+    "target_in_model_input": false,
+    "determinism_note": "seeded Python and PyTorch; exact GPU bitwise reproducibility is not guaranteed"
+  },
+  "models": {
+    "Popularity": {
+      "random_seed": null,
+      "model_config": {
+        "ranking": "descending train interaction count"
+      },
+      "best_epoch": null,
+      "validation_metrics": {
+        "Recall@10": 0.2069454287739192,
+        "NDCG@10": 0.10347478480339198,
+        "HitRate@10": 0.2069454287739192,
+        "Precision@10": 0.020694542877391923,
+        "Recall@20": 0.35294117647058826,
+        "NDCG@20": 0.14005345513674433,
+        "HitRate@20": 0.35294117647058826,
+        "Precision@20": 0.017647058823529415
+      },
+      "test_metrics": {
+        "Recall@10": 0.1998582565556343,
+        "NDCG@10": 0.1092651193976331,
+        "HitRate@10": 0.1998582565556343,
+        "Precision@10": 0.019985825655563432,
+        "Recall@20": 0.32884479092841956,
+        "NDCG@20": 0.14152796928829234,
+        "HitRate@20": 0.32884479092841956,
+        "Precision@20": 0.01644223954642098
+      }
+    },
+    "MF": {
+      "random_seed": 42,
+      "model_config": {
+        "num_users": 1411,
+        "num_items": 3317,
+        "embedding_dim": 64
+      },
+      "training_config": {
+        "dataset": "kuairec_small",
+        "data_dir": "data",
+        "artifacts_dir": "artifacts",
+        "epochs": 5,
+        "batch_size": 1024,
+        "learning_rate": 0.01,
+        "embedding_dim": 64,
+        "positive_threshold": null,
+        "seed": 42,
+        "device": "auto",
+        "max_batches_per_epoch": null,
+        "validation_users": 0
+      },
+      "best_epoch": 1,
+      "selection_note": "selected by validation Recall@20",
+      "validation_metrics": {
+        "Recall@10": 0.20978029766123316,
+        "NDCG@10": 0.09685294799034588,
+        "HitRate@10": 0.20978029766123316,
+        "Precision@10": 0.020978029766123316,
+        "Recall@20": 0.3982990786676116,
+        "NDCG@20": 0.1441836378204765,
+        "HitRate@20": 0.3982990786676116,
+        "Precision@20": 0.019914953933380584
+      },
+      "test_metrics": {
+        "Recall@10": 0.222537207654146,
+        "NDCG@10": 0.10969999814528271,
+        "HitRate@10": 0.222537207654146,
+        "Precision@10": 0.0222537207654146,
+        "Recall@20": 0.38979447200566975,
+        "NDCG@20": 0.15175053864972332,
+        "HitRate@20": 0.38979447200566975,
+        "Precision@20": 0.019489723600283487
+      }
+    },
+    "Two-Tower": {
+      "random_seed": 42,
+      "model_config": {
+        "num_users": 1411,
+        "num_items": 3317,
+        "embedding_dim": 128,
+        "hidden_dim": 128,
+        "output_dim": 128,
+        "temperature": 0.1,
+        "tower_type": "embedding",
+        "item_cat_cardinalities": null,
+        "item_numeric_count": 0,
+        "feature_dim": 16
+      },
+      "training_config": {
+        "dataset": "kuairec_small",
+        "data_dir": "data",
+        "artifacts_dir": "artifacts",
+        "epochs": 9,
+        "batch_size": 256,
+        "learning_rate": 0.01,
+        "embedding_dim": 128,
+        "hidden_dim": 128,
+        "output_dim": 128,
+        "temperature": 0.1,
+        "tower_type": "embedding",
+        "mask_false_negatives": true,
+        "use_item_features": false,
+        "feature_dim": 16,
+        "checkpoint_name": "two_tower",
+        "positive_threshold": null,
+        "weight_decay": 0.0,
+        "seed": 42,
+        "device": "auto",
+        "max_batches_per_epoch": null,
+        "validation_users": 0
+      },
+      "best_epoch": 6,
+      "validation_metrics": {
+        "Recall@10": 0.20198440822111977,
+        "NDCG@10": 0.09348580470133865,
+        "HitRate@10": 0.20198440822111977,
+        "Precision@10": 0.020198440822111977,
+        "Recall@20": 0.3465627214741318,
+        "NDCG@20": 0.12965621206876016,
+        "HitRate@20": 0.3465627214741318,
+        "Precision@20": 0.017328136073706594
+      },
+      "test_metrics": {
+        "Recall@10": 0.20623671155209072,
+        "NDCG@10": 0.09923110729631536,
+        "HitRate@10": 0.20623671155209072,
+        "Precision@10": 0.02062367115520907,
+        "Recall@20": 0.332388377037562,
+        "NDCG@20": 0.13109067907853572,
+        "HitRate@20": 0.332388377037562,
+        "Precision@20": 0.016619418851878103
+      }
+    },
+    "SASRec": {
+      "random_seed": 42,
+      "model_config": {
+        "num_items": 3317,
+        "max_seq_len": 50,
+        "embedding_dim": 64,
+        "num_blocks": 2,
+        "num_heads": 2,
+        "dropout": 0.2
+      },
+      "training_config": {
+        "dataset": "kuairec_small",
+        "data_dir": "data",
+        "artifacts_dir": "artifacts",
+        "max_epochs": 30,
+        "patience": 5,
+        "batch_size": 256,
+        "learning_rate": 0.001,
+        "weight_decay": 0.0,
+        "embedding_dim": 64,
+        "num_blocks": 2,
+        "num_heads": 2,
+        "max_seq_len": 50,
+        "dropout": 0.2,
+        "positive_threshold": null,
+        "seed": 42,
+        "device": "auto",
+        "validation_users": 0
+      },
+      "best_epoch": 15,
+      "validation_metrics": {
+        "Recall@10": 0.7895109851169383,
+        "NDCG@10": 0.4384572086628311,
+        "HitRate@10": 0.7895109851169383,
+        "Precision@10": 0.07895109851169384,
+        "Recall@20": 0.9270021261516654,
+        "NDCG@20": 0.47376040494643457,
+        "HitRate@20": 0.9270021261516654,
+        "Precision@20": 0.04635010630758328
+      },
+      "test_metrics": {
+        "Recall@10": 0.7958894401133948,
+        "NDCG@10": 0.44558737131237247,
+        "HitRate@10": 0.7958894401133948,
+        "Precision@10": 0.07958894401133948,
+        "Recall@20": 0.9241672572643516,
+        "NDCG@20": 0.4782769123935856,
+        "HitRate@20": 0.9241672572643516,
+        "Precision@20": 0.04620836286321758
+      }
+    }
+  },
+  "supplementary_controlled_evaluation": {
+    "name": "SASRec train-history-only test",
+    "purpose": "train-only SASRec input with the same test-time seen-item filter",
+    "metrics": {
+      "Recall@10": 0.7937632884479093,
+      "NDCG@10": 0.4439350210959535,
+      "HitRate@10": 0.7937632884479093,
+      "Precision@10": 0.07937632884479093,
+      "Recall@20": 0.9241672572643516,
+      "NDCG@20": 0.477264184598864,
+      "HitRate@20": 0.9241672572643516,
+      "Precision@20": 0.04620836286321758
+    }
+  },
+  "faiss_index_flat_ip": {
+    "brute_force_metrics": {
+      "Recall@10": 0.20623671155209072,
+      "NDCG@10": 0.09923110729631536,
+      "HitRate@10": 0.20623671155209072,
+      "Precision@10": 0.02062367115520907,
+      "Recall@20": 0.332388377037562,
+      "NDCG@20": 0.13109067907853572,
+      "HitRate@20": 0.332388377037562,
+      "Precision@20": 0.016619418851878103
+    },
+    "faiss_metrics": {
+      "Recall@10": 0.20623671155209072,
+      "NDCG@10": 0.09923110729631536,
+      "HitRate@10": 0.20623671155209072,
+      "Precision@10": 0.02062367115520907,
+      "Recall@20": 0.332388377037562,
+      "NDCG@20": 0.13109067907853572,
+      "HitRate@20": 0.332388377037562,
+      "Precision@20": 0.016619418851878103
+    },
+    "top_k_overlap": 1.0,
+    "exact_order_match_rate": 1.0,
+    "benchmark": {
+      "num_users": 1411,
+      "num_items": 3317,
+      "embedding_dim": 128,
+      "index_build_seconds": 0.005940399998507928,
+      "brute_force_total_seconds": 0.39833760000328766,
+      "brute_force_ms_per_user": 0.2823087172241585,
+      "faiss_total_seconds": 0.7629221999995934,
+      "faiss_ms_per_user": 0.5406961020549919
+    }
+  }
+}

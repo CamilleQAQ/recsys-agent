@@ -305,8 +305,10 @@ def finalize_experiment(
     save_json(dataset_artifacts_dir / "two_tower_config.json", two_tower_config)
     save_json(dataset_artifacts_dir / "mf_config.json", mf_config)
     save_json(dataset_artifacts_dir / "sasrec_config.json", sasrec_config)
-    save_json(artifacts_dir / "results.json", results)
-    print(f"Saved final results to {artifacts_dir / 'results.json'}")
+    # 结果按数据集落盘：多个数据集各自收口时不会互相覆盖。
+    results_path = dataset_artifacts_dir / "results.json"
+    save_json(results_path, results)
+    print(f"Saved final results to {results_path}")
     return results
 
 

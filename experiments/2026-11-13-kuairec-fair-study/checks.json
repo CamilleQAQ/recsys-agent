@@ -1,0 +1,16 @@
+{
+  "weights_unchanged": true,
+  "old_splits_unchanged": true,
+  "equal_total_code_trials": true,
+  "equal_total_llm_calls": true,
+  "test_after_all_old_training_and_checkpoint_selection_events": true,
+  "cold_queue_and_position_rule_shared": true,
+  "training_performed": false,
+  "independent_recall_ndcg_recalculation": true,
+  "cold_item_identity_and_exact_positions_identical_all_arms": true,
+  "final_rankings_same_user_ids_no_duplicate_or_unknown_item": true,
+  "selected_algorithm_hashes_match_lock": true,
+  "shared_records_artifact_checks_passed": 10,
+  "test_users_with_candidate_pool_at_most_100": 1199,
+  "test_positive_users": 1405
+}

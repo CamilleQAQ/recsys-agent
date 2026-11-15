@@ -1,0 +1,52 @@
+{
+  "test_split": "unchanged KuaiSAR-small held-out last request; all 2000 test users; original test exposure mask used for every arm",
+  "counts": {
+    "users": 2000,
+    "positives": 4275,
+    "catalog": 454717,
+    "masked_test_pairs": 4
+  },
+  "training": {
+    "nested_fraction_percent": [
+      25,
+      50,
+      100
+    ],
+    "unique_positive_rows": {
+      "25": 187168,
+      "50": 374337,
+      "100": 748674
+    },
+    "sampling": "One fixed permutation of the original train split; 25% prefix contained in 50%, contained in 100%. Each arm cycles shuffled subsets to equalize updates, full subset covered once before repetition.",
+    "same_optimizer_steps": 366,
+    "same_positive_row_exposures": 749568,
+    "batch_size": 2048,
+    "learning_rate": 0.01,
+    "optimizer": "torch Adam (fused CPU implementation); no weight decay; project in-batch cross-entropy, same init seed",
+    "negative_mask": false,
+    "model_config": {
+      "num_users": 2000,
+      "num_items": 454717,
+      "embedding_dim": 64,
+      "hidden_dim": 128,
+      "output_dim": 64,
+      "temperature": 0.1,
+      "tower_type": "embedding",
+      "item_cat_cardinalities": [
+        38,
+        294,
+        4,
+        29
+      ],
+      "item_numeric_count": 5,
+      "feature_dim": 16
+    },
+    "seed": 42,
+    "device": "CPU, 4 torch and FAISS threads",
+    "checkpoint_selection": "Final fixed step; no tuning on validation or test. Prior production checkpoint had 20 epochs; treated as historical reference only."
+  },
+  "index": "Exact FAISS IndexFlatIP, same entire ordered item ID vocabulary for all Two-Tower arms, including zero-training-click items.",
+  "itemcf": "Exact sum of cosine co-click similarities to each user's train items; sparse factorization avoids item-by-item matrix. Positive-neighbor candidates only.",
+  "popularity": "Descending train click count, ties ascending item ID; only positive-count candidates.",
+  "cold_breakdown": "Group membership fixed using the full small training split, for fair comparison. Per-arm cold counts also recorded."
+}

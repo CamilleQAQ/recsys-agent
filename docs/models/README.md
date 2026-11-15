@@ -11,7 +11,22 @@
 | Popularity | [`popularity.md`](popularity.md) |
 | BPR-MF（矩阵分解） | [`matrix_factorization.md`](matrix_factorization.md) |
 | Two-Tower（ID 双塔） | [`two_tower.md`](two_tower.md) |
+| LightGCN | [`lightgcn.md`](lightgcn.md) |
+| DSSM（双塔） | [`dssm.md`](dssm.md) |
 | MIND（多兴趣召回） | [`mind.md`](mind.md) |
+| TIGER（生成式检索） | [`tiger.md`](tiger.md) |
+| HSTU（生成式序列推荐） | [`hstu.md`](hstu.md) |
+| MMRec 多模态推荐框架 | [`mmrec_multimodal.md`](mmrec_multimodal.md) |
+| RQ-VAE / Semantic ID（本项目适配） | [`semantic_id_rqvae.md`](semantic_id_rqvae.md) |
 | SASRec（本项目实现） | [`sasrec.md`](sasrec.md) |
+| BERT4Rec | [`bert4rec.md`](bert4rec.md) |
+| DIN（深度兴趣网络） | [`din.md`](din.md) |
+| DIEN（深度兴趣演化） | [`dien.md`](dien.md) |
+| DCNv2（Deep & Cross v2） | [`dcnv2.md`](dcnv2.md) |
+| DeepFM | [`deepfm.md`](deepfm.md) |
+| MMoE（多门混合专家） | [`mmoe.md`](mmoe.md) |
+| PLE（渐进式分层提取） | [`ple.md`](ple.md) |
+| LightGBM LambdaRank | [`lightgbm_ranker.md`](lightgbm_ranker.md) |
+| Ultra-HSTU（TorchEasyRec 排序版） | [`ultra_hstu.md`](ultra_hstu.md) |
 | FAISS（向量检索） | [`faiss.md`](faiss.md) |
 | FAISS 物品索引封装（本项目） | [`faiss_item_index.md`](faiss_item_index.md) |

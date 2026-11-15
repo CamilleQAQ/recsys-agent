@@ -5,7 +5,7 @@
 ```
 models/
 ├── README.md            本文件：分类规则、完整度定义、怎么加模型
-├── zoo.toml             唯一事实来源（机读，24 条记录 + 3 个分类元数据）
+├── zoo.toml             唯一事实来源（机读，25 条记录 + 3 个分类元数据）
 ├── retrieval/README.md  召回模型（生成）
 ├── ranking/README.md    排序模型（生成）
 └── infrastructure/README.md  基础设施（生成）
@@ -36,12 +36,25 @@ FuxiCTR 同时提供 DIN/DCNv2（排序）和 DSSM（召回），所以一个仓
 
 `blocked` 不等于「代码没价值」：它是**明确的已知限制**，防止有人照着文档装一晚上环境才发现装不上。
 
+每条记录还有 7 个逐项状态（`status`），与完整度分开：
+
+| 字段 | 含义 |
+| --- | --- |
+| `source_available` | 源码在 `third_party/` 或 `src/` |
+| `source_reviewed` | 已定位上游入口、输入输出与依赖 |
+| `adapter_ready` | 已有项目适配（适配器或组件 API） |
+| `runnable` | 在指定环境中实际跑过基础训练或推理 |
+| `integrated` | 已进入统一推荐链路（召回/排序） |
+| `agent_callable` | Rec Agent 工具可调用 |
+| `evaluated` | 有明确评估结果（不是冒烟指标） |
+
 ## 加一个模型
 
 ```powershell
 # 1. 代码放对位置：自研 → src/recsys/models；第三方 → third_party/<repo>（原样）
 # 2. 在 zoo.toml 追加一条 [[models]]
-# 3. 若已接入统一接口：召回在 src/recsys/adapters/builtin.py 加子类，排序在 ranking.py 加子类，并填 adapter 字段
+# 3. 若已接入统一接口：召回在 src/recsys/adapters/registry.py 注册，排序在 ranking_registry.py 注册
+#    （具体实现按模型类型放 builtin/graph/sequence/tiger/mmrec/neural_ranking），并填 adapter 字段
 # 4. 重新生成文档并校验
 python scripts/zoo.py render
 python scripts/zoo.py check
@@ -52,7 +65,7 @@ python scripts/zoo.py check
 
 ## 与 third_party 的关系
 
-- `third_party/SOURCES.toml`：13 个仓库的**维护版**来源清单（URL、分支、完整 commit、许可、可用性、本地改动）；
+- `third_party/SOURCES.toml`：14 个仓库的**维护版**来源清单（URL、分支、完整 commit、许可、可用性、本地改动）；
 - `third_party/repository_manifest.csv`：Phase 0 静态审计快照（含实现文件与符号级证据）；
 - `third_party/model_mapping.md`：逐文件的模型定义与行号（跨仓库全量清单，比 `zoo.toml` 更细）；
 - `models/zoo.toml`：**只收录本项目打算用的模型**，字段面向「怎么跑起来」而不是「源码在哪一行」。

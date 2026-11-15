@@ -1,0 +1,1114 @@
+{
+  "protocol": {
+    "dataset": "kuairec_small",
+    "source_protocol": {
+      "dataset": "KuaiRec 2.0 official small_matrix",
+      "raw_rows": 4676570,
+      "users": 1411,
+      "items": 3327,
+      "unique_first_exposures": 4494578,
+      "ambiguous_first_labels_excluded": 0,
+      "missing_timestamp_rows": 181992,
+      "unknown_time_pairs_excluded": 181992,
+      "positive_rule": "first playback watch_ratio >= 1.0, frozen before modeling",
+      "split": "Per-user distinct first-exposure timestamps: earliest 80% train, next 10% validation, last 10% test; equal timestamps kept together; boundary times from exposure times, without reading labels.",
+      "seen_filter": "All first playbacks strictly before each evaluation cutoff, including negatives. Validation observations used only as known history/mask in test, not for optimizer updates.",
+      "rationale": "Block holdout avoids an almost fully exposed user's last single positive creating only a handful of available candidates.",
+      "split_counts": {
+        "train": 1177823,
+        "validation": 140775,
+        "test": 153264
+      },
+      "eval_users": 1410,
+      "cold_test_targets": 120308,
+      "train_items": 2999,
+      "train_item_frequency_quantiles": [
+        1.0,
+        318.0,
+        893.0,
+        1243.0
+      ],
+      "test_unseen_candidate_quantiles": [
+        356.0,
+        463.0,
+        597.0
+      ],
+      "two_tower": {
+        "embedding_dim": 32,
+        "output_dim": 32,
+        "tower_type": "embedding",
+        "temperature": 0.1,
+        "lr": 0.01,
+        "batch_size": 1024,
+        "epochs": 5,
+        "seed": 42,
+        "selection": "best validation NDCG@20",
+        "mask_train_positive_false_negatives": true
+      },
+      "training_history": "Only this dataset; new initialization and independent mappings."
+    },
+    "configs": {
+      "fixed_rr": {
+        "mode": "round_robin",
+        "channels": [
+          "two_tower",
+          "itemcf",
+          "popularity"
+        ],
+        "weights": {}
+      },
+      "rrf_equal": {
+        "mode": "rrf",
+        "channels": [
+          "two_tower",
+          "itemcf",
+          "popularity"
+        ],
+        "weights": {}
+      },
+      "rrf_tt3": {
+        "mode": "rrf",
+        "channels": [
+          "two_tower",
+          "itemcf",
+          "popularity"
+        ],
+        "weights": {
+          "two_tower": 3,
+          "itemcf": 1,
+          "popularity": 1
+        }
+      },
+      "rrf_tt6": {
+        "mode": "rrf",
+        "channels": [
+          "two_tower",
+          "itemcf",
+          "popularity"
+        ],
+        "weights": {
+          "two_tower": 6,
+          "itemcf": 1,
+          "popularity": 1
+        }
+      },
+      "rrf_tt_pop": {
+        "mode": "rrf",
+        "channels": [
+          "two_tower",
+          "popularity"
+        ],
+        "weights": {
+          "two_tower": 3,
+          "popularity": 1
+        }
+      },
+      "rr_tt_itemcf": {
+        "mode": "round_robin",
+        "channels": [
+          "two_tower",
+          "itemcf"
+        ],
+        "weights": {}
+      }
+    },
+    "objective": "validation NDCG@20; tie: Recall@100 then config_id",
+    "new_experiments_per_agent": 2,
+    "memory_prior": "one real validation evaluation: rrf_equal",
+    "prior_cost_counted_separately": true,
+    "test_previously_evaluated_for_single_models": true,
+    "selection_test_access": "No test metrics/labels supplied to LLM; config menu frozen before this study.",
+    "scope": "rank fusion only; existing ResearchAgent graph with experimental KuaiRec business adapter, no child RecAgent LLM or learned reranker",
+    "weights_sha256": "3e847c7bd9dc63b1d9e4f5860aa8c2d34ca63f59126198013c9750514e39775a",
+    "split_hashes": {
+      "train": "fba8fd168578262ce817b25d7ef1727cde546aab3ae1fe02da8dec050db45ab0",
+      "validation": "8d45ff79f767dfbd10f95277808713fc48209bff202ff2cd2a6ddd34420817e2",
+      "test": "139ff8d89075d08b43ffd4fc84ee7f589916e2a28669add76c4fbc309547a94d"
+    }
+  },
+  "selected": {
+    "fixed": "fixed_rr",
+    "no_memory": "rrf_equal",
+    "memory": "rrf_equal"
+  },
+  "test_metrics": {
+    "fixed": {
+      "Recall@20": 0.04201765135516845,
+      "Recall@100": 0.21886384880768753,
+      "NDCG@20": 0.22421016231871924
+    },
+    "no_memory": {
+      "Recall@20": 0.026610437166645507,
+      "Recall@100": 0.15221218167248687,
+      "NDCG@20": 0.12323314737979195
+    },
+    "memory": {
+      "Recall@20": 0.026610437166645507,
+      "Recall@100": 0.15221218167248687,
+      "NDCG@20": 0.12323314737979195
+    }
+  },
+  "gains_vs_fixed": {
+    "no_memory": {
+      "Recall@20": {
+        "absolute": -0.015407214188522946,
+        "relative_pct": -36.668432650574026
+      },
+      "Recall@100": {
+        "absolute": -0.06665166713520065,
+        "relative_pct": -30.453483980246776
+      },
+      "NDCG@20": {
+        "absolute": -0.10097701493892729,
+        "relative_pct": -45.03676991919146
+      }
+    },
+    "memory": {
+      "Recall@20": {
+        "absolute": -0.015407214188522946,
+        "relative_pct": -36.668432650574026
+      },
+      "Recall@100": {
+        "absolute": -0.06665166713520065,
+        "relative_pct": -30.453483980246776
+      },
+      "NDCG@20": {
+        "absolute": -0.10097701493892729,
+        "relative_pct": -45.03676991919146
+      }
+    }
+  },
+  "eval_users": 1410,
+  "test_positive_count": 153264,
+  "arms": {
+    "no_memory": {
+      "selected_config_id": "rrf_equal",
+      "selection": "best validation incumbent among actual observations",
+      "trials": {
+        "rrf_tt3": {
+          "config_id": "rrf_tt3",
+          "metrics": {
+            "Recall@20": 0.03024880657553886,
+            "Recall@100": 0.15128601432462405,
+            "NDCG@20": 0.1433831495235171
+          },
+          "elapsed_s": 0.5269560999986425,
+          "split": "validation"
+        },
+        "rrf_equal": {
+          "config_id": "rrf_equal",
+          "metrics": {
+            "Recall@20": 0.06290807951706046,
+            "Recall@100": 0.2547573936097533,
+            "NDCG@20": 0.2673677573443123
+          },
+          "elapsed_s": 0.5326948000001721,
+          "split": "validation"
+        }
+      },
+      "history_prior_count": 0,
+      "wall_s": 6.013181800000893,
+      "summary": {
+        "task_id": "task-20261113T172545-ea3bcd",
+        "task": "研究 KuaiRec 多路召回融合。目标是在验证集最大化 NDCG@20（平手选 Recall@100）。\n你必须先解释假设，选一个融合配置调用工具，看反馈后决定第二个不同配置，最多两个新实验，然后停止。\n不要重跑已知 fixed_rr 或历史配置；有历史记录时先调用 read_experiment_result，基于指标形成下一步。\n所有方案至少融合两个模型，不得改模型权重、训练或接触测试集。只用给定菜单，不要虚构指标。\n第一轮反馈后在第二轮选择中体现反馈；允许保留固定基线。最终给出 selected_config_id 和理由。\n系统用你实际观察过的验证 NDCG 最优方案作为 incumbent，若新方案更差则保留此前最好方案。",
+        "status": "verified",
+        "planner_requested": "llm",
+        "planner": "llm",
+        "decision_source": "llm",
+        "scripted_stand_in": false,
+        "llm_used": true,
+        "llm_available": true,
+        "llm_blocker": null,
+        "llm_requests": 3,
+        "stop_reason": "llm_stop",
+        "stop_detail": "结论（两个新实验已用完，停止）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 用排名倒数融合，比固定轮询更能抑制单路噪声；但若给 two_tower 加权（3:1:1），可能过度偏向单一通道，反而降低多样性收益。\n\n**实验与真实结果（validation，KuaiRec small）**：\n1. `rrf_tt3`（RRF，权重 3:1:1）：NDCG@20 = 0.14338，Recall@20 = 0.03025，Recall@100 = 0.15129 → 低于基线 fixed_rr（NDCG@20 0.15115），加权确实有害。\n2. 基于该反馈，第二轮改为不加权的 `rrf_equal`（RRF，三路等权）：NDCG@20 = **0.26737**，Recall@20 = 0.06291，Recall@100 = 0.25476 → 显著优于基线 fixed_rr（0.15115）与 rrf_tt3。\n\n**selected_config_id：`rrf_equal`**（record_id b20a8cafb6c142f29559cfc0e03c5eed）。理由：等权 RRF 在 NDCG@20 上比基线提升约 +77%，且 Recall@100 也同步提升（0.2548 vs 0.1988），说明收益来自融合方式而非单通道偏置；加权版本（rrf_tt3）被验证为更差，故不保留。incumbent 更新为 rrf_equal。",
+        "history": null,
+        "reuse_mode": null,
+        "new_experiments": 2,
+        "businesses": [
+          "recommendation"
+        ],
+        "record_ids": [
+          "cf478a47081b446d801922c2a7b3788e",
+          "b20a8cafb6c142f29559cfc0e03c5eed"
+        ],
+        "tool_results": [
+          {
+            "step": 1,
+            "phase": "execute",
+            "source": "llm",
+            "tool": "run_recommendation_experiment",
+            "business": "recommendation",
+            "arguments": {
+              "config_id": "rrf_tt3"
+            },
+            "ok": true,
+            "status": "success",
+            "record_id": "cf478a47081b446d801922c2a7b3788e",
+            "error": null,
+            "elapsed_s": 0.54,
+            "result_summary": {
+              "ok": true,
+              "status": "success",
+              "business": "recommendation",
+              "record_id": "cf478a47081b446d801922c2a7b3788e",
+              "metrics": {
+                "config_id": "rrf_tt3",
+                "Recall@20": 0.03024880657553886,
+                "Recall@100": 0.15128601432462405,
+                "NDCG@20": 0.1433831495235171
+              }
+            }
+          },
+          {
+            "step": 2,
+            "phase": "execute",
+            "source": "llm",
+            "tool": "run_recommendation_experiment",
+            "business": "recommendation",
+            "arguments": {
+              "config_id": "rrf_equal"
+            },
+            "ok": true,
+            "status": "success",
+            "record_id": "b20a8cafb6c142f29559cfc0e03c5eed",
+            "error": null,
+            "elapsed_s": 0.55,
+            "result_summary": {
+              "ok": true,
+              "status": "success",
+              "business": "recommendation",
+              "record_id": "b20a8cafb6c142f29559cfc0e03c5eed",
+              "metrics": {
+                "config_id": "rrf_equal",
+                "Recall@20": 0.06290807951706046,
+                "Recall@100": 0.2547573936097533,
+                "NDCG@20": 0.2673677573443123
+              }
+            }
+          }
+        ],
+        "decisions": [
+          {
+            "step": 1,
+            "source": "llm",
+            "action": "call",
+            "reason": "LLM 选择工具 run_recommendation_experiment",
+            "visible": {
+              "history": null,
+              "tool_results": [],
+              "budget": {
+                "task_id": "task-20261113T172545-ea3bcd",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 0,
+                  "tool": 0,
+                  "experiment": 0,
+                  "history": 0,
+                  "artifact": 0
+                },
+                "remaining": {
+                  "llm": 6,
+                  "tool": 10,
+                  "experiment": 2,
+                  "history": 0,
+                  "artifact": 2,
+                  "seconds": 239.93
+                },
+                "elapsed_s": 0.07,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172545-ea3bcd",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 1,
+                "tool": 0,
+                "experiment": 0,
+                "history": 0,
+                "artifact": 0
+              },
+              "remaining": {
+                "llm": 5,
+                "tool": 10,
+                "experiment": 2,
+                "history": 0,
+                "artifact": 2,
+                "seconds": 238.44
+              },
+              "elapsed_s": 1.56,
+              "refusals": []
+            },
+            "tool": "run_recommendation_experiment",
+            "arguments": {
+              "config_id": "rrf_tt3"
+            }
+          },
+          {
+            "step": 2,
+            "source": "llm",
+            "action": "call",
+            "reason": "LLM 选择工具 run_recommendation_experiment",
+            "visible": {
+              "history": null,
+              "tool_results": [
+                {
+                  "business": "recommendation",
+                  "tool": "run_recommendation_experiment",
+                  "ok": true,
+                  "status": "success",
+                  "record_id": "cf478a47081b446d801922c2a7b3788e",
+                  "error": null
+                }
+              ],
+              "budget": {
+                "task_id": "task-20261113T172545-ea3bcd",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 1,
+                  "tool": 2,
+                  "experiment": 1,
+                  "history": 0,
+                  "artifact": 0
+                },
+                "remaining": {
+                  "llm": 5,
+                  "tool": 8,
+                  "experiment": 1,
+                  "history": 0,
+                  "artifact": 2,
+                  "seconds": 237.88
+                },
+                "elapsed_s": 2.12,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172545-ea3bcd",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 2,
+                "tool": 2,
+                "experiment": 1,
+                "history": 0,
+                "artifact": 0
+              },
+              "remaining": {
+                "llm": 4,
+                "tool": 8,
+                "experiment": 1,
+                "history": 0,
+                "artifact": 2,
+                "seconds": 237.13
+              },
+              "elapsed_s": 2.87,
+              "refusals": []
+            },
+            "tool": "run_recommendation_experiment",
+            "arguments": {
+              "config_id": "rrf_equal"
+            }
+          },
+          {
+            "step": 3,
+            "source": "llm",
+            "action": "stop",
+            "reason": "结论（两个新实验已用完，停止）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 用排名倒数融合，比固定轮询更能抑制单路噪声；但若给 two_tower 加权（3:1:1），可能过度偏向单一通道，反而降低多样性收益。\n\n**实验与真实结果（validation，KuaiRec small）**：\n1. `rrf_tt3`（RRF，权重 3:1:1）：NDCG@20 = 0.14338，Recall@20 = 0.03025，Recall@100 = 0.15129 → 低于基线 fixed_rr（NDCG@20 0.15115），加权确实有害。\n2. 基于该反馈，第二轮改为不加权的 `rrf_equal`（RRF，三路等权）：NDCG@20 = **0.26737**，Recall@20 = 0.06291，Recall@100 = 0.25476 → 显著优于基线 fixed_rr（0.15115）与 rrf_tt3。\n\n**selected_config_id：`rrf_equal`**（record_id b20a8cafb6c142f29559cfc0e03c5eed）。理由：等权 RRF 在 NDCG@20 上比基线提升约 +77%，且 Recall@100 也同步提升（0.2548 vs 0.1988），说明收益来自融合方式而非单通道偏置；加权版本（rrf_tt3）被验证为更差，故不保留。incumbent 更新为 rrf_equal。",
+            "visible": {
+              "history": null,
+              "tool_results": [
+                {
+                  "business": "recommendation",
+                  "tool": "run_recommendation_experiment",
+                  "ok": true,
+                  "status": "success",
+                  "record_id": "cf478a47081b446d801922c2a7b3788e",
+                  "error": null
+                },
+                {
+                  "business": "recommendation",
+                  "tool": "run_recommendation_experiment",
+                  "ok": true,
+                  "status": "success",
+                  "record_id": "b20a8cafb6c142f29559cfc0e03c5eed",
+                  "error": null
+                }
+              ],
+              "budget": {
+                "task_id": "task-20261113T172545-ea3bcd",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 2,
+                  "tool": 4,
+                  "experiment": 2,
+                  "history": 0,
+                  "artifact": 0
+                },
+                "remaining": {
+                  "llm": 4,
+                  "tool": 6,
+                  "experiment": 0,
+                  "history": 0,
+                  "artifact": 2,
+                  "seconds": 236.57
+                },
+                "elapsed_s": 3.43,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172545-ea3bcd",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 3,
+                "tool": 4,
+                "experiment": 2,
+                "history": 0,
+                "artifact": 0
+              },
+              "remaining": {
+                "llm": 3,
+                "tool": 6,
+                "experiment": 0,
+                "history": 0,
+                "artifact": 2,
+                "seconds": 234.05
+              },
+              "elapsed_s": 5.95,
+              "refusals": []
+            },
+            "stop_reason": "llm_stop",
+            "detail": "结论（两个新实验已用完，停止）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 用排名倒数融合，比固定轮询更能抑制单路噪声；但若给 two_tower 加权（3:1:1），可能过度偏向单一通道，反而降低多样性收益。\n\n**实验与真实结果（validation，KuaiRec small）**：\n1. `rrf_tt3`（RRF，权重 3:1:1）：NDCG@20 = 0.14338，Recall@20 = 0.03025，Recall@100 = 0.15129 → 低于基线 fixed_rr（NDCG@20 0.15115），加权确实有害。\n2. 基于该反馈，第二轮改为不加权的 `rrf_equal`（RRF，三路等权）：NDCG@20 = **0.26737**，Recall@20 = 0.06291，Recall@100 = 0.25476 → 显著优于基线 fixed_rr（0.15115）与 rrf_tt3。\n\n**selected_config_id：`rrf_equal`**（record_id b20a8cafb6c142f29559cfc0e03c5eed）。理由：等权 RRF 在 NDCG@20 上比基线提升约 +77%，且 Recall@100 也同步提升（0.2548 vs 0.1988），说明收益来自融合方式而非单通道偏置；加权版本（rrf_tt3）被验证为更差，故不保留。incumbent 更新为 rrf_equal。"
+          }
+        ],
+        "budget": {
+          "task_id": "task-20261113T172545-ea3bcd",
+          "policy": {
+            "max_llm_requests": 6,
+            "max_tool_calls": 10,
+            "max_experiments": 2,
+            "max_history_lookups": 0,
+            "max_artifact_reads": 2,
+            "max_seconds": 240.0
+          },
+          "counters": {
+            "llm": 3,
+            "tool": 4,
+            "experiment": 2,
+            "history": 0,
+            "artifact": 0
+          },
+          "remaining": {
+            "llm": 3,
+            "tool": 6,
+            "experiment": 0,
+            "history": 0,
+            "artifact": 2,
+            "seconds": 234.04
+          },
+          "elapsed_s": 5.96,
+          "refusals": []
+        },
+        "budget_refusals": [],
+        "final_answer": "结论（两个新实验已用完，停止）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 用排名倒数融合，比固定轮询更能抑制单路噪声；但若给 two_tower 加权（3:1:1），可能过度偏向单一通道，反而降低多样性收益。\n\n**实验与真实结果（validation，KuaiRec small）**：\n1. `rrf_tt3`（RRF，权重 3:1:1）：NDCG@20 = 0.14338，Recall@20 = 0.03025，Recall@100 = 0.15129 → 低于基线 fixed_rr（NDCG@20 0.15115），加权确实有害。\n2. 基于该反馈，第二轮改为不加权的 `rrf_equal`（RRF，三路等权）：NDCG@20 = **0.26737**，Recall@20 = 0.06291，Recall@100 = 0.25476 → 显著优于基线 fixed_rr（0.15115）与 rrf_tt3。\n\n**selected_config_id：`rrf_equal`**（record_id b20a8cafb6c142f29559cfc0e03c5eed）。理由：等权 RRF 在 NDCG@20 上比基线提升约 +77%，且 Recall@100 也同步提升（0.2548 vs 0.1988），说明收益来自融合方式而非单通道偏置；加权版本（rrf_tt3）被验证为更差，故不保留。incumbent 更新为 rrf_equal。",
+        "artifacts": {
+          "summary": "experiments\\2026-11-13-kuairec-fusion-research\\no_memory\\tasks\\task-20261113T172545-ea3bcd\\summary.json",
+          "trace": "experiments\\2026-11-13-kuairec-fusion-research\\no_memory\\tasks\\task-20261113T172545-ea3bcd\\trace.jsonl",
+          "tool_results": "experiments\\2026-11-13-kuairec-fusion-research\\no_memory\\tasks\\task-20261113T172545-ea3bcd\\tool_results.json",
+          "decisions": "experiments\\2026-11-13-kuairec-fusion-research\\no_memory\\tasks\\task-20261113T172545-ea3bcd\\decisions.json",
+          "final_answer": "experiments\\2026-11-13-kuairec-fusion-research\\no_memory\\tasks\\task-20261113T172545-ea3bcd\\final_answer.md",
+          "task_record": "a019540e05d54155b231cd19d3b34266"
+        },
+        "elapsed_s": 5.97,
+        "task_record_id": "a019540e05d54155b231cd19d3b34266"
+      }
+    },
+    "memory": {
+      "selected_config_id": "rrf_equal",
+      "selection": "best validation incumbent among actual observations",
+      "trials": {
+        "rrf_tt3": {
+          "config_id": "rrf_tt3",
+          "metrics": {
+            "Recall@20": 0.03024880657553886,
+            "Recall@100": 0.15128601432462405,
+            "NDCG@20": 0.1433831495235171
+          },
+          "elapsed_s": 0.4974624999995285,
+          "split": "validation"
+        },
+        "rrf_tt_pop": {
+          "config_id": "rrf_tt_pop",
+          "metrics": {
+            "Recall@20": 0.02027547760800405,
+            "Recall@100": 0.09998004309118655,
+            "NDCG@20": 0.09018523440854274
+          },
+          "elapsed_s": 0.3950995999985025,
+          "split": "validation"
+        }
+      },
+      "history_prior_count": 1,
+      "wall_s": 7.6200363999996625,
+      "summary": {
+        "task_id": "task-20261113T172551-9631b9",
+        "task": "研究 KuaiRec 多路召回融合。目标是在验证集最大化 NDCG@20（平手选 Recall@100）。\n你必须先解释假设，选一个融合配置调用工具，看反馈后决定第二个不同配置，最多两个新实验，然后停止。\n不要重跑已知 fixed_rr 或历史配置；有历史记录时先调用 read_experiment_result，基于指标形成下一步。\n所有方案至少融合两个模型，不得改模型权重、训练或接触测试集。只用给定菜单，不要虚构指标。\n第一轮反馈后在第二轮选择中体现反馈；允许保留固定基线。最终给出 selected_config_id 和理由。\n系统用你实际观察过的验证 NDCG 最优方案作为 incumbent，若新方案更差则保留此前最好方案。",
+        "status": "verified",
+        "planner_requested": "llm",
+        "planner": "llm",
+        "decision_source": "llm",
+        "scripted_stand_in": false,
+        "llm_used": true,
+        "llm_available": true,
+        "llm_blocker": null,
+        "llm_requests": 4,
+        "stop_reason": "llm_stop",
+        "stop_detail": "结论（KuaiRec 验证集，真实工具返回）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 融合优于轮询（round_robin），因为轮询忽略各路排序置信度；而给 two_tower 加权（3:1:1）应能进一步放大其排序质量。若加权反而变差，说明 two_tower 单路信号弱、需要 itemcf/popularity 的多样性来补足。\n\n**观察到的指标（NDCG@20 / Recall@100）**：\n- 历史记录 `eb7088ef…`（rrf_equal，复用）：0.26737 / 0.25476 —— 最优\n- 基线 fixed_rr（round_robin 三路）：0.15115 / 0.19879\n- 新实验 1 `863fbe57…`（rrf_tt3，two_tower 权重 3）：0.14338 / 0.15129 —— 明显劣于 rrf_equal，甚至低于 fixed_rr\n- 新实验 2 `00e58b51…`（rrf_tt_pop，去掉 itemcf、two_tower 权重 3）：0.09019 / 0.09998 —— 最差\n\n**第二轮反馈体现**：第一轮 rrf_tt3 加权后大幅下降，说明 two_tower 加权会压制 itemcf 的贡献；因此第二轮不再继续加大 two_tower 权重（放弃 rrf_tt6），改为检验“去掉 itemcf 是否致命”——结果确认 itemcf 是必要通道，去掉后指标腰斩。\n\n**selected_config_id：rrf_equal**（NDCG@20 = 0.26737，Recall@100 = 0.25476，来源：历史记录 eb7088ef3b8e4bd8a5215a5ec9cb6e69，可复用）。\n理由：等权 RRF 三路融合在已观察的所有方案中 NDCG@20 最高，比 fixed_rr 基线高约 77%；两个新实验均更差，按规则保留此前最好方案作为 incumbent。未改动模型权重、未训练、未接触测试集。",
+        "history": null,
+        "reuse_mode": null,
+        "new_experiments": 2,
+        "businesses": [
+          "recommendation"
+        ],
+        "record_ids": [
+          "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+          "863fbe573dec48afaac46c1bc29b4f16",
+          "00e58b514bd04b82a688128f5873fe01"
+        ],
+        "tool_results": [
+          {
+            "step": 1,
+            "phase": "execute",
+            "source": "llm",
+            "tool": "read_experiment_result",
+            "business": null,
+            "arguments": {
+              "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+              "field": "metrics"
+            },
+            "ok": true,
+            "status": null,
+            "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+            "error": null,
+            "elapsed_s": 0.0,
+            "result_summary": {
+              "ok": true,
+              "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69"
+            }
+          },
+          {
+            "step": 2,
+            "phase": "execute",
+            "source": "llm",
+            "tool": "run_recommendation_experiment",
+            "business": "recommendation",
+            "arguments": {
+              "config_id": "rrf_tt3"
+            },
+            "ok": true,
+            "status": "success",
+            "record_id": "863fbe573dec48afaac46c1bc29b4f16",
+            "error": null,
+            "elapsed_s": 0.51,
+            "result_summary": {
+              "ok": true,
+              "status": "success",
+              "business": "recommendation",
+              "record_id": "863fbe573dec48afaac46c1bc29b4f16",
+              "metrics": {
+                "config_id": "rrf_tt3",
+                "Recall@20": 0.03024880657553886,
+                "Recall@100": 0.15128601432462405,
+                "NDCG@20": 0.1433831495235171
+              }
+            }
+          },
+          {
+            "step": 3,
+            "phase": "execute",
+            "source": "llm",
+            "tool": "run_recommendation_experiment",
+            "business": "recommendation",
+            "arguments": {
+              "config_id": "rrf_tt_pop"
+            },
+            "ok": true,
+            "status": "success",
+            "record_id": "00e58b514bd04b82a688128f5873fe01",
+            "error": null,
+            "elapsed_s": 0.41,
+            "result_summary": {
+              "ok": true,
+              "status": "success",
+              "business": "recommendation",
+              "record_id": "00e58b514bd04b82a688128f5873fe01",
+              "metrics": {
+                "config_id": "rrf_tt_pop",
+                "Recall@20": 0.02027547760800405,
+                "Recall@100": 0.09998004309118655,
+                "NDCG@20": 0.09018523440854274
+              }
+            }
+          }
+        ],
+        "decisions": [
+          {
+            "step": 1,
+            "source": "llm",
+            "action": "call",
+            "reason": "LLM 选择工具 read_experiment_result",
+            "visible": {
+              "history": null,
+              "tool_results": [],
+              "budget": {
+                "task_id": "task-20261113T172551-9631b9",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 0,
+                  "tool": 0,
+                  "experiment": 0,
+                  "history": 0,
+                  "artifact": 0
+                },
+                "remaining": {
+                  "llm": 6,
+                  "tool": 10,
+                  "experiment": 2,
+                  "history": 0,
+                  "artifact": 2,
+                  "seconds": 239.99
+                },
+                "elapsed_s": 0.01,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172551-9631b9",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 1,
+                "tool": 0,
+                "experiment": 0,
+                "history": 0,
+                "artifact": 0
+              },
+              "remaining": {
+                "llm": 5,
+                "tool": 10,
+                "experiment": 2,
+                "history": 0,
+                "artifact": 2,
+                "seconds": 238.82
+              },
+              "elapsed_s": 1.18,
+              "refusals": []
+            },
+            "tool": "read_experiment_result",
+            "arguments": {
+              "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+              "field": "metrics"
+            }
+          },
+          {
+            "step": 2,
+            "source": "llm",
+            "action": "call",
+            "reason": "LLM 选择工具 run_recommendation_experiment",
+            "visible": {
+              "history": null,
+              "tool_results": [
+                {
+                  "business": null,
+                  "tool": "read_experiment_result",
+                  "ok": true,
+                  "status": null,
+                  "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+                  "error": null
+                }
+              ],
+              "budget": {
+                "task_id": "task-20261113T172551-9631b9",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 1,
+                  "tool": 1,
+                  "experiment": 0,
+                  "history": 0,
+                  "artifact": 1
+                },
+                "remaining": {
+                  "llm": 5,
+                  "tool": 9,
+                  "experiment": 2,
+                  "history": 0,
+                  "artifact": 1,
+                  "seconds": 238.82
+                },
+                "elapsed_s": 1.18,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172551-9631b9",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 2,
+                "tool": 1,
+                "experiment": 0,
+                "history": 0,
+                "artifact": 1
+              },
+              "remaining": {
+                "llm": 4,
+                "tool": 9,
+                "experiment": 2,
+                "history": 0,
+                "artifact": 1,
+                "seconds": 237.62
+              },
+              "elapsed_s": 2.38,
+              "refusals": []
+            },
+            "tool": "run_recommendation_experiment",
+            "arguments": {
+              "config_id": "rrf_tt3"
+            }
+          },
+          {
+            "step": 3,
+            "source": "llm",
+            "action": "call",
+            "reason": "LLM 选择工具 run_recommendation_experiment",
+            "visible": {
+              "history": null,
+              "tool_results": [
+                {
+                  "business": null,
+                  "tool": "read_experiment_result",
+                  "ok": true,
+                  "status": null,
+                  "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+                  "error": null
+                },
+                {
+                  "business": "recommendation",
+                  "tool": "run_recommendation_experiment",
+                  "ok": true,
+                  "status": "success",
+                  "record_id": "863fbe573dec48afaac46c1bc29b4f16",
+                  "error": null
+                }
+              ],
+              "budget": {
+                "task_id": "task-20261113T172551-9631b9",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 2,
+                  "tool": 3,
+                  "experiment": 1,
+                  "history": 0,
+                  "artifact": 1
+                },
+                "remaining": {
+                  "llm": 4,
+                  "tool": 7,
+                  "experiment": 1,
+                  "history": 0,
+                  "artifact": 1,
+                  "seconds": 237.1
+                },
+                "elapsed_s": 2.9,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172551-9631b9",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 3,
+                "tool": 3,
+                "experiment": 1,
+                "history": 0,
+                "artifact": 1
+              },
+              "remaining": {
+                "llm": 3,
+                "tool": 7,
+                "experiment": 1,
+                "history": 0,
+                "artifact": 1,
+                "seconds": 236.05
+              },
+              "elapsed_s": 3.95,
+              "refusals": []
+            },
+            "tool": "run_recommendation_experiment",
+            "arguments": {
+              "config_id": "rrf_tt_pop"
+            }
+          },
+          {
+            "step": 4,
+            "source": "llm",
+            "action": "stop",
+            "reason": "结论（KuaiRec 验证集，真实工具返回）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 融合优于轮询（round_robin），因为轮询忽略各路排序置信度；而给 two_tower 加权（3:1:1）应能进一步放大其排序质量。若加权反而变差，说明 two_tower 单路信号弱、需要 itemcf/popularity 的多样性来补足。\n\n**观察到的指标（NDCG@20 / Recall@100）**：\n- 历史记录 `eb7088ef…`（rrf_equal，复用）：0.26737 / 0.25476 —— 最优\n- 基线 fixed_rr（round_robin 三路）：0.15115 / 0.19879\n- 新实验 1 `863fbe57…`（rrf_tt3，two_tower 权重 3）：0.14338 / 0.15129 —— 明显劣于 rrf_equal，甚至低于 fixed_rr\n- 新实验 2 `00e58b51…`（rrf_tt_pop，去掉 itemcf、two_tower 权重 3）：0.09019 / 0.09998 —— 最差\n\n**第二轮反馈体现**：第一轮 rrf_tt3 加权后大幅下降，说明 two_tower 加权会压制 itemcf 的贡献；因此第二轮不再继续加大 two_tower 权重（放弃 rrf_tt6），改为检验“去掉 itemcf 是否致命”——结果确认 itemcf 是必要通道，去掉后指标腰斩。\n\n**selected_config_id：rrf_equal**（NDCG@20 = 0.26737，Recall@100 = 0.25476，来源：历史记录 eb7088ef3b8e4bd8a5215a5ec9cb6e69，可复用）。\n理由：等权 RRF 三路融合在已观察的所有方案中 NDCG@20 最高，比 fixed_rr 基线高约 77%；两个新实验均更差，按规则保留此前最好方案作为 incumbent。未改动模型权重、未训练、未接触测试集。",
+            "visible": {
+              "history": null,
+              "tool_results": [
+                {
+                  "business": null,
+                  "tool": "read_experiment_result",
+                  "ok": true,
+                  "status": null,
+                  "record_id": "eb7088ef3b8e4bd8a5215a5ec9cb6e69",
+                  "error": null
+                },
+                {
+                  "business": "recommendation",
+                  "tool": "run_recommendation_experiment",
+                  "ok": true,
+                  "status": "success",
+                  "record_id": "863fbe573dec48afaac46c1bc29b4f16",
+                  "error": null
+                },
+                {
+                  "business": "recommendation",
+                  "tool": "run_recommendation_experiment",
+                  "ok": true,
+                  "status": "success",
+                  "record_id": "00e58b514bd04b82a688128f5873fe01",
+                  "error": null
+                }
+              ],
+              "budget": {
+                "task_id": "task-20261113T172551-9631b9",
+                "policy": {
+                  "max_llm_requests": 6,
+                  "max_tool_calls": 10,
+                  "max_experiments": 2,
+                  "max_history_lookups": 0,
+                  "max_artifact_reads": 2,
+                  "max_seconds": 240.0
+                },
+                "counters": {
+                  "llm": 3,
+                  "tool": 5,
+                  "experiment": 2,
+                  "history": 0,
+                  "artifact": 1
+                },
+                "remaining": {
+                  "llm": 3,
+                  "tool": 5,
+                  "experiment": 0,
+                  "history": 0,
+                  "artifact": 1,
+                  "seconds": 235.63
+                },
+                "elapsed_s": 4.37,
+                "refusals": []
+              },
+              "targets": [
+                "recommendation"
+              ]
+            },
+            "budget_before": {
+              "task_id": "task-20261113T172551-9631b9",
+              "policy": {
+                "max_llm_requests": 6,
+                "max_tool_calls": 10,
+                "max_experiments": 2,
+                "max_history_lookups": 0,
+                "max_artifact_reads": 2,
+                "max_seconds": 240.0
+              },
+              "counters": {
+                "llm": 4,
+                "tool": 5,
+                "experiment": 2,
+                "history": 0,
+                "artifact": 1
+              },
+              "remaining": {
+                "llm": 2,
+                "tool": 5,
+                "experiment": 0,
+                "history": 0,
+                "artifact": 1,
+                "seconds": 232.43
+              },
+              "elapsed_s": 7.57,
+              "refusals": []
+            },
+            "stop_reason": "llm_stop",
+            "detail": "结论（KuaiRec 验证集，真实工具返回）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 融合优于轮询（round_robin），因为轮询忽略各路排序置信度；而给 two_tower 加权（3:1:1）应能进一步放大其排序质量。若加权反而变差，说明 two_tower 单路信号弱、需要 itemcf/popularity 的多样性来补足。\n\n**观察到的指标（NDCG@20 / Recall@100）**：\n- 历史记录 `eb7088ef…`（rrf_equal，复用）：0.26737 / 0.25476 —— 最优\n- 基线 fixed_rr（round_robin 三路）：0.15115 / 0.19879\n- 新实验 1 `863fbe57…`（rrf_tt3，two_tower 权重 3）：0.14338 / 0.15129 —— 明显劣于 rrf_equal，甚至低于 fixed_rr\n- 新实验 2 `00e58b51…`（rrf_tt_pop，去掉 itemcf、two_tower 权重 3）：0.09019 / 0.09998 —— 最差\n\n**第二轮反馈体现**：第一轮 rrf_tt3 加权后大幅下降，说明 two_tower 加权会压制 itemcf 的贡献；因此第二轮不再继续加大 two_tower 权重（放弃 rrf_tt6），改为检验“去掉 itemcf 是否致命”——结果确认 itemcf 是必要通道，去掉后指标腰斩。\n\n**selected_config_id：rrf_equal**（NDCG@20 = 0.26737，Recall@100 = 0.25476，来源：历史记录 eb7088ef3b8e4bd8a5215a5ec9cb6e69，可复用）。\n理由：等权 RRF 三路融合在已观察的所有方案中 NDCG@20 最高，比 fixed_rr 基线高约 77%；两个新实验均更差，按规则保留此前最好方案作为 incumbent。未改动模型权重、未训练、未接触测试集。"
+          }
+        ],
+        "budget": {
+          "task_id": "task-20261113T172551-9631b9",
+          "policy": {
+            "max_llm_requests": 6,
+            "max_tool_calls": 10,
+            "max_experiments": 2,
+            "max_history_lookups": 0,
+            "max_artifact_reads": 2,
+            "max_seconds": 240.0
+          },
+          "counters": {
+            "llm": 4,
+            "tool": 5,
+            "experiment": 2,
+            "history": 0,
+            "artifact": 1
+          },
+          "remaining": {
+            "llm": 2,
+            "tool": 5,
+            "experiment": 0,
+            "history": 0,
+            "artifact": 1,
+            "seconds": 232.43
+          },
+          "elapsed_s": 7.57,
+          "refusals": []
+        },
+        "budget_refusals": [],
+        "final_answer": "结论（KuaiRec 验证集，真实工具返回）：\n\n**假设**：三路召回（two_tower / itemcf / popularity）中，RRF 融合优于轮询（round_robin），因为轮询忽略各路排序置信度；而给 two_tower 加权（3:1:1）应能进一步放大其排序质量。若加权反而变差，说明 two_tower 单路信号弱、需要 itemcf/popularity 的多样性来补足。\n\n**观察到的指标（NDCG@20 / Recall@100）**：\n- 历史记录 `eb7088ef…`（rrf_equal，复用）：0.26737 / 0.25476 —— 最优\n- 基线 fixed_rr（round_robin 三路）：0.15115 / 0.19879\n- 新实验 1 `863fbe57…`（rrf_tt3，two_tower 权重 3）：0.14338 / 0.15129 —— 明显劣于 rrf_equal，甚至低于 fixed_rr\n- 新实验 2 `00e58b51…`（rrf_tt_pop，去掉 itemcf、two_tower 权重 3）：0.09019 / 0.09998 —— 最差\n\n**第二轮反馈体现**：第一轮 rrf_tt3 加权后大幅下降，说明 two_tower 加权会压制 itemcf 的贡献；因此第二轮不再继续加大 two_tower 权重（放弃 rrf_tt6），改为检验“去掉 itemcf 是否致命”——结果确认 itemcf 是必要通道，去掉后指标腰斩。\n\n**selected_config_id：rrf_equal**（NDCG@20 = 0.26737，Recall@100 = 0.25476，来源：历史记录 eb7088ef3b8e4bd8a5215a5ec9cb6e69，可复用）。\n理由：等权 RRF 三路融合在已观察的所有方案中 NDCG@20 最高，比 fixed_rr 基线高约 77%；两个新实验均更差，按规则保留此前最好方案作为 incumbent。未改动模型权重、未训练、未接触测试集。",
+        "artifacts": {
+          "summary": "experiments\\2026-11-13-kuairec-fusion-research\\memory\\tasks\\task-20261113T172551-9631b9\\summary.json",
+          "trace": "experiments\\2026-11-13-kuairec-fusion-research\\memory\\tasks\\task-20261113T172551-9631b9\\trace.jsonl",
+          "tool_results": "experiments\\2026-11-13-kuairec-fusion-research\\memory\\tasks\\task-20261113T172551-9631b9\\tool_results.json",
+          "decisions": "experiments\\2026-11-13-kuairec-fusion-research\\memory\\tasks\\task-20261113T172551-9631b9\\decisions.json",
+          "final_answer": "experiments\\2026-11-13-kuairec-fusion-research\\memory\\tasks\\task-20261113T172551-9631b9\\final_answer.md",
+          "task_record": "a46cf4e6f29b4eb0b549d2a2b75c54e0"
+        },
+        "elapsed_s": 7.58,
+        "task_record_id": "a46cf4e6f29b4eb0b549d2a2b75c54e0"
+      }
+    }
+  },
+  "prior_validation": {
+    "config_id": "rrf_equal",
+    "metrics": {
+      "Recall@20": 0.06290807951706046,
+      "Recall@100": 0.2547573936097533,
+      "NDCG@20": 0.2673677573443123
+    },
+    "elapsed_s": 0.5348422999995819,
+    "split": "validation"
+  },
+  "fixed_validation": {
+    "config_id": "fixed_rr",
+    "metrics": {
+      "Recall@20": 0.03664407005448816,
+      "Recall@100": 0.19878875794758072,
+      "NDCG@20": 0.1511458187712929
+    },
+    "elapsed_s": 0.244151700000657,
+    "split": "validation"
+  },
+  "wall_s": 19.933739099997183
+}

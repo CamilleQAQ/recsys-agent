@@ -1,0 +1,251 @@
+{
+  "dataset": "kuasar_small",
+  "generated_at": "2026-11-09T22:25:21+0800",
+  "weight_dir": "artifacts\\kuasar_small\\ads\\interface_weights",
+  "default_weight_dir": "artifacts\\kuasar_small\\ads\\weights",
+  "weight_kind": "fixed_init_interface_test",
+  "is_trained": false,
+  "results": {
+    "deepfm": {
+      "model": "deepfm",
+      "display": "DeepFM",
+      "framework": "deepctr_torch",
+      "task": "ctr",
+      "needs_history": false,
+      "status": "interface_test",
+      "is_trained": false,
+      "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\deepfm.pt",
+      "checkpoint_sha256": "3bb96f636aacd5d3efd95aaf890d1a7709719871ab79187c112a350b43e189cb",
+      "checkpoint_size_bytes": 16398297,
+      "weight_kind": "fixed_init_interface_test",
+      "inference_ok": true,
+      "inference_rows": 32,
+      "save_load_max_abs_diff": {
+        "ctr": 0.0
+      },
+      "save_load_ok": true,
+      "test_metrics": {
+        "rows": 43,
+        "clicks": 36,
+        "ctr": 0.8372093023255814,
+        "predicted_ctr": 0.20672819468864176,
+        "AUC": 0.6984126984126984,
+        "LogLoss": 1.3524448376159532
+      },
+      "multitask_check": null,
+      "note": "固定初始化权重（未训练）；只证明接口可用，不代表效果。"
+    },
+    "din": {
+      "model": "din",
+      "display": "DIN（深度兴趣网络）",
+      "framework": "project",
+      "task": "ctr",
+      "needs_history": true,
+      "status": "interface_test",
+      "is_trained": false,
+      "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\din.pt",
+      "checkpoint_sha256": "3e1428d0ca67dfcbc033a3d8f2a93313b7814567d6a972ffd473d7526ac78e2b",
+      "checkpoint_size_bytes": 14577698,
+      "weight_kind": "fixed_init_interface_test",
+      "inference_ok": true,
+      "inference_rows": 32,
+      "save_load_max_abs_diff": {
+        "ctr": 0.0
+      },
+      "save_load_ok": true,
+      "test_metrics": {
+        "rows": 43,
+        "clicks": 36,
+        "ctr": 0.8372093023255814,
+        "predicted_ctr": 0.41497043468231376,
+        "AUC": 0.5833333333333334,
+        "LogLoss": 0.8321706875594654
+      },
+      "multitask_check": null,
+      "note": "固定初始化权重（未训练）；只证明接口可用，不代表效果。"
+    },
+    "dien": {
+      "model": "dien",
+      "display": "DIEN（深度兴趣演化）",
+      "framework": "project",
+      "task": "ctr",
+      "needs_history": true,
+      "status": "interface_test",
+      "is_trained": false,
+      "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\dien.pt",
+      "checkpoint_sha256": "c30389e807147d97300fedd9bd7c653248b667430e01d057502dbe0ca2046c22",
+      "checkpoint_size_bytes": 14580447,
+      "weight_kind": "fixed_init_interface_test",
+      "inference_ok": true,
+      "inference_rows": 32,
+      "save_load_max_abs_diff": {
+        "ctr": 0.0
+      },
+      "save_load_ok": true,
+      "test_metrics": {
+        "rows": 43,
+        "clicks": 36,
+        "ctr": 0.8372093023255814,
+        "predicted_ctr": 0.5119918453138929,
+        "AUC": 0.36904761904761907,
+        "LogLoss": 0.6921778744167496
+      },
+      "multitask_check": null,
+      "note": "固定初始化权重（未训练）；只证明接口可用，不代表效果。"
+    },
+    "dcnv2": {
+      "model": "dcnv2",
+      "display": "DCNv2（Deep & Cross v2）",
+      "framework": "project",
+      "task": "ctr",
+      "needs_history": false,
+      "status": "interface_test",
+      "is_trained": false,
+      "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\dcnv2.pt",
+      "checkpoint_sha256": "70438161412456aca541da498fc23be9ac4924ba43f011791c4ac66c192a2704",
+      "checkpoint_size_bytes": 37393,
+      "weight_kind": "fixed_init_interface_test",
+      "inference_ok": true,
+      "inference_rows": 32,
+      "save_load_max_abs_diff": {
+        "ctr": 0.0
+      },
+      "save_load_ok": true,
+      "test_metrics": {
+        "rows": 43,
+        "clicks": 36,
+        "ctr": 0.8372093023255814,
+        "predicted_ctr": 0.9542801546496015,
+        "AUC": 0.5277777777777778,
+        "LogLoss": 0.6935101928726267
+      },
+      "multitask_check": null,
+      "note": "固定初始化权重（未训练）；只证明接口可用，不代表效果。"
+    },
+    "mmoe": {
+      "model": "mmoe",
+      "display": "MMoE（多门混合专家）",
+      "framework": "deepctr_torch",
+      "task": "multitask",
+      "needs_history": false,
+      "status": "interface_test",
+      "is_trained": false,
+      "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\mmoe.pt",
+      "checkpoint_sha256": "7e921dd75275aa89ecdff72d834b375c9720c44f3cb804702986a4b503d1988d",
+      "checkpoint_size_bytes": 14599303,
+      "weight_kind": "fixed_init_interface_test",
+      "inference_ok": true,
+      "inference_rows": 32,
+      "save_load_max_abs_diff": {
+        "ctr": 0.0,
+        "cvr": 0.0
+      },
+      "save_load_ok": true,
+      "test_metrics": {
+        "rows": 43,
+        "clicks": 36,
+        "ctr": 0.8372093023255814,
+        "predicted_ctr": 0.4018224068852358,
+        "AUC": 0.5912698412698413,
+        "LogLoss": 0.8443512390610546
+      },
+      "multitask_check": {
+        "rows": 304,
+        "synthetic": true,
+        "not_real_conversion": true,
+        "tasks": [
+          "ctr",
+          "cvr"
+        ],
+        "ctr_mean": 0.434747,
+        "cvr_mean": 0.169345,
+        "ctr_metrics": {
+          "rows": 304,
+          "clicks": 211,
+          "ctr": 0.694078947368421,
+          "predicted_ctr": 0.43474654157302883,
+          "AUC": 0.44162462416552006,
+          "LogLoss": 0.7576142683546504
+        },
+        "cvr_metrics": {
+          "rows": 304,
+          "clicks": 50,
+          "ctr": 0.16447368421052633,
+          "predicted_ctr": 0.16934538912028074,
+          "AUC": 0.5348031496062993,
+          "LogLoss": 0.4461714137095296
+        }
+      },
+      "note": "固定初始化权重（未训练）；只证明接口可用，不代表效果。"
+    },
+    "ple": {
+      "model": "ple",
+      "display": "PLE（渐进式分层提取）",
+      "framework": "deepctr_torch",
+      "task": "multitask",
+      "needs_history": false,
+      "status": "interface_test",
+      "is_trained": false,
+      "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\ple.pt",
+      "checkpoint_sha256": "11259a19b43c63953ff5ad6a28a3325e50d2af57347f8a94dfd5788b00bd9b77",
+      "checkpoint_size_bytes": 14637278,
+      "weight_kind": "fixed_init_interface_test",
+      "inference_ok": true,
+      "inference_rows": 32,
+      "save_load_max_abs_diff": {
+        "ctr": 0.0,
+        "cvr": 0.0
+      },
+      "save_load_ok": true,
+      "test_metrics": {
+        "rows": 43,
+        "clicks": 36,
+        "ctr": 0.8372093023255814,
+        "predicted_ctr": 0.5687334495921468,
+        "AUC": 0.6547619047619048,
+        "LogLoss": 0.606430416879969
+      },
+      "multitask_check": {
+        "rows": 304,
+        "synthetic": true,
+        "not_real_conversion": true,
+        "tasks": [
+          "ctr",
+          "cvr"
+        ],
+        "ctr_mean": 0.582392,
+        "cvr_mean": 0.680115,
+        "ctr_metrics": {
+          "rows": 304,
+          "clicks": 211,
+          "ctr": 0.694078947368421,
+          "predicted_ctr": 0.5823920453457456,
+          "AUC": 0.45283595780461705,
+          "LogLoss": 0.6451079696997334
+        },
+        "cvr_metrics": {
+          "rows": 304,
+          "clicks": 50,
+          "ctr": 0.16447368421052633,
+          "predicted_ctr": 0.6801147611909791,
+          "AUC": 0.44503937007874017,
+          "LogLoss": 1.0223924361857761
+        }
+      },
+      "note": "固定初始化权重（未训练）；只证明接口可用，不代表效果。"
+    }
+  },
+  "summary": {
+    "models": 6,
+    "inference_ok": 6,
+    "save_load_ok": 6,
+    "trained": 0,
+    "multitask_ok": 2,
+    "errors": []
+  },
+  "limits": [
+    "没有训练：所有指标来自固定初始化权重，AUC/LogLoss 只用于确认输出可用。",
+    "CVR 只在 synthetic 模拟样本上验证，KuaiSAR 没有真实转化标签。",
+    "接口测试权重不写入业务默认权重目录。"
+  ]
+}

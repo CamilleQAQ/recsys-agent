@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/* ---- Campaign Ops - warm beige operator console ------------------------- */
+@theme {
+  --color-paper: #ece4d6; /* warm beige - app background */
+  --color-surface: #f8f3ea; /* cream - cards */
+  --color-sand: #e4dccb; /* deeper beige - sidebar */
+  --color-ink: #2b2722; /* warm near-black - text + dark accents */
+  --color-ink-soft: #3d382f;
+  --color-muted: #6f685a; /* secondary text */
+  --color-faint: #9c9484; /* tertiary text */
+  --color-line: #d8cfbc; /* borders */
+
+  --color-brand: #137a53; /* forest emerald - pairs with beige */
+  --color-brand-strong: #0c5e3f;
+  --color-brand-soft: #dde8d9;
+
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-display: var(--font-instrument), Georgia, serif;
+}
+
+html {
+  background: var(--color-paper);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.nums {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+  font-weight: 600;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* The proposal is the climax - a touch of scale plus the rise gives it presence. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.pop-in {
+  animation: pop-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Success checkmark springs in (slight overshoot) to land the "draft created" beat. */
+@keyframes check-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.check-pop {
+  animation: check-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) 0.06s both;
+}
+
+/* Respect reduced-motion: keep things visible, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .pop-in,
+  .check-pop,
+  .live-dot {
+    animation: none;
+  }
+}
+
+::selection {
+  background: var(--color-brand);
+  color: #fff;
+}

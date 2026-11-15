@@ -238,6 +238,8 @@ def build_ranking_samples(
             "labels": c[row_mask],
             "users": u[row_mask],
             "groups": group_sizes,
+            # 每个请求一个时间戳，行级时间戳在读取时按 groups 展开。
+            "timestamps": t[request_start][keep_request],
         }
         counts[name] = int(row_mask.sum())
         if counts[name] and int(group_sizes.sum()) != counts[name]:
@@ -292,6 +294,8 @@ def build_ranking_samples(
         "elapsed_s": round(time.time() - started, 1),
     }
     schema = {
+        "schema_version": 2,
+        "has_request_timestamps": True,
         "split_unit": "request=(user_id, timestamp)",
         "positive_field": POSITIVE_FIELD,
         "stats": stats,
@@ -316,9 +320,17 @@ def verify_ranking_store(dataset_root: Path, schema: dict[str, Any]) -> list[str
 
 
 def load_ranking_samples(
-    dataset_root: Path | None = None, split: str = "train", *, verify: bool = True
-) -> dict[str, np.ndarray]:
-    """读取某个切分的候选样本（mmap）。"""
+    dataset_root: Path | None = None,
+    split: str = "train",
+    *,
+    verify: bool = True,
+    require_timestamps: bool = False,
+) -> dict[str, Any]:
+    """读取某个切分的候选样本（mmap）。
+
+    ``require_timestamps=True`` 时，旧版没有请求时间戳的工件会直接报错；
+    LightGBM / DCNv2 等不需要序列历史的调用保持兼容（返回 ``timestamps=None``）。
+    """
     dataset_root = dataset_root or kuasar_dataset_dir(DEFAULT_DATA_DIR)
     base = ranking_dir(dataset_root)
     schema_path = base / "schema.json"
@@ -336,12 +348,22 @@ def load_ranking_samples(
                 f"排序样本校验失败（{len(problems)} 项，前 3 项：{problems[:3]}）；"
                 "重新运行 python -m recsys.data.kuasar_ranking --force。"
             )
-    return {
+    timestamp_path = base / f"{split}_timestamps.npy"
+    timestamps = np.load(timestamp_path, mmap_mode="r") if timestamp_path.exists() else None
+    if require_timestamps and timestamps is None:
+        raise ValueError(
+            f"{timestamp_path} 不存在：旧排序工件没有请求时间戳，"
+            "无法为 DIN/DIEN/Ultra-HSTU 构造严格早于请求的历史。\n"
+            "重建命令：python -m recsys.data.kuasar_ranking --force"
+        )
+    payload = {
         "items": np.load(base / f"{split}_items.npy", mmap_mode="r"),
         "labels": np.load(base / f"{split}_labels.npy", mmap_mode="r"),
         "users": np.load(base / f"{split}_users.npy", mmap_mode="r"),
         "groups": np.load(base / f"{split}_groups.npy", mmap_mode="r"),
+        "timestamps": timestamps,
     }
+    return payload
 
 
 def iter_candidate_batches(

@@ -1,0 +1,107 @@
+{
+  "experiment": "kuairec_small formal integration + four-model baseline",
+  "dataset": {
+    "name": "kuairec_small",
+    "source": "KuaiRec 2.0 official small_matrix (Zenodo 18164998)",
+    "matrix_crc32": 77673810,
+    "raw_rows": 4676570,
+    "rows_missing_timestamp_excluded": 181992,
+    "rows_meeting_threshold": 1515050,
+    "positive_pairs": 1471862,
+    "positive_users": 1411,
+    "positive_items": 3317,
+    "duplicate_events_on_positive_pairs": 0
+  },
+  "protocol": {
+    "split_strategy": "per_user_last_two_strict_timestamp_v2",
+    "positive_rule": "first exposure watch_ratio >= 1.0",
+    "positive_threshold": 1.0,
+    "seen_filter": "all observed exposures strictly before target time",
+    "validation_use": "checkpoint selection only",
+    "test_use": "one locked run after selection",
+    "seed": 42,
+    "ks": [
+      10,
+      20
+    ],
+    "candidates_after_filter_per_user": {
+      "min": 29,
+      "median": 149,
+      "max": 470
+    }
+  },
+  "commands": [
+    "python -m recsys.data.prepare --dataset kuairec_small",
+    "python -m recsys.training.train_mf --dataset kuairec_small",
+    "python -m recsys.training.trainer --dataset kuairec_small",
+    "python -m recsys.training.train_sasrec --dataset kuairec_small",
+    "python -m recsys.experiments.finalize_experiment --dataset kuairec_small"
+  ],
+  "training": {
+    "MF": {
+      "epochs": 5,
+      "batch_size": 1024,
+      "best_epoch": 1,
+      "elapsed_s": 207.3,
+      "checkpoint_sha256": "1e04331d66b2e50f27d5f6964b0e696dfe358555d973258c72db24f4bc027a19",
+      "model_config": {
+        "num_users": 1411,
+        "num_items": 3317,
+        "embedding_dim": 64
+      }
+    },
+    "Two-Tower": {
+      "epochs": 9,
+      "batch_size": 256,
+      "best_epoch": 6,
+      "elapsed_s": 441.7,
+      "checkpoint_sha256": "a6ba6b0d990e1a11b33d7cd3e15ceb940ceeefa47458d1d6f2f755b0b912e21e",
+      "model_config": {
+        "num_users": 1411,
+        "num_items": 3317,
+        "embedding_dim": 128,
+        "hidden_dim": 128,
+        "output_dim": 128,
+        "temperature": 0.1,
+        "tower_type": "embedding",
+        "item_cat_cardinalities": null,
+        "item_numeric_count": 0,
+        "feature_dim": 16
+      }
+    },
+    "SASRec": {
+      "max_epochs": 30,
+      "patience": 5,
+      "batch_size": 256,
+      "best_epoch": 15,
+      "early_stopped_at_epoch": 20,
+      "elapsed_s": 106.1,
+      "checkpoint_sha256": "1cf7b326df0bfd65891ce9e0e71654efd0a8756f80caf649bf640a67f3412e61",
+      "model_config": {
+        "num_items": 3317,
+        "max_seq_len": 50,
+        "embedding_dim": 64,
+        "num_blocks": 2,
+        "num_heads": 2,
+        "dropout": 0.2
+      }
+    }
+  },
+  "timings_s": {
+    "prepare": 40.4,
+    "train_total": 755.1,
+    "finalize": 198.9,
+    "wall_clock_total": 994.4
+  },
+  "environment": {
+    "python": "3.14.3",
+    "pytorch": "2.14.0+cpu",
+    "faiss": "1.15.1",
+    "device": "cpu"
+  },
+  "artifacts": {
+    "results": "artifacts/kuairec_small/results.json",
+    "label_audit": "data/kuairec_small/processed/label_audit.json",
+    "checkpoints": "artifacts/kuairec_small/{matrix_factorization,two_tower,sasrec}.pt"
+  }
+}

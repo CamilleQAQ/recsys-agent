@@ -75,7 +75,7 @@
 > 历史结果显示，30/70 配额命中 5 个验证目标、Recall@100 为 0.013672，而 50/50 基准命中 4 个、Recall@100 为 0.011719，前者多保留 1 个目标且 Recall 提升 0.001953；由于该目标配额已有与当前缓存一致的可复用成功记录，按“命中目标数优先、Recall@100 次之”的规则已判定 30/70 更优，故停止，不再执行融合评测。
 
 停止原因：**历史结果与当前输入和评估口径一致，直接复用，未执行融合评测**。
-证据：[metrics.json](metrics.json)、[events.jsonl](events.jsonl)、
+证据：[metrics.json](metrics.json)、events.jsonl（本地文件：`events.jsonl`）、
 [decision.json](decision.json)、[baseline.json](baseline.json)、[config.toml](config.toml)。
 
 ## 本地分支验证（均不请求真实模型）
@@ -85,11 +85,11 @@
 | 分支 | 命令 | 结果 | 证据 |
 | --- | --- | --- | --- |
 | 解析/顺序/预算自检 | `--self-check` | 12 项全过：查询前评测、未知工具、路径/命令/脚本参数、配额不一致、命中复用、未命中一次评测、未命中停止、多条 tool_calls、命中后请求工具、重复评测、命中后评测、请求上限 | [self_check.json](self_check.json) |
-| 未命中 → 一次评测 | `--regression-miss` | verified / evaluated / 3 请求 / 历史 1 / 评测 1（fake eval）；同 ID 回传 | [regression_miss.json](regression_miss/regression_miss.json) |
-| 历史命中后最终请求失败 | `--regression-timeout history` | **partial** / CLI 2 / 2 请求 / 评测 0 / 历史结果保留 / 无 verified | [regression_timeout.json](regression_timeout_history/regression_timeout.json) |
-| 评测成功后最终请求失败 | `--regression-timeout evaluation` | **partial** / CLI 2 / 3 请求 / 评测 1 / 评测结果保留 / 无 verified | [regression_timeout.json](regression_timeout_evaluation/regression_timeout.json) |
-| 历史指纹不匹配 | 篡改副本的 `recall_mind_sha256` | **miss**，原因“指纹不一致 recall_mind_sha256” | [history_checks.json](cache_dir_check/history_checks.json) |
-| 历史记录 partial | 副本写入 `status=partial` | **miss**，原因“运行状态不可复用：partial” | [history_checks.json](cache_dir_check/history_checks.json) |
+| 未命中 → 一次评测 | `--regression-miss` | verified / evaluated / 3 请求 / 历史 1 / 评测 1（fake eval）；同 ID 回传 | regression_miss.json（本地文件：`regression_miss/regression_miss.json`） |
+| 历史命中后最终请求失败 | `--regression-timeout history` | **partial** / CLI 2 / 2 请求 / 评测 0 / 历史结果保留 / 无 verified | regression_timeout.json（本地文件：`regression_timeout_history/regression_timeout.json`） |
+| 评测成功后最终请求失败 | `--regression-timeout evaluation` | **partial** / CLI 2 / 3 请求 / 评测 1 / 评测结果保留 / 无 verified | regression_timeout.json（本地文件：`regression_timeout_evaluation/regression_timeout.json`） |
+| 历史指纹不匹配 | 篡改副本的 `recall_mind_sha256` | **miss**，原因“指纹不一致 recall_mind_sha256” | history_checks.json（本地文件：`cache_dir_check/history_checks.json`） |
+| 历史记录 partial | 副本写入 `status=partial` | **miss**，原因“运行状态不可复用：partial” | history_checks.json（本地文件：`cache_dir_check/history_checks.json`） |
 
 ## 非默认 `--cache-dir` 验证
 
@@ -103,10 +103,10 @@
 | 缺失目录 | `--check-cache --cache-dir .../does_not_exist` | **blocked**，CLI 退出码 **2**，未回退默认目录 |
 | 篡改缓存 | 副本追加换行改变 `recall_mind.json` 哈希 | **blocked**，CLI **2**，“基准指纹与当前缓存不一致：['recall_mind_sha256']” |
 
-证据：[cache_check.json](cache_dir_check/cache_check.json)、
-[regression_miss/metrics.json](cache_dir_check/regression_miss/metrics.json)、
-[missing/cache_check.json](cache_dir_check/missing/cache_check.json)、
-[tampered/cache_check.json](cache_dir_check/tampered/cache_check.json)。
+证据：cache_check.json（本地文件：`cache_dir_check/cache_check.json`）、
+regression_miss/metrics.json（本地文件：`cache_dir_check/regression_miss/metrics.json`）、
+missing/cache_check.json（本地文件：`cache_dir_check/missing/cache_check.json`）、
+tampered/cache_check.json（本地文件：`cache_dir_check/tampered/cache_check.json`）。
 
 CLI 解析后的目录进入 LangGraph 状态字段 `cache_dir`；`node_load_baseline`、
 `node_execute_history`、`node_execute_eval` 均从该状态取路径，节点内不再使用

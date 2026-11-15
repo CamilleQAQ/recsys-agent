@@ -1,0 +1,1018 @@
+{
+  "metrics": {
+    "popularity_25": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.005425,
+        "Recall@100": 0.016091666666666664,
+        "NDCG@20": 0.0026622447401630066,
+        "hit_targets_20": 27,
+        "hit_targets_100": 67
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.007937054904663449,
+          "Recall@100": 0.024511830921203764,
+          "NDCG@20": 0.003804746133657477,
+          "hit_targets_20": 27,
+          "hit_targets_100": 67
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.05355355355355355,
+          "Recall@100": 0.1549049049049049,
+          "NDCG@20": 0.023005952311444443,
+          "hit_targets_20": 27,
+          "hit_targets_100": 67
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 0.042
+    },
+    "itemcf_25": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.00025,
+        "Recall@100": 0.00175,
+        "NDCG@20": 0.0001532867981913646,
+        "hit_targets_20": 1,
+        "hit_targets_100": 6
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.00034458993797381116,
+          "Recall@100": 0.002584424534803584,
+          "NDCG@20": 0.00021128435312386574,
+          "hit_targets_20": 1,
+          "hit_targets_100": 6
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0036496350364963502,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 2
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.002173913043478261,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 2
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0019723865877712033,
+          "Recall@100": 0.0039447731755424065,
+          "NDCG@20": 0.0009861932938856016,
+          "hit_targets_20": 1,
+          "hit_targets_100": 2
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        }
+      },
+      "users_with_full_top100": 1938,
+      "wall_s": 4.125
+    },
+    "two_tower_25": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.00029166666666666664,
+        "Recall@100": 0.0019333333333333333,
+        "NDCG@20": 0.0001073651006235766,
+        "hit_targets_20": 2,
+        "hit_targets_100": 8
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.001987507098239637,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 3
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.0005743165632896852,
+          "Recall@100": 0.0016080863772111188,
+          "NDCG@20": 0.00018616295582797322,
+          "hit_targets_20": 2,
+          "hit_targets_100": 5
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.002737226277372263,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 2
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0009861932938856016,
+          "Recall@100": 0.0019723865877712033,
+          "NDCG@20": 0.0002958713868014553,
+          "hit_targets_20": 1,
+          "hit_targets_100": 2
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.001001001001001001,
+          "Recall@100": 0.001001001001001001,
+          "NDCG@20": 0.00036070767506922317,
+          "hit_targets_20": 1,
+          "hit_targets_100": 1
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 16.332
+    },
+    "popularity_50": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.004633333333333333,
+        "Recall@100": 0.016066666666666667,
+        "NDCG@20": 0.0026006061353581952,
+        "hit_targets_20": 24,
+        "hit_targets_100": 66
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.006845853434413049,
+          "Recall@100": 0.02487939352170917,
+          "NDCG@20": 0.003734882903249751,
+          "hit_targets_20": 24,
+          "hit_targets_100": 66
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.0467967967967968,
+          "Recall@100": 0.15715715715715717,
+          "NDCG@20": 0.021797547901772223,
+          "hit_targets_20": 24,
+          "hit_targets_100": 66
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 0.045
+    },
+    "itemcf_50": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.0013916666666666667,
+        "Recall@100": 0.006258333333333334,
+        "NDCG@20": 0.0007859605905849,
+        "hit_targets_20": 5,
+        "hit_targets_100": 21
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.002549965541006203,
+          "Recall@100": 0.00988973121984838,
+          "NDCG@20": 0.0012402103955911202,
+          "hit_targets_20": 5,
+          "hit_targets_100": 21
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0072992700729927005,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 4
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0014492753623188406,
+          "Recall@100": 0.005797101449275362,
+          "NDCG@20": 0.0003411723382125192,
+          "hit_targets_20": 1,
+          "hit_targets_100": 4
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.005424063116370809,
+          "Recall@100": 0.011341222879684419,
+          "NDCG@20": 0.0031097975018021026,
+          "hit_targets_20": 4,
+          "hit_targets_100": 7
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.0,
+          "Recall@100": 0.013513513513513514,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 6
+        }
+      },
+      "users_with_full_top100": 1993,
+      "wall_s": 16.825
+    },
+    "two_tower_50": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.0003333333333333333,
+        "Recall@100": 0.003683333333333333,
+        "NDCG@20": 0.00019553280250948185,
+        "hit_targets_20": 2,
+        "hit_targets_100": 16
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.004755820556501987,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 9
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.0005743165632896852,
+          "Recall@100": 0.0024351022283482654,
+          "NDCG@20": 0.00030256496250852125,
+          "hit_targets_20": 2,
+          "hit_targets_100": 7
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0036496350364963502,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 2
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0019723865877712033,
+          "Recall@100": 0.004930966469428008,
+          "NDCG@20": 0.0006574621959237343,
+          "hit_targets_20": 1,
+          "hit_targets_100": 3
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.0015015015015015015,
+          "Recall@100": 0.003003003003003003,
+          "NDCG@20": 0.0009206414305787664,
+          "hit_targets_20": 1,
+          "hit_targets_100": 2
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 15.433
+    },
+    "popularity_100": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.005425,
+        "Recall@100": 0.016325,
+        "NDCG@20": 0.0024232290515928926,
+        "hit_targets_20": 27,
+        "hit_targets_100": 66
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.007960027567195039,
+          "Recall@100": 0.024190213645761544,
+          "NDCG@20": 0.003507465401398484,
+          "hit_targets_20": 27,
+          "hit_targets_100": 66
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.057057057057057055,
+          "Recall@100": 0.15415415415415415,
+          "NDCG@20": 0.021727466080044205,
+          "hit_targets_20": 27,
+          "hit_targets_100": 66
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 0.046
+    },
+    "itemcf_100": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.00405,
+        "Recall@100": 0.008483333333333332,
+        "NDCG@20": 0.0016948428865087432,
+        "hit_targets_20": 16,
+        "hit_targets_100": 41
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.00607626923960487,
+          "Recall@100": 0.01326671261199173,
+          "NDCG@20": 0.0025265972250764638,
+          "hit_targets_20": 16,
+          "hit_targets_100": 41
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0018248175182481751,
+          "Recall@100": 0.0018248175182481751,
+          "NDCG@20": 0.0004562043795620438,
+          "hit_targets_20": 1,
+          "hit_targets_100": 1
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.002898550724637681,
+          "Recall@100": 0.010869565217391304,
+          "NDCG@20": 0.0009525176561913092,
+          "hit_targets_20": 2,
+          "hit_targets_100": 8
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.004930966469428008,
+          "Recall@100": 0.015450361604207758,
+          "NDCG@20": 0.0030819164126085694,
+          "hit_targets_20": 3,
+          "hit_targets_100": 10
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.022022022022022022,
+          "Recall@100": 0.04004004004004004,
+          "NDCG@20": 0.007959625484681905,
+          "hit_targets_20": 10,
+          "hit_targets_100": 22
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 59.592
+    },
+    "two_tower_100": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.00016666666666666666,
+        "Recall@100": 0.0035166666666666666,
+        "NDCG@20": 6.54509950840986e-05,
+        "hit_targets_20": 1,
+        "hit_targets_100": 17
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.002342419080068143,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 4
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.0002297266253158741,
+          "Recall@100": 0.004617505168849069,
+          "NDCG@20": 9.021501734541502e-05,
+          "hit_targets_20": 1,
+          "hit_targets_100": 13
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0009124087591240876,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 1
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0036231884057971015,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 3
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0,
+          "Recall@100": 0.005917159763313609,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 4
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.001001001001001001,
+          "Recall@100": 0.00925925925925926,
+          "NDCG@20": 0.00039309906957416576,
+          "hit_targets_20": 1,
+          "hit_targets_100": 5
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": 15.792
+    },
+    "old_two_tower": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.0044083333333333335,
+        "Recall@100": 0.01165,
+        "NDCG@20": 0.0028361836966693124,
+        "hit_targets_20": 17,
+        "hit_targets_100": 52
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0035491198182850655,
+          "Recall@100": 0.0041453719477569555,
+          "NDCG@20": 0.0027843272630087286,
+          "hit_targets_20": 6,
+          "hit_targets_100": 8
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.00421548357454629,
+          "Recall@100": 0.014518722719963243,
+          "NDCG@20": 0.0021374712761165105,
+          "hit_targets_20": 11,
+          "hit_targets_100": 44
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.006280193236714976,
+          "Recall@100": 0.018599033816425123,
+          "NDCG@20": 0.0030459518514380007,
+          "hit_targets_20": 6,
+          "hit_targets_100": 15
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0029585798816568047,
+          "Recall@100": 0.021367521367521368,
+          "NDCG@20": 0.0014540388812017678,
+          "hit_targets_20": 2,
+          "hit_targets_100": 13
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.007007007007007008,
+          "Recall@100": 0.02652652652652653,
+          "NDCG@20": 0.004264164614072328,
+          "hit_targets_20": 3,
+          "hit_targets_100": 16
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": null
+    },
+    "old_mind": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.0044083333333333335,
+        "Recall@100": 0.018216666666666666,
+        "NDCG@20": 0.002200204152319698,
+        "hit_targets_20": 17,
+        "hit_targets_100": 82
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.006305995864920744,
+          "Recall@100": 0.02764759935676545,
+          "NDCG@20": 0.0031203265998764724,
+          "hit_targets_20": 17,
+          "hit_targets_100": 82
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0036496350364963502,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 2
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.004830917874396136,
+          "Recall@100": 0.025603864734299518,
+          "NDCG@20": 0.002570598293061673,
+          "hit_targets_20": 4,
+          "hit_targets_100": 22
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.01282051282051282,
+          "Recall@100": 0.05670611439842209,
+          "NDCG@20": 0.0059402227700479345,
+          "hit_targets_20": 8,
+          "hit_targets_100": 37
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.01001001001001001,
+          "Recall@100": 0.046296296296296294,
+          "NDCG@20": 0.003447427802429403,
+          "hit_targets_20": 5,
+          "hit_targets_100": 21
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": null
+    },
+    "old_round_robin": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.005966666666666667,
+        "Recall@100": 0.015325,
+        "NDCG@20": 0.0034568049154266043,
+        "hit_targets_20": 25,
+        "hit_targets_100": 69
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.002981260647359455,
+          "Recall@100": 0.0035491198182850655,
+          "NDCG@20": 0.002390607833375408,
+          "hit_targets_20": 4,
+          "hit_targets_100": 6
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.007052607397197335,
+          "Recall@100": 0.021077417872731447,
+          "NDCG@20": 0.003331275072407709,
+          "hit_targets_20": 21,
+          "hit_targets_100": 63
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.0070048309178743955,
+          "Recall@100": 0.03067632850241546,
+          "NDCG@20": 0.0036111998485488113,
+          "hit_targets_20": 6,
+          "hit_targets_100": 26
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.013806706114398421,
+          "Recall@100": 0.032215647600262985,
+          "NDCG@20": 0.0049221043947707144,
+          "hit_targets_20": 9,
+          "hit_targets_100": 22
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.011011011011011011,
+          "Recall@100": 0.03078078078078078,
+          "NDCG@20": 0.005515945786042143,
+          "hit_targets_20": 6,
+          "hit_targets_100": 15
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": null
+    },
+    "old_lightgbm": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.0020083333333333333,
+        "Recall@100": 0.015325,
+        "NDCG@20": 0.0009661820096090374,
+        "hit_targets_20": 11,
+        "hit_targets_100": 69
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.001419647927314026,
+          "Recall@100": 0.0035491198182850655,
+          "NDCG@20": 0.0007731079205429806,
+          "hit_targets_20": 3,
+          "hit_targets_100": 6
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.0017688950149322305,
+          "Recall@100": 0.021077417872731447,
+          "NDCG@20": 0.0007467774155277773,
+          "hit_targets_20": 8,
+          "hit_targets_100": 63
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.004830917874396136,
+          "Recall@100": 0.03067632850241546,
+          "NDCG@20": 0.0015803654655527004,
+          "hit_targets_20": 4,
+          "hit_targets_100": 26
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0039447731755424065,
+          "Recall@100": 0.032215647600262985,
+          "NDCG@20": 0.0012513756227659227,
+          "hit_targets_20": 3,
+          "hit_targets_100": 22
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.003003003003003003,
+          "Recall@100": 0.03078078078078078,
+          "NDCG@20": 0.000720157557261656,
+          "hit_targets_20": 1,
+          "hit_targets_100": 15
+        }
+      },
+      "users_with_full_top100": 2000,
+      "wall_s": null
+    },
+    "old_final": {
+      "overall": {
+        "users": 2000,
+        "targets": 4275,
+        "Recall@20": 0.002175,
+        "Recall@100": 0.002175,
+        "NDCG@20": 0.0010214062854869593,
+        "hit_targets_20": 12,
+        "hit_targets_100": 12
+      },
+      "full_train_frequency_groups": {
+        "cold": {
+          "users": 1174,
+          "targets": 1759,
+          "Recall@20": 0.001419647927314026,
+          "Recall@100": 0.001419647927314026,
+          "NDCG@20": 0.0007731079205429806,
+          "hit_targets_20": 3,
+          "hit_targets_100": 3
+        },
+        "warm": {
+          "users": 1451,
+          "targets": 2516,
+          "Recall@20": 0.0024580748908798527,
+          "Recall@100": 0.0024580748908798527,
+          "NDCG@20": 0.0009066720733250711,
+          "hit_targets_20": 9,
+          "hit_targets_100": 9
+        },
+        "one_click": {
+          "users": 548,
+          "targets": 630,
+          "Recall@20": 0.0,
+          "Recall@100": 0.0,
+          "NDCG@20": 0.0,
+          "hit_targets_20": 0,
+          "hit_targets_100": 0
+        },
+        "two_to_five": {
+          "users": 690,
+          "targets": 846,
+          "Recall@20": 0.006280193236714976,
+          "Recall@100": 0.006280193236714976,
+          "NDCG@20": 0.001923716012579571,
+          "hit_targets_20": 5,
+          "hit_targets_100": 5
+        },
+        "six_to_twenty": {
+          "users": 507,
+          "targets": 612,
+          "Recall@20": 0.0039447731755424065,
+          "Recall@100": 0.0039447731755424065,
+          "NDCG@20": 0.0012513756227659227,
+          "hit_targets_20": 3,
+          "hit_targets_100": 3
+        },
+        "twenty_one_plus": {
+          "users": 333,
+          "targets": 428,
+          "Recall@20": 0.003003003003003003,
+          "Recall@100": 0.003003003003003003,
+          "NDCG@20": 0.000720157557261656,
+          "hit_targets_20": 1,
+          "hit_targets_100": 1
+        }
+      },
+      "users_with_full_top100": 0,
+      "wall_s": null
+    }
+  },
+  "scales": {
+    "25": {
+      "unique_train_rows": 187168,
+      "active_train_users": 2000,
+      "train_items": 145246,
+      "test_cold_targets": 2648,
+      "indices_sha256": "591460568900aa426c97d97ecf568398a29c86806f8bce91bb393cc9e6f65294",
+      "faiss_backend": "IndexFlatIP",
+      "faiss_ntotal": 454717,
+      "training_items_in_index": 145246,
+      "zero_train_click_items_in_index": 309471,
+      "test_targets_in_index": 4275,
+      "training_loss": 6.8851377924934765,
+      "training_s": 15.067,
+      "encode_index_and_retrieve_s": 1.265
+    },
+    "50": {
+      "unique_train_rows": 374337,
+      "active_train_users": 2000,
+      "train_items": 260294,
+      "test_cold_targets": 2203,
+      "indices_sha256": "7aa2db9f1dbf069b7ddd8ff451303ebe797c19811694132cdba8e0d06f9ee98a",
+      "faiss_backend": "IndexFlatIP",
+      "faiss_ntotal": 454717,
+      "training_items_in_index": 260294,
+      "zero_train_click_items_in_index": 194423,
+      "test_targets_in_index": 4275,
+      "training_loss": 7.244774706376706,
+      "training_s": 14.212,
+      "encode_index_and_retrieve_s": 1.222
+    },
+    "100": {
+      "unique_train_rows": 748674,
+      "active_train_users": 2000,
+      "train_items": 450767,
+      "test_cold_targets": 1759,
+      "indices_sha256": "b4bced23ca0408156e1f3dfa52b5377f9ed8a04014db13de3eb27a6470de7aea",
+      "faiss_backend": "IndexFlatIP",
+      "faiss_ntotal": 454717,
+      "training_items_in_index": 450767,
+      "zero_train_click_items_in_index": 3950,
+      "test_targets_in_index": 4275,
+      "training_loss": 7.288974506607473,
+      "training_s": 14.579,
+      "encode_index_and_retrieve_s": 1.213
+    }
+  },
+  "elapsed_s": 136.824
+}

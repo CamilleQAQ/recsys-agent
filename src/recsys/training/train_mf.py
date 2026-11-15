@@ -40,6 +40,7 @@ class MFTrainConfig:
     seed: int = 42
     device: str = "auto"
     max_batches_per_epoch: int | None = None
+    validation_users: int = 0
 
 
 def train_one_mf_epoch(
@@ -112,6 +113,11 @@ def train_mf(config: MFTrainConfig) -> tuple[MatrixFactorization, list[float]]:
         dataset=config.dataset,
         data_dir=config.data_dir,
         positive_threshold=positive_threshold,
+    )
+    from recsys.training.subsets import limit_validation_users
+
+    prepared_data = limit_validation_users(
+        prepared_data, config.validation_users, config.seed
     )
     train_items_by_user = group_items_by_user(prepared_data.train_interactions)
     train_dataset = InteractionDataset(prepared_data.train_interactions)
@@ -214,6 +220,7 @@ def parse_args() -> MFTrainConfig:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--max-batches-per-epoch", type=int, default=None)
+    parser.add_argument("--validation-users", type=int, default=0)
     return MFTrainConfig(**vars(parser.parse_args()))
 
 

@@ -1,0 +1,41 @@
+# Phase 2 搜索系统：FAISS 向量索引、混合检索与精排（2026-11-09）
+#
+# 只读 Search 1 已建好的 BM25 小样本索引（120 物品 / 823 vocab），
+# 不重新扫描原始 CSV、不重建 BM25、不训练任何模型。
+# 搜索向量索引独立于推荐侧 FAISS 索引：目录、编码器与配置都不共享。
+
+[search]
+name = "kuasar_search_phase2"
+dataset = "kuasar"
+description = "KuaiSAR 小样本：token 向量编码 + FAISS 向量召回 + RRF 混合检索 + token 精排"
+bm25_index = "artifacts/search/kuasar_bm25/index.json"
+bm25_sample = "artifacts/search/kuasar_bm25/sample.json"
+artifact_root = "artifacts/search/kuasar_vector"
+vector_dir = "vector"
+manifest_file = "manifest.json"
+
+[encoder]
+# KuaiSAR 查询与 caption 都是匿名整数 token，没有原文/词表/预训练权重；
+# 因此使用无需训练的本地 token 哈希编码。查询和文档共用同一套配置。
+name = "token_hash"
+dim = 4096
+seed = 20261109
+include_category = true
+category_weight = 0.25
+
+[vector]
+# 搜索侧固定用 FAISS 精确索引（IndexFlatIP）；numpy 仅作对照。
+# 小样本不会因为规模自动退回 NumPy：构建时显式指定 backend。
+backend = "faiss"
+
+[hybrid]
+fusion = "rrf"
+rrf_k = 60
+pool = 50
+
+[rerank]
+# 复用上游 Reranker 契约与 RerankedEngine 组合；方法名由 register_reranker 注册。
+method = "kuasar_token_overlap"
+pool = 50
+prior_weight = 0.35
+coverage_weight = 0.65

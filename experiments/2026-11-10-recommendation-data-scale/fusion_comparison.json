@@ -1,0 +1,42 @@
+{
+  "source": "experiments\\2026-11-10-formal-e2e\\recommendation",
+  "protocol": "Reuse cached Two-Tower and MIND rankings; same test set and 100 candidates; no reranking or test tuning. RRF uses repo default k=60. Quota 30/70 previously selected on validation.",
+  "methods": {
+    "two_tower": {
+      "Recall@20": 0.0044083333333333335,
+      "Recall@100": 0.01165,
+      "NDCG@20": 0.0028361836966693124,
+      "hit_targets_20": 17,
+      "hit_targets_100": 52
+    },
+    "mind": {
+      "Recall@20": 0.0044083333333333335,
+      "Recall@100": 0.018216666666666666,
+      "NDCG@20": 0.002200204152319698,
+      "hit_targets_20": 17,
+      "hit_targets_100": 82
+    },
+    "round_robin": {
+      "Recall@20": 0.005966666666666667,
+      "Recall@100": 0.015325,
+      "NDCG@20": 0.0034568049154266043,
+      "hit_targets_20": 25,
+      "hit_targets_100": 69
+    },
+    "rrf": {
+      "Recall@20": 0.006258333333333333,
+      "Recall@100": 0.014283333333333334,
+      "NDCG@20": 0.0030964956389525353,
+      "hit_targets_20": 27,
+      "hit_targets_100": 65
+    },
+    "quota": {
+      "Recall@20": 0.0044083333333333335,
+      "Recall@100": 0.017341666666666665,
+      "NDCG@20": 0.0028361836966693124,
+      "hit_targets_20": 17,
+      "hit_targets_100": 76
+    }
+  },
+  "elapsed_s": 2.845
+}

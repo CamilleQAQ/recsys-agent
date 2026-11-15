@@ -1,0 +1,25 @@
+{
+  "fusion_top20_hits": 25,
+  "kept_hits": {
+    "n": 4,
+    "mean_train_clicks": 25.25,
+    "median_train_clicks": 28.0,
+    "zero_click_share": 0.0,
+    "mean_author_freq": 95.0
+  },
+  "dropped_hits": {
+    "n": 21,
+    "mean_train_clicks": 11.33,
+    "median_train_clicks": 6.0,
+    "zero_click_share": 0.19,
+    "mean_author_freq": 53.9
+  },
+  "promoted_non_hits": {
+    "n": 39996,
+    "mean_train_clicks": 4.22,
+    "median_train_clicks": 2.0,
+    "zero_click_share": 0.019,
+    "mean_author_freq": 102.2
+  },
+  "reading": "kept/dropped 都是融合 top-20 里的命中；promoted 是排序器放进 top-20 的非命中。若 promoted 的 train_clicks 显著高于 dropped，说明它用头部热度换掉了长尾命中。"
+}

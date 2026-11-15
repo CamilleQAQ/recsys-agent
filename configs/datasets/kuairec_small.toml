@@ -1,0 +1,66 @@
+# KuaiRec 2.0 small_matrix（稠密子集，正式小样本数据线）
+#
+# 与 kuairec.toml 是同一个读取器、同一套标签与切分口径，区别只有矩阵文件本身：
+# big_matrix 是 12M 级稀疏日志，small_matrix 是 1,411 用户 × 3,327 视频、
+# 填充率 95.7% 的稠密矩阵。字段与 recsys.config / recsys.data.kuairec 的常量一一对应，
+# 由 scripts/check_project.py 校验，避免文档漂移。
+
+[dataset]
+name = "kuairec_small"
+display_name = "KuaiRec 2.0 small_matrix"
+domain = "短视频推荐（全曝光稠密子集）"
+source_url = "https://zenodo.org/records/18164998/files/KuaiRec.zip"
+archive_member = "KuaiRec 2.0/data/small_matrix.csv"
+matrix_crc32 = 77673810
+license = "研究用途；使用前确认数据集页面条款"
+paper = "https://arxiv.org/abs/2206.05302"
+
+[layout]
+root = "data/kuairec_small"
+raw = "data/kuairec_small/raw"
+processed = "data/kuairec_small/processed"
+matrix_candidates = [
+  "small_matrix.csv",
+  "raw/small_matrix.csv",
+  "raw/KuaiRec 2.0/data/small_matrix.csv",
+  "KuaiRec 2.0/data/small_matrix.csv",
+]
+label_audit = "data/kuairec_small/processed/label_audit.json"
+
+[matrix]
+required_columns = [
+  "user_id",
+  "video_id",
+  "play_duration",
+  "video_duration",
+  "timestamp",
+  "watch_ratio",
+]
+# 建库时由 prepare_kuairec_small 核对；对不上直接报错，挡住半截下载或换错矩阵。
+expected_rows = 4676570
+expected_users = 1411
+expected_items = 3327
+# 正样本物品词表：10 个视频没有 watch_ratio >= 1.0 的首次曝光，所以是 3,317。
+positive_items = 3317
+# 4,494,578 行有 timestamp；其余 181,992 行缺时间，无法定位先后，建库时剔除。
+rows_with_timestamp = 4494578
+rows_missing_timestamp = 181992
+density = 0.957
+
+[labels]
+positive_field = "watch_ratio"
+positive_threshold = 1.0
+deduplicate_user_item_pairs = true
+positive_definition = "首次曝光 watch_ratio >= 1.0"
+note = "重复播放不重新标注、不移动首次曝光时间；同首次时间戳但标签冲突的对判为不确定并剔除"
+
+[split]
+strategy = "per_user_last_two_strict_timestamp_v2"
+validation = "每个用户倒数第二个正反馈"
+test = "每个用户最后一个正反馈"
+note = "与 kuairec 完全一致；边界时间戳相同则整个用户留训练集"
+
+[evaluation]
+seen_mask = "目标时刻之前真实曝光过的全部视频（含非正反馈播放）"
+metrics = ["Recall@k", "NDCG@k", "HitRate@k"]
+note = "稠密矩阵下每用户候选集被曝光过滤后只剩 29–470 个（中位 149），指标按全目录打分后过滤计算"

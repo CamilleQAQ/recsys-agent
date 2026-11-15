@@ -1,0 +1,9 @@
+{
+  "weights_unchanged": true,
+  "splits_hash_unchanged": true,
+  "raw_reconstructed_splits_identical": true,
+  "all_test_recommendations_unique_and_unseen": true,
+  "all_test_metrics_recomputed_from_saved_predictions": true,
+  "business_memory_record_artifact_hashes_verified": true,
+  "test_evaluation_users": 1410
+}

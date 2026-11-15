@@ -49,6 +49,25 @@ REQUIRED_FIELDS = (
     "completeness",
     "completeness_note",
     "adapter",
+    "status",
+)
+STATUS_FIELDS = (
+    "source_available",
+    "source_reviewed",
+    "adapter_ready",
+    "runnable",
+    "integrated",
+    "agent_callable",
+    "evaluated",
+)
+STATUS_LABELS = (
+    ("source_available", "源码"),
+    ("source_reviewed", "已核源码"),
+    ("adapter_ready", "适配"),
+    ("runnable", "可运行"),
+    ("integrated", "业务接入"),
+    ("agent_callable", "Agent"),
+    ("evaluated", "已评估"),
 )
 COMPLETENESS_LABELS = {
     "ready": "可直接运行",
@@ -112,6 +131,17 @@ def validate(zoo: dict) -> tuple[list[str], list[str]]:
         if model["completeness"] not in COMPLETENESS:
             errors.append(f"{model_id}: completeness 非法（{model['completeness']}）")
 
+        status = model.get("status") or {}
+        unknown_status = sorted(set(status) - set(STATUS_FIELDS))
+        if unknown_status:
+            errors.append(f"{model_id}: status 含未知字段 {unknown_status}")
+        missing_status = [field for field in STATUS_FIELDS if field not in status]
+        if missing_status:
+            errors.append(f"{model_id}: status 缺少字段 {missing_status}")
+        for field in STATUS_FIELDS:
+            if field in status and not isinstance(status[field], bool):
+                errors.append(f"{model_id}: status.{field} 必须是布尔值")
+
         for relative in model["code"]:
             if not (PROJECT_ROOT / relative).exists():
                 errors.append(f"{model_id}: code 路径不存在 {relative}")
@@ -165,6 +195,17 @@ def render_summary_table(models: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def status_cells(status: dict) -> str:
+    return " | ".join("✓" if status.get(field) else "—" for field, _label in STATUS_LABELS)
+
+
+def render_status_table(model: dict) -> str:
+    status = model.get("status") or {}
+    header = "| " + " | ".join(label for _field, label in STATUS_LABELS) + " |"
+    divider = "| " + " | ".join("---" for _field, _label in STATUS_LABELS) + " |"
+    return "\n".join([header, divider, "| " + status_cells(status) + " |"])
+
+
 def render_model_card(model: dict) -> str:
     if model["family"] == "vendor":
         source = f"third_party/{model['repo']}（上游 {model['upstream_url']}）"
@@ -192,6 +233,7 @@ def render_model_card(model: dict) -> str:
         f"- **数据格式**：{model['data_format']}",
         f"- **保存/加载**：{model['checkpoint']}",
         f"- **代码完整度**：{COMPLETENESS_LABELS[model['completeness']]}（{model['completeness']}）—— {model['completeness_note']}",
+        f"- **逐项状态**：{'、'.join(f'{label}={"是" if model.get("status", {}).get(field) else "否"}' for field, label in STATUS_LABELS)}",
         f"- **适配层**：{model['adapter'] or '尚未接入'}",
     ]
     if model.get("notes"):
@@ -231,6 +273,17 @@ def render_overview(zoo: dict) -> str:
                 model["adapter"] or "—",
             )
         )
+    lines += [
+        "",
+        "## 逐模型完成状态",
+        "",
+        "状态口径见 PROJECT_MASTER §9：源码 → 已核源码 → 项目适配 → 可运行 → 业务接入 → Agent 可调用 → 已评估。",
+        "",
+        "| id | " + " | ".join(label for _field, label in STATUS_LABELS) + " |",
+        "| --- | " + " | ".join("---" for _field, _label in STATUS_LABELS) + " |",
+    ]
+    for model in models:
+        lines.append(f"| `{model['id']}` | {status_cells(model.get('status') or {})} |")
     for category in CATEGORIES:
         lines += ["", f"## {category_meta(zoo, category)['title']}（{category}）", ""]
         summary = category_meta(zoo, category)["summary"]
@@ -329,6 +382,10 @@ def render_dossier(model: dict) -> str:
         f"- **代码完整度**：{COMPLETENESS_LABELS[model['completeness']]}（{model['completeness']}）",
         f"- **依据**：{model['completeness_note']}",
         f"- **已知局限**：{model.get('limitations', '暂无记录（接入实验后补充）')}",
+        "",
+        "## 逐项状态",
+        "",
+        render_status_table(model),
         "",
         "## 实验记录",
         "",

@@ -1,0 +1,63 @@
+# Phase 13 · `70/30` 历史信息消融（2026-11-09）
+#
+# 只改变决策方是否能看到已有的 70/30 指标；70/30 在两组都不可查询。
+# 只读现有融合汇总 JSON；不重训、不重新召回、不重跑评测。
+
+schema_version = 1
+
+[run]
+phase = "Phase 13 70/30 History Ablation"
+mode = "history_ablation"
+base_config = "configs/experiments/offline_replay.toml"
+description = "对照组只看 50/50；历史组额外看到 70/30。两组候选、预算、工具和规则相同。"
+
+[scenarios.A]
+label = "对照组（无 70/30 历史）"
+starting_quotas = ["50/50"]
+allowed_quotas = ["30/70", "80/20", "20/80"]
+budget = 2
+max_model_requests = 3
+observation = "只看到 50/50 历史时的首选与后续查询"
+
+[scenarios.B]
+label = "历史组（可见 70/30）"
+starting_quotas = ["50/50", "70/30"]
+allowed_quotas = ["30/70", "80/20", "20/80"]
+budget = 2
+max_model_requests = 3
+observation = "额外看到 70/30 历史时，首选、后续查询或停止时机是否改变"
+
+[fixed_policy]
+name = "fixed_symmetric_probe"
+order = ["30/70", "80/20"]
+description = "两组固定策略都按 30/70 → 80/20 执行；70/30 不可查询"
+
+[local_policy]
+name = "local_feedback_v1"
+first_step = "对照组选与 50/50 的 L1 距离最小者；历史组把已有的 70/30 视为反馈，低于 50/50 时转向镜像 30/70"
+better_step = "若新结果 Recall@100 高于当前最佳，沿同一方向再探一档（30/70→20/80）"
+worse_step = "若新结果 Recall@100 低于当前最佳，转向跨 50/50 的镜像配额"
+tie_step = "若新结果 Recall@100 与当前最佳持平，停止"
+description = "复用 Phase 13 本地反馈规则；70/30 在历史组仅是起始历史，不计预算、不可重复查询"
+
+[best_rule]
+description = "先比 Recall@100；并列选更接近 50/50 的配额；仍并列按双塔配额升序；Coverage 仅作描述"
+
+[scope]
+mode = "offline replay over existing summary JSON only"
+training = 0
+recall = 0
+real_evaluation = 0
+llm_requests_per_scenario_max = 3
+network_requests = "only configured LLM service"
+
+[commands]
+main = "python -m recsys.experiments.offline_replay_scenarios"
+self_check = "python -m recsys.experiments.offline_replay_scenarios --self-check"
+
+# 成对复验：3 对，每对两组各启动一次；顺序固定，不根据结果调整。
+[paired]
+pairs = 3
+order = ["A", "B", "B", "A", "A", "B"]
+max_total_requests = 18
+reference_run = "experiments/2026-11-09-kuasar_small-70-30-history-ablation/run-20261109T045034Z-15408"

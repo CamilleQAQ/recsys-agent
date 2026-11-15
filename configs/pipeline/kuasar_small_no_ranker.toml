@@ -1,0 +1,43 @@
+# 效果专项对照配置：同一批召回与融合，但**不接精排、不做类目重排**。
+# 证据见 experiments/2026-11-10-effect-study/report.md：
+# 在 kuasar_small 全测试集上，去掉精排与类目重排后 Recall@20 从 0.002175 提到 0.005967。
+# 旧配置 configs/pipeline/kuasar_small_default.toml 保持原样，不受影响。
+
+[run]
+dataset = "kuasar_small"
+data_dir = "data"
+artifacts_dir = "artifacts"
+output_name = "pipeline_no_ranker"
+split = "test"
+users = 2000
+seed = 42
+k_recall = 100
+k_final = 20
+include_validation_in_test_history = true
+device = "cpu"
+
+[recall.two_tower]
+model = "two_tower"
+checkpoint = "artifacts/kuasar_small/two_tower_features.pt"
+k = 100
+weight = 1.0
+
+[recall.mind]
+model = "mind"
+checkpoint = "artifacts/kuasar_small/mind20.pt"
+k = 100
+weight = 1.0
+
+[fusion]
+mode = "round_robin"
+limit = 100
+
+# model = "none"：不加载排序器，直接按融合名次出榜。
+[ranking]
+model = "none"
+
+[rerank]
+# category_cap 设成大于 k_final，等价于关闭类目配额；diversity=false 关闭作者配額。
+category_cap = 100
+author_cap = 0
+diversity = false

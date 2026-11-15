@@ -1,11 +1,12 @@
-# Search 2 · Search Agent MVP
+# Search Agent：BM25 / FAISS 向量 / 混合检索 / 精排
 
-> **状态**：2026-11-09 完成一次真实工作流验收。只做 `search_bm25` 工具调用与一次反馈决策；
-> 中文文本输入、向量检索、排序/重排和全量评测留到后续。
+> **状态**：2026-11-09。§1–§10 是第一版（只有 `search_bm25` + 一次反馈决策，含一次真实
+> LLM 工作流与本地回归）；§11 是 Phase 2 扩展：注册 `search_vector` / `search_hybrid` /
+> `search_rerank`，并把四条入口都接进同一套 LangGraph 预算与落盘约束。
 >
-> **结论**：真实 `deepseek-chat` 工作流只启动一次，模型发出原生 `search_bm25` 调用，
-> 收到 **5 条**结果后**主动停止**；共 **2 次模型请求 / 1 次 BM25 查询**，
-> 状态 **verified**，11/11 验收检查通过。原 Search 1 索引前后 sha256 一致。
+> **第一版结论（保留）**：真实 `deepseek-chat` 工作流只启动一次，模型发出原生
+> `search_bm25` 调用，收到 5 条结果后主动停止；2 次模型请求 / 1 次 BM25 查询，状态
+> `verified`，11/11 检查通过，索引 sha256 前后一致。
 
 ## 1. 本轮交付
 
@@ -220,3 +221,116 @@ python -m recsys.experiments.search_agent `
 证据：[regression report](../experiments/2026-11-09-kuasar-search-agent-regression/report.md)、
 [regression.json](../experiments/2026-11-09-kuasar-search-agent-regression/regression.json)
 （sha256 `b2a24887…`）。
+
+## 11. Phase 2：四工具注册与扩展工作流（2026-11-09）
+
+### 11.1 工具
+
+| 工具 | 参数 | 执行的真实代码 | 返回 |
+| --- | --- | --- | --- |
+| `search_bm25` | `query_tokens`, `top_k` | `BM25Index.search`（原入口不变） | rank / item_id / BM25 分 / 类目 |
+| `search_vector` | `query_tokens`, `top_k` | `SearchVectorIndex.search_scored`（`faiss.IndexFlatIP`） | rank / item_id / 余弦分 / 类目 |
+| `search_hybrid` | `query_tokens`, `top_k` | `HybridSearcher.search`（上游 RRF） | rank / item_id / 融合分 / 类目 / **sources**（source, rank, score） |
+| `search_rerank` | `query_tokens`, `top_k` | `SearchReranker.rerank`（上游 `RerankedEngine` + `Reranker`） | rank / item_id / 精排分 / coverage / prior_rank / sources |
+
+工具注册与参数校验在 [`src/recsys/search/tool.py`](../src/recsys/search/tool.py)
+的 `SearchToolbox`；四个 schema 都只接受 `query_tokens` 与 `top_k`，未知字段拒绝。
+候选明细只通过 `role=tool` 消息回传模型，落盘约束见 §11.5。
+
+### 11.2 工作流
+
+```text
+request_first → execute_first → request_feedback
+                                   ├─ 停止 → finish
+                                   ├─ search_rerank → execute_rerank → request_final → finish
+                                   └─ 第二次检索 → execute_second → request_final → finish
+```
+
+- `request_first`：只下发三个检索工具；第一次必须是检索（不能直接精排），且
+  `query_tokens` 等于规范化后的原查询；
+- `execute_first`：经 `SearchToolbox` 执行，记录工具名、返回数量与来源摘要；
+- `request_feedback`：三选一——停止、`search_rerank`（`query_tokens` 必须等于本次任务
+  已检索过的某个查询）、或一次受约束二次检索（原查询的非空真子集，可换工具）；
+- `execute_rerank`：对**融合候选池**重新打分，返回最终 Top-K；
+- `request_final`：`tools=None`，若再次请求工具则拒绝并记 `partial`。
+
+### 11.3 预算与规则
+
+| 规则 | 实现 |
+| --- | --- |
+| 首查 | 必须等于规范化原查询（`normalize_query`：正整数、去重、限长 64） |
+| 第二查 | 非空、原查询子集、至少去掉一个 token、不与之前相同 |
+| 精排 | 只允许在检索之后；`query_tokens` 必须是已检索过的查询 |
+| 检索预算 | 最多 **2** 次 |
+| 精排预算 | 最多 **1** 次 |
+| 模型请求 | 最多 **3** 次（首查 / 反馈 / 最终回复） |
+| 空结果 | 返回 `count=0`，不抛异常；模型可停止或再查 |
+| 失败 | 工具拒绝、工具异常、LLM 超时/异常、回复截断/为空都保留已有轨迹并记 `partial`/`failed` |
+| 自动重试 | 关闭 |
+
+### 11.4 CLI
+
+```powershell
+$env:PYTHONPATH = "src"
+
+# 本地自检（17 项，合成响应，不联网）
+python -m recsys.experiments.search_agent --self-check
+
+# 本地回归（旧证据不变、候选不落盘、样本外查询）
+python -m recsys.experiments.search_agent --regression --tokens 2 `
+  --output-root artifacts/search_agent_regression_phase2
+
+# 脚本替身驱动一次完整链路（不联网；决策是脚本，检索/精排/落盘是真实代码）
+python -m recsys.experiments.search_agent --scripted-plan hybrid_rerank `
+  --output-root experiments/2026-11-09-kuasar-search-phase2/agent_scripted
+
+# 真实 LLM（需要 .env 中的 DSH_AGENT_LLM_*）
+python -m recsys.experiments.search_agent `
+  --tokens "3538762,3181091,4061567,3525929" `
+  --output-root experiments/2026-11-09-kuasar-search-agent-phase2
+```
+
+`--scripted-plan` 可选：`hybrid_rerank` / `bm25_stop` / `vector_stop` / `two_search` /
+`hybrid_stop`（配合无匹配 token 验空结果）/ `rerank_first`（失败分支）。
+
+### 11.5 落盘边界（保持）
+
+- 轨迹只写：`tool_call_id`、工具名、查询 token、`top_k`、返回数量、
+  **精排最终分数**、来源数量摘要、停止类型、预算与状态；
+- 不写候选 `item_id` 列表、不写模型正文；`trace.json` / `metrics.json` 标记
+  `candidates_persisted=false`、`model_free_text_persisted=false`；
+- 索引身份前后核对：BM25 索引 sha256 必须一致；
+- 原始查询、命令、规范化/改写形态与 `driver`（`llm` / `scripted_driver`）都写入 trace。
+
+### 11.6 验收（2026-11-09）
+
+| 检查 | 结果 |
+| --- | --- |
+| 本地自检 | **17/17**（含跨工具二次检索、混合→精排、精排前置拒绝、精排未知查询拒绝、混合来源、空结果） |
+| 本地回归 | **45/45**（含旧真实工件与索引哈希不变、候选不落盘） |
+| 脚本替身链路 | `search_hybrid → search_rerank`，**verified**，3 请求 / 1 检索 / 1 精排；轨迹无候选 ID |
+| 真实 LLM 链路（1 次） | `deepseek-chat` 自主选择 `search_hybrid → search_rerank`，**verified**，3 请求 / 1 检索 / 1 精排，17/17 检查，2.83 s |
+| 空结果分支 | 无匹配 token 的混合检索返回 0 条；Agent 链路以 0 结果 verified |
+| 失败分支 | 首轮直接请求精排 → `tool_not_allowed`，`incomplete`，未执行检索 |
+
+真实运行目录：`experiments/2026-11-09-kuasar-search-phase2/agent_llm/run-20261109T134757Z-32924/`。
+
+证据：[验收 JSON](../experiments/2026-11-09-kuasar-search-phase2/acceptance.json)、
+脚本替身轨迹（本地文件：`../experiments/2026-11-09-kuasar-search-phase2/agent_scripted/scripted-hybrid_rerank/trace.json`）、
+真实 LLM 轨迹（本地文件：`../experiments/2026-11-09-kuasar-search-phase2/agent_llm/run-20261109T134757Z-32924/trace.json`）、
+[报告](../experiments/2026-11-09-kuasar-search-phase2/report.md)。
+
+### 11.7 配置
+
+[`configs/experiments/search_agent.toml`](../configs/experiments/search_agent.toml)：
+工具数与预算、BM25/样本 sha256、向量索引目录与 manifest、编码器配置（`token_hash` /
+dim 4096 / seed 20261109）、RRF 参数、精排权重。`[search_backend]` 与
+`configs/search/kuasar_search_phase2.toml` 必须保持一致，否则重载会因编码器配置哈希
+不一致而拒绝。
+
+### 11.8 限制
+
+1. 真实 LLM 只跑了 **1 次**（自主选择混合检索 + 精排）；二次检索、空结果、拒绝等分支由
+   脚本替身与自检覆盖，不是真实模型的多次行为统计。
+2. 精排是规则版本，没有预训练精排器；语义编码受 KuaiSAR 无文本限制。
+3. 仍是小样本链路验收，不是检索质量评测。

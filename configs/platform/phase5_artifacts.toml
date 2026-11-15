@@ -1,0 +1,249 @@
+# Phase 5 工件清单（演示与恢复只读使用）
+#
+# 这份清单只登记「实际被业务链路加载的文件」，不是模型库索引。
+# 每条包含：业务、角色、路径、来源、大小、sha256，以及已有的校验出处
+# （checksum_recorded_in）和可机检的 metadata。
+#
+# 校验规则（recsys.platform.artifacts.verify_manifest）：
+#   1. 路径必须存在且是文件；
+#   2. size_bytes 与 sha256 必须一致；
+#   3. metadata 中的结构字段（num_docs / vocab_size / num_items / dim /
+#      weight_kind / stats 等）必须与文件内容一致。
+# 任何一条不满足都会报出具体文件并失败；不会训练、换模型或重建索引。
+#
+# 重新生成 sha256 的方法见 README「Phase 5 工件恢复」一节。
+
+manifest_version = 1
+dataset = "kuasar_small"
+generated_at = "2026-11-10"
+note = "固定小样本 + 现有权重/索引；演示和恢复路径只加载，不训练、不重建。"
+
+# ---------------------------------------------------------------------------
+# 推荐：召回权重 + 排序权重（LightGBM LambdaRank）
+# ---------------------------------------------------------------------------
+
+[[artifacts]]
+id = "rec_two_tower"
+business = "recommendation"
+role = "recall_checkpoint"
+path = "artifacts/kuasar_small/two_tower_features.pt"
+sha256 = "784a2ad68972884dac4b0a652d44bb4a4d802c5788517fec05b6a25c6c1f0c3b"
+size_bytes = 140698117
+source = "Phase 2 Two-Tower（物品特征入塔）checkpoint"
+checksum_recorded_in = "artifacts/kuasar_small/mvp/run_meta.json -> fingerprints.two_tower_checkpoint.sha256"
+note = "两个召回通道都加载它；缺失即失败，不回退到 popularity。"
+
+[artifacts.metadata]
+format = "torch_checkpoint"
+dataset = "kuasar_small"
+model_config = "two_tower"
+
+[[artifacts]]
+id = "rec_mind"
+business = "recommendation"
+role = "recall_checkpoint"
+path = "artifacts/kuasar_small/mind20.pt"
+sha256 = "eba017182142a8d09183ccf93de99d53535b32830de0a27bbdfad70d40ff9dac"
+size_bytes = 116990990
+source = "MIND 多兴趣召回 checkpoint（torch-rechub 适配）"
+checksum_recorded_in = "artifacts/kuasar_small/mvp/run_meta.json -> fingerprints.mind_checkpoint.sha256"
+note = "固定 routing seed，缺失即失败。"
+
+[artifacts.metadata]
+format = "torch_checkpoint"
+dataset = "kuasar_small"
+interest_num = 2
+max_length = 20
+
+[[artifacts]]
+id = "rec_lightgbm_ranker"
+business = "recommendation"
+role = "ranking_checkpoint"
+path = "artifacts/kuasar_small/mvp/lgbm_ranker.txt"
+sha256 = "a79d9d451d3833460f3160fe4d76c32f76a1aee49458aa8ab9d252510cf1ac60"
+size_bytes = 71061
+source = "离线 MVP 的 LightGBM LambdaRank 排序权重（20 轮）"
+checksum_recorded_in = "artifacts/kuasar_small/mvp/run_meta.json -> assertions（LightGBM 重载复验）"
+note = "Phase 5 用 artifact_policy=existing_only 加载；缺失时必须失败，禁止自动训练。"
+
+[artifacts.metadata]
+format = "lightgbm_text"
+booster = "lambdarank"
+num_trees = 20
+num_feature = 9
+
+# ---------------------------------------------------------------------------
+# 广告：DIN 接口测试权重 + 权重索引
+# ---------------------------------------------------------------------------
+
+[[artifacts]]
+id = "ads_din_weights"
+business = "ads"
+role = "interface_test_weights"
+path = "artifacts/kuasar_small/ads/interface_weights/din.pt"
+sha256 = "3e1428d0ca67dfcbc033a3d8f2a93313b7814567d6a972ffd473d7526ac78e2b"
+size_bytes = 14577698
+source = "Phase 3 固定初始化接口权重（未训练）"
+checksum_recorded_in = "artifacts/kuasar_small/ads/interface_weights/index.json -> files.din.sha256"
+note = "interface_test：只证明能加载/能推理，不代表已训练或有效果。"
+
+[artifacts.metadata]
+format = "torch_checkpoint"
+model = "din"
+weight_kind = "interface_test"
+is_trained = false
+num_items = 454717
+
+[[artifacts]]
+id = "ads_weight_index"
+business = "ads"
+role = "weights_index"
+path = "artifacts/kuasar_small/ads/interface_weights/index.json"
+sha256 = "f156ddb88242a056ad638aa1827ef0d9dc254c2d3e4fde91b094ba8b266ef5a4"
+size_bytes = 1615
+source = "python -m recsys.ads.verify --build-interface-weights"
+checksum_recorded_in = "文件自带的 files.<model>.sha256 表"
+note = "本次演示只核对 din 一条，其余五个模型保持原样。"
+
+[artifacts.metadata]
+format = "json_weights_index"
+weight_kind = "fixed_init_interface_test"
+is_trained = false
+num_items = 454717
+
+# ---------------------------------------------------------------------------
+# 搜索：BM25 小索引 + 样本 + 搜索侧 FAISS 向量索引（独立于推荐索引）
+# ---------------------------------------------------------------------------
+
+[[artifacts]]
+id = "search_bm25_index"
+business = "search"
+role = "keyword_index"
+path = "artifacts/search/kuasar_bm25/index.json"
+sha256 = "3ae2b858d456eab4c4c21ed356812cd44260b56dd596639588a53fb1a6a52690"
+size_bytes = 76077
+source = "python -m recsys.search.prepare（30 会话 / 120 物品）"
+checksum_recorded_in = "configs/experiments/search_agent.toml -> expected_index_sha256"
+note = "混合检索的 BM25 一路；只读，不重建。"
+
+[artifacts.metadata]
+format = "bm25_index"
+num_docs = 120
+vocab_size = 823
+k1 = 1.5
+b = 0.75
+
+[[artifacts]]
+id = "search_sample"
+business = "search"
+role = "query_sample"
+path = "artifacts/search/kuasar_bm25/sample.json"
+sha256 = "12a46f3c3a614a715e52f4a790ccac93eb0fc7519ab5ff4a0826ceace58a7daf"
+size_bytes = 54651
+source = "python -m recsys.search.prepare"
+checksum_recorded_in = "configs/experiments/search_agent.toml -> expected_sample_sha256"
+note = "固定查询会话 11208 的来源样本。"
+
+[artifacts.metadata]
+format = "search_sample"
+sessions = 30
+
+[[artifacts]]
+id = "search_bm25_manifest"
+business = "search"
+role = "index_manifest"
+path = "artifacts/search/kuasar_bm25/manifest.json"
+sha256 = "eba233325c6554b93384642c844b4a911e86d27d62cae7bc0a30772df2a38238"
+size_bytes = 7156
+source = "python -m recsys.search.prepare"
+checksum_recorded_in = "文件自身的 index.sha256 字段"
+note = "记录索引构建参数与计数。"
+
+[artifacts.metadata]
+format = "json_manifest"
+
+[[artifacts]]
+id = "search_vector_payload"
+business = "search"
+role = "vector_index_payload"
+path = "artifacts/search/kuasar_vector/vector/ann.faiss"
+sha256 = "5d6983b148fc8b334c26d76ee67583f44a61aeb3601e462750608a418f7a97e3"
+size_bytes = 1966125
+source = "python -m recsys.search.build_vector_index（faiss.IndexFlatIP）"
+checksum_recorded_in = "artifacts/search/kuasar_vector/manifest.json -> index.payload_sha256"
+note = "搜索侧 FAISS 索引，与推荐物品索引分开管理。"
+
+[artifacts.metadata]
+format = "faiss_indexflatip"
+num_items = 120
+dim = 4096
+encoder = "token_hash"
+
+[[artifacts]]
+id = "search_vector_doc_ids"
+business = "search"
+role = "vector_index_metadata"
+path = "artifacts/search/kuasar_vector/vector/doc_ids.json"
+sha256 = "9a83c0384b1c54bc7eb77647e2b5921b9c47b9aade17dfc74947196d571e2a01"
+size_bytes = 1171
+source = "python -m recsys.search.build_vector_index"
+checksum_recorded_in = "artifacts/search/kuasar_vector/manifest.json -> index"
+note = "向量行号 → item_id 映射。"
+
+[artifacts.metadata]
+format = "json_doc_ids"
+num_items = 120
+
+[[artifacts]]
+id = "search_vector_meta"
+business = "search"
+role = "vector_index_metadata"
+path = "artifacts/search/kuasar_vector/vector/meta.json"
+sha256 = "28ff571006eedf9b8ea41c39349ab95e7a8644256c19b3883934a43af7985a80"
+size_bytes = 8212
+source = "python -m recsys.search.build_vector_index"
+checksum_recorded_in = "artifacts/search/kuasar_vector/manifest.json"
+note = "向量索引元数据（编码器配置、BM25 索引哈希）。"
+
+[artifacts.metadata]
+format = "json_vector_meta"
+num_items = 120
+dim = 4096
+
+[[artifacts]]
+id = "search_vector_manifest"
+business = "search"
+role = "vector_index_manifest"
+path = "artifacts/search/kuasar_vector/manifest.json"
+sha256 = "a300e7abda8c9a59cf674088a21f1fe25b1eeb1837c65bffd704ebd13b38b464"
+size_bytes = 1759
+source = "python -m recsys.search.build_vector_index"
+checksum_recorded_in = "文件自身的 index.payload_sha256 字段"
+note = "配置要求 require_vector_manifest=true。"
+
+[artifacts.metadata]
+format = "recsys.search.vector_manifest.v1"
+num_items = 120
+dim = 4096
+encoder = "token_hash"
+
+# ---------------------------------------------------------------------------
+# 平台：本地 RAG 索引（与搜索 FAISS、推荐向量索引分开）
+# ---------------------------------------------------------------------------
+
+[[artifacts]]
+id = "rag_index"
+business = "platform"
+role = "rag_index"
+path = "artifacts/rag/phase4/index.json"
+sha256 = "dff9c05db6f0854ef33851f350c3d4588072aa46037e4d1fd87ccd11b6925f03"
+size_bytes = 728959
+source = "python -m recsys.platform --rag-build（项目文档/模型说明/历史实验）"
+checksum_recorded_in = "索引内 sources[].sha256（逐文件）"
+note = "只用于检索背景与来源，不能代替实验校验。"
+
+[artifacts.metadata]
+format = "recsys.platform.rag.index.v1"
+files = 19
+chunks = 308
+vocab = 8049

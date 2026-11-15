@@ -36,6 +36,7 @@
 | 阿里 OSS wheel | TorchEasyRec 依赖 graphlearn/pyfg/common_io 的 Linux wheel | Windows 无法安装；只在 Linux 构建机跑 |
 | pandas 3 vs torch-rechub | torch-rechub 1.0.0 声明 `pandas<3`，但 Python 3.14 只有 pandas 3.1.1 的 wheel | 实测导入/MIND 前向正常，仅 pip 告警；若要用它的 `MatchTrainer` 再评估是否降级 |
 | faiss-cpu 与 numpy | 部分 faiss-cpu wheel 对 numpy 2.x 支持滞后 | 按 `requirements/optional-faiss.txt`；失败时先降 numpy 再装 faiss |
+| 搜索向量编码 | Phase 2 的 `token_hash` 编码只依赖 numpy + faiss-cpu，**不需要** sentence-transformers/torch | 已在本机跑通；将来启用真实文本语义编码才需要 `sentence-transformers` + 本地权重（当前未安装、无文本） |
 
 ## 本机实测（2026-11-05）
 

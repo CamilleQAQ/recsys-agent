@@ -8,10 +8,10 @@
 - [report.md](report.md)：工具接口、查询调整规则、预算、真实决策、问题与遗留项。
 - [self_check.json](self_check.json)：12 项本地合成检查（不联网）。
 - `run-20261109T080657Z-19556/`：唯一一次真实工作流
-  - [trace.json](run-20261109T080657Z-19556/trace.json)：工具调用 ID、查询 token、
+  - trace.json（本地文件：`run-20261109T080657Z-19556/trace.json`）：工具调用 ID、查询 token、
     返回数量、继续/停止理由、请求计数。
-  - [metrics.json](run-20261109T080657Z-19556/metrics.json)：验收 checks、预算、索引身份。
-  - [run_meta.json](run-20261109T080657Z-19556/run_meta.json)：命令、模型、索引、查询来源。
+  - metrics.json（本地文件：`run-20261109T080657Z-19556/metrics.json`）：验收 checks、预算、索引身份。
+  - run_meta.json（本地文件：`run-20261109T080657Z-19556/run_meta.json`）：命令、模型、索引、查询来源。
 
 ## 结果速览
 

@@ -1,0 +1,87 @@
+{
+  "ranker": "E:\\PythonProject\\recsys-agent\\artifacts\\kuasar_small\\mvp\\lgbm_ranker.txt",
+  "note": "同一份出厂 LightGBM 权重（2,418 请求 / 9,997 行 / 20 轮 / 9 列物品特征），只换候选池。",
+  "per_seed": [
+    {
+      "seed": 42,
+      "pool_hits": 69,
+      "fusion": {
+        "Recall@20": 0.005967,
+        "NDCG@20": 0.003457,
+        "hits@20": 25
+      },
+      "legacy_ranker": {
+        "Recall@20": 0.002008,
+        "NDCG@20": 0.000966,
+        "hits@20": 11
+      },
+      "fusion_plus_rerank": {
+        "Recall@20": 0.005592,
+        "NDCG@20": 0.003343,
+        "hits@20": 23
+      },
+      "legacy_plus_rerank": {
+        "Recall@20": 0.002175,
+        "NDCG@20": 0.001021,
+        "hits@20": 12
+      },
+      "legacy_minus_fusion_hits": -14
+    },
+    {
+      "seed": 43,
+      "pool_hits": 69,
+      "fusion": {
+        "Recall@20": 0.005542,
+        "NDCG@20": 0.00253,
+        "hits@20": 25
+      },
+      "legacy_ranker": {
+        "Recall@20": 0.002767,
+        "NDCG@20": 0.000985,
+        "hits@20": 12
+      },
+      "fusion_plus_rerank": {
+        "Recall@20": 0.005417,
+        "NDCG@20": 0.00248,
+        "hits@20": 24
+      },
+      "legacy_plus_rerank": {
+        "Recall@20": 0.002975,
+        "NDCG@20": 0.001047,
+        "hits@20": 13
+      },
+      "legacy_minus_fusion_hits": -13
+    },
+    {
+      "seed": 44,
+      "pool_hits": 45,
+      "fusion": {
+        "Recall@20": 0.003392,
+        "NDCG@20": 0.002107,
+        "hits@20": 13
+      },
+      "legacy_ranker": {
+        "Recall@20": 0.00145,
+        "NDCG@20": 0.000732,
+        "hits@20": 10
+      },
+      "fusion_plus_rerank": {
+        "Recall@20": 0.00335,
+        "NDCG@20": 0.002097,
+        "hits@20": 13
+      },
+      "legacy_plus_rerank": {
+        "Recall@20": 0.002158,
+        "NDCG@20": 0.000979,
+        "hits@20": 14
+      },
+      "legacy_minus_fusion_hits": -3
+    }
+  ],
+  "summary": {
+    "seeds_where_legacy_worse_than_fusion": 3,
+    "seeds": 3,
+    "mean_delta_hits": -10.0,
+    "mean_delta_hits_with_rerank": -7.0
+  }
+}

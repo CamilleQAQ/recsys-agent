@@ -1,0 +1,626 @@
+{
+  "format": "recsys.search.phase2_acceptance.v1",
+  "generated_at": "2026-11-09T21:48:58+0800",
+  "passed": true,
+  "total": 9,
+  "passed_count": 9,
+  "checks": [
+    {
+      "id": "legacy_bm25_entry",
+      "status": "pass",
+      "detail": "BM25 库入口与 `python -m recsys.search` CLI 都返回 5 条；Top-1=80675 score=17.8641"
+    },
+    {
+      "id": "faiss_index_reload",
+      "status": "pass",
+      "detail": "backend=faiss.IndexFlatIP（faiss 1.15.1）；首次搜索 faiss 调用 +1；重载后 Top-5 一致"
+    },
+    {
+      "id": "vector_index_update",
+      "status": "pass",
+      "detail": "先建 119 个物品的索引，add_items 追加 1 个 → 保存/重载后 120 个物品，仍可查询（FAISS）"
+    },
+    {
+      "id": "hybrid_rrf_provenance",
+      "status": "pass",
+      "detail": "7 条融合结果按 item_id 去重，来源/名次/分数齐全；融合分等于 Σ1/(60+rank)，顺序与上游 RRF 一致"
+    },
+    {
+      "id": "rerank_final_topk",
+      "status": "pass",
+      "detail": "精排对 7 个融合候选重新打分，返回最终 Top-5；分数 = 0.65·coverage + 0.35·prior_norm，排序 (-score, item_id)"
+    },
+    {
+      "id": "agent_end_to_end",
+      "status": "pass",
+      "detail": "scripted_driver：首轮 search_hybrid → 反馈阶段 search_rerank → 最终回复；状态 verified，FAISS 后端已核对，轨迹无候选 ID / 无模型正文"
+    },
+    {
+      "id": "empty_and_failure_branch",
+      "status": "pass",
+      "detail": "无匹配 token：混合检索返回 0 条，Agent 链路以 0 结果 verified 结束；空查询被拒绝（empty_query）；首轮直接请求精排被拒绝（tool_not_allowed → incomplete）"
+    },
+    {
+      "id": "text_encoder_blocked",
+      "status": "pass",
+      "detail": "TextSemanticEncoder 按预期不可用：文本语义编码不可用：本地权重目录不存在：''；未安装 sentence-transformers。KuaiSAR 当前只有匿名整数 token，没有 caption/query 原文，也没有可用的本地预训练权重；请继续使用 token_ha…"
+    },
+    {
+      "id": "readonly_inputs",
+      "status": "pass",
+      "detail": "验收前后 BM25 索引与样本 sha256 一致；未重建 BM25、未扫描原始 CSV"
+    }
+  ],
+  "environment": {
+    "python": "3.14.3",
+    "numpy": "2.5.3",
+    "faiss": "1.15.1"
+  },
+  "components_reused_from_skimsearchagent": [
+    "agent_search.retrievers.dense.vector_index (@4794575)：索引保存/加载/元数据",
+    "agent_search.retrievers.fusion.rrf (@4794575)：RRF 融合",
+    "agent_search.retrievers.rerankers (@4794575)：Reranker 契约与注册表",
+    "agent_search.retrievers.reranked (@4794575)：RerankedEngine 组合"
+  ],
+  "adapters": [
+    "FaissFlatIndex：faiss.IndexFlatIP + 整数 item_id 映射（上游只有 numpy/hnsw/ivfpq）",
+    "TokenHashEncoder：无训练的整数 token 哈希编码（查询/文档同配置）",
+    "HybridSearcher：在 RRF 之外补来源/名次/分数的追溯",
+    "TokenOverlapReranker：基于现有 token 的轻量精排规则",
+    "SearchService / SearchToolbox / Search Agent 四工具注册"
+  ],
+  "evidence": {
+    "legacy_bm25_entry": {
+      "cli_mode": "bm25",
+      "results": [
+        {
+          "rank": 1,
+          "item_id": 80675,
+          "score": 17.86405127570893,
+          "category": "science / Experimental Invention",
+          "category_zh": "科学 / 实验发明",
+          "item_type": "NORMAL"
+        },
+        {
+          "rank": 2,
+          "item_id": 135989,
+          "score": 12.73822136931529,
+          "category": "High tech digital / Technology digital products",
+          "category_zh": "高新数码 / 科技数码产品",
+          "item_type": "NORMAL"
+        },
+        {
+          "rank": 3,
+          "item_id": 209624,
+          "score": 8.432907090834146,
+          "category": "High tech digital / Technology digital products",
+          "category_zh": "高新数码 / 科技数码产品",
+          "item_type": "NORMAL"
+        },
+        {
+          "rank": 4,
+          "item_id": 350728,
+          "score": 7.958621939912353,
+          "category": "High tech digital / Technology digital products / Technology surrounding / Charging transfer",
+          "category_zh": "高新数码 / 科技数码产品 / 科技周边 / 充电转接",
+          "item_type": "NORMAL"
+        },
+        {
+          "rank": 5,
+          "item_id": 135058,
+          "score": 7.6127397735266396,
+          "category": "High tech digital / High tech digital teaching",
+          "category_zh": "高新数码 / 高新数码教学",
+          "item_type": "NORMAL"
+        }
+      ],
+      "clicked": {
+        "clicked_items": [
+          350728,
+          80675
+        ],
+        "in_top_k": [
+          350728,
+          80675
+        ],
+        "best_rank": 1,
+        "note": "点击标签仅用于核对，不参与打分或排序"
+      }
+    },
+    "faiss_index_reload": {
+      "backend_actual": "faiss.IndexFlatIP",
+      "faiss_version": "1.15.1",
+      "faiss_search_calls_before": 0,
+      "faiss_search_calls_after": 1,
+      "num_items": 120,
+      "dim": 4096,
+      "encoder": {
+        "encoder": "token_hash",
+        "dim": 4096,
+        "seed": 20261109,
+        "include_category": true,
+        "category_weight": 0.25,
+        "requires_training": false,
+        "text_semantic": false,
+        "note": "KuaiSAR 匿名整数 token 的稳定哈希编码；同一编码配置用于查询与文档，余弦相似度≈加权 token 重合，不代表中文语义。"
+      },
+      "reload_identical": true,
+      "results": [
+        {
+          "rank": 1,
+          "item_id": 80675,
+          "score": 0.61999
+        },
+        {
+          "rank": 2,
+          "item_id": 135989,
+          "score": 0.50798
+        },
+        {
+          "rank": 3,
+          "item_id": 209624,
+          "score": 0.382767
+        },
+        {
+          "rank": 4,
+          "item_id": 350728,
+          "score": 0.345411
+        },
+        {
+          "rank": 5,
+          "item_id": 135058,
+          "score": 0.333625
+        }
+      ],
+      "clicked": {
+        "clicked_items": [
+          350728,
+          80675
+        ],
+        "in_top_k": [
+          350728,
+          80675
+        ],
+        "best_rank": 1,
+        "note": "点击标签仅用于核对，不参与打分或排序"
+      }
+    },
+    "hybrid_rrf_provenance": {
+      "rrf_k": 60,
+      "pool": 50,
+      "rankings": {
+        "bm25": [
+          {
+            "item_id": 80675,
+            "score": 17.864051,
+            "rank": 1
+          },
+          {
+            "item_id": 135989,
+            "score": 12.738221,
+            "rank": 2
+          },
+          {
+            "item_id": 209624,
+            "score": 8.432907,
+            "rank": 3
+          },
+          {
+            "item_id": 350728,
+            "score": 7.958622,
+            "rank": 4
+          },
+          {
+            "item_id": 135058,
+            "score": 7.61274,
+            "rank": 5
+          },
+          {
+            "item_id": 213578,
+            "score": 4.338469,
+            "rank": 6
+          },
+          {
+            "item_id": 379467,
+            "score": 3.364088,
+            "rank": 7
+          }
+        ],
+        "vector": [
+          {
+            "item_id": 80675,
+            "score": 0.61999,
+            "rank": 1
+          },
+          {
+            "item_id": 135989,
+            "score": 0.50798,
+            "rank": 2
+          },
+          {
+            "item_id": 209624,
+            "score": 0.382767,
+            "rank": 3
+          },
+          {
+            "item_id": 350728,
+            "score": 0.345411,
+            "rank": 4
+          },
+          {
+            "item_id": 135058,
+            "score": 0.333625,
+            "rank": 5
+          },
+          {
+            "item_id": 213578,
+            "score": 0.213711,
+            "rank": 6
+          },
+          {
+            "item_id": 379467,
+            "score": 0.142373,
+            "rank": 7
+          }
+        ]
+      },
+      "results": [
+        {
+          "rank": 1,
+          "item_id": 80675,
+          "score": 0.03278688524590164,
+          "category": "science / Experimental Invention",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 1,
+              "score": 17.86405127570893
+            },
+            {
+              "source": "vector",
+              "rank": 1,
+              "score": 0.6199895143508911
+            }
+          ]
+        },
+        {
+          "rank": 2,
+          "item_id": 135989,
+          "score": 0.03225806451612903,
+          "category": "High tech digital / Technology digital products",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 2,
+              "score": 12.73822136931529
+            },
+            {
+              "source": "vector",
+              "rank": 2,
+              "score": 0.5079799890518188
+            }
+          ]
+        },
+        {
+          "rank": 3,
+          "item_id": 209624,
+          "score": 0.031746031746031744,
+          "category": "High tech digital / Technology digital products",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 3,
+              "score": 8.432907090834146
+            },
+            {
+              "source": "vector",
+              "rank": 3,
+              "score": 0.38276687264442444
+            }
+          ]
+        },
+        {
+          "rank": 4,
+          "item_id": 350728,
+          "score": 0.03125,
+          "category": "High tech digital / Technology digital products / Technology surrounding / Charging transfer",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 4,
+              "score": 7.958621939912353
+            },
+            {
+              "source": "vector",
+              "rank": 4,
+              "score": 0.34541088342666626
+            }
+          ]
+        },
+        {
+          "rank": 5,
+          "item_id": 135058,
+          "score": 0.03076923076923077,
+          "category": "High tech digital / High tech digital teaching",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 5,
+              "score": 7.6127397735266396
+            },
+            {
+              "source": "vector",
+              "rank": 5,
+              "score": 0.3336254060268402
+            }
+          ]
+        },
+        {
+          "rank": 6,
+          "item_id": 213578,
+          "score": 0.030303030303030304,
+          "category": "High tech digital / Technology digital products / mobile phone",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 6,
+              "score": 4.338469028857367
+            },
+            {
+              "source": "vector",
+              "rank": 6,
+              "score": 0.2137114554643631
+            }
+          ]
+        },
+        {
+          "rank": 7,
+          "item_id": 379467,
+          "score": 0.029850746268656716,
+          "category": "High tech digital / High tech digital teaching",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 7,
+              "score": 3.364088032291979
+            },
+            {
+              "source": "vector",
+              "rank": 7,
+              "score": 0.14237268269062042
+            }
+          ]
+        }
+      ],
+      "clicked": {
+        "clicked_items": [
+          350728,
+          80675
+        ],
+        "in_top_k": [
+          350728,
+          80675
+        ],
+        "best_rank": 1,
+        "note": "点击标签仅用于核对，不参与打分或排序"
+      }
+    },
+    "rerank_final_topk": {
+      "reranker": {
+        "base": "hybrid",
+        "pool": 50,
+        "reranker": "kuasar_token_overlap",
+        "prior_weight": 0.35,
+        "coverage_weight": 0.65,
+        "training_free": true,
+        "uses_click_label": false,
+        "query_side": "idf-weighted token coverage over KuaiSAR integer tokens",
+        "engine": "agent_search.retrievers.reranked.RerankedEngine"
+      },
+      "pool_size": 7,
+      "results": [
+        {
+          "rank": 1,
+          "item_id": 80675,
+          "score": 1.0,
+          "category": "science / Experimental Invention",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 1,
+              "score": 17.86405127570893
+            },
+            {
+              "source": "vector",
+              "rank": 1,
+              "score": 0.6199895143508911
+            }
+          ],
+          "details": {
+            "coverage": 1.0,
+            "prior_score": 0.03278688524590164,
+            "prior_rank": 1
+          }
+        },
+        {
+          "rank": 2,
+          "item_id": 135989,
+          "score": 0.73516906,
+          "category": "High tech digital / Technology digital products",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 2,
+              "score": 12.73822136931529
+            },
+            {
+              "source": "vector",
+              "rank": 2,
+              "score": 0.5079799890518188
+            }
+          ],
+          "details": {
+            "coverage": 0.689548761,
+            "prior_score": 0.03225806451612903,
+            "prior_rank": 2
+          }
+        },
+        {
+          "rank": 3,
+          "item_id": 209624,
+          "score": 0.495818483,
+          "category": "High tech digital / Technology digital products",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 3,
+              "score": 8.432907090834146
+            },
+            {
+              "source": "vector",
+              "rank": 3,
+              "score": 0.38276687264442444
+            }
+          ],
+          "details": {
+            "coverage": 0.415219319,
+            "prior_score": 0.031746031746031744,
+            "prior_rank": 3
+          }
+        },
+        {
+          "rank": 4,
+          "item_id": 350728,
+          "score": 0.436689432,
+          "category": "High tech digital / Technology digital products / Technology surrounding / Charging transfer",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 4,
+              "score": 7.958621939912353
+            },
+            {
+              "source": "vector",
+              "rank": 4,
+              "score": 0.34541088342666626
+            }
+          ],
+          "details": {
+            "coverage": 0.415219319,
+            "prior_score": 0.03125,
+            "prior_rank": 4
+          }
+        },
+        {
+          "rank": 5,
+          "item_id": 135058,
+          "score": 0.379379737,
+          "category": "High tech digital / High tech digital teaching",
+          "sources": [
+            {
+              "source": "bm25",
+              "rank": 5,
+              "score": 7.6127397735266396
+            },
+            {
+              "source": "vector",
+              "rank": 5,
+              "score": 0.3336254060268402
+            }
+          ],
+          "details": {
+            "coverage": 0.415219319,
+            "prior_score": 0.03076923076923077,
+            "prior_rank": 5
+          }
+        }
+      ],
+      "clicked": {
+        "clicked_items": [
+          350728,
+          80675
+        ],
+        "in_top_k": [
+          350728,
+          80675
+        ],
+        "best_rank": 1,
+        "note": "点击标签仅用于核对，不参与打分或排序"
+      }
+    },
+    "agent_end_to_end": {
+      "driver": "scripted_driver",
+      "status": "verified",
+      "tool_sequence": [
+        "search_hybrid",
+        "search_rerank"
+      ],
+      "request_count": 3,
+      "search_calls": 1,
+      "rerank_calls": 1,
+      "rerank_result_count": 5,
+      "rerank_scores": [
+        1.0,
+        0.735169,
+        0.495818,
+        0.436689,
+        0.37938
+      ],
+      "checks": {
+        "index_loaded": true,
+        "index_unchanged": true,
+        "vector_faiss_backend": true,
+        "tools_registered": true,
+        "tool_choice_ok": true,
+        "query_forms_preserved": true,
+        "native_tool_call": true,
+        "tool_result_sent": true,
+        "tool_call_id_roundtrip": true,
+        "return_counts_present": true,
+        "request_budget_ok": true,
+        "search_budget_ok": true,
+        "rerank_budget_ok": true,
+        "second_query_rule_ok": true,
+        "rerank_scores_ok": true,
+        "final_reply_ok": true,
+        "no_candidate_dump": true
+      },
+      "trace_file": "experiments\\2026-11-09-kuasar-search-phase2\\agent_scripted\\scripted-hybrid_rerank\\trace.json",
+      "note": "决策由脚本替身给出；检索、精排、索引读取与落盘均为真实代码"
+    },
+    "empty_and_failure_branch": {
+      "no_match_hybrid": {
+        "query_tokens": [
+          1000000000000
+        ],
+        "count": 0
+      },
+      "empty_query_rejection": "empty_query",
+      "rerank_first": {
+        "status": "incomplete",
+        "stop_code": "invalid_first_request:tool_not_allowed"
+      },
+      "agent_no_match": {
+        "status": "verified",
+        "return_counts": [
+          0
+        ],
+        "tool_sequence": [
+          "search_hybrid"
+        ]
+      }
+    }
+  },
+  "scope": {
+    "training": 0,
+    "fine_tuning": 0,
+    "bm25_rebuild": 0,
+    "full_corpus_index": 0,
+    "raw_csv_scan": 0,
+    "real_llm_requests": 0,
+    "real_llm_note": "验收脚本不联网；另有一次真实 LLM 工作流记录在 experiments/2026-11-09-kuasar-search-phase2/agent_llm/ 下",
+    "agent_decisions": "scripted_driver",
+    "retrieval_and_rerank_executed": true,
+    "click_labels_used_for_scoring": false
+  }
+}

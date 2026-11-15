@@ -59,6 +59,7 @@ class MindTrainConfig:
     seed: int = 42
     device: str = "auto"
     max_batches_per_epoch: int | None = None
+    validation_users: int = 0
 
 
 def _validation_recommendations(
@@ -90,6 +91,9 @@ def train(config: MindTrainConfig) -> tuple[nn.Module, list[float]]:
     device = resolve_device(config.device)
     threshold = resolve_positive_threshold(config.dataset, config.positive_threshold)
     prepared = prepare_dataset(config.dataset, config.data_dir, positive_threshold=threshold)
+    from recsys.training.subsets import limit_validation_users
+
+    prepared = limit_validation_users(prepared, config.validation_users, config.seed)
 
     dataset = MindTrainDataset(
         prepared.train_interactions,
@@ -232,6 +236,7 @@ def parse_args(argv: list[str] | None = None) -> MindTrainConfig:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--max-batches-per-epoch", type=int, default=None)
+    parser.add_argument("--validation-users", type=int, default=0)
     args = parser.parse_args(argv)
     return MindTrainConfig(**vars(args))
 

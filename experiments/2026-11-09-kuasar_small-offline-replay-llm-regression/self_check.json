@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "status": "pass",
+  "total": 13,
+  "passed": 13,
+  "failed": 0,
+  "synthetic_only": true,
+  "network_requests": 0,
+  "checks": [
+    {
+      "id": "first_visibility",
+      "status": "pass",
+      "detail": "首轮消息只有 50/50 历史、候选标签和 2 次预算；不含其他配额指标"
+    },
+    {
+      "id": "call_id_roundtrip",
+      "status": "pass",
+      "detail": "首轮工具返回与第二次请求的 tool 消息使用同一调用 ID"
+    },
+    {
+      "id": "verified_one_reveal",
+      "status": "pass",
+      "detail": "一次成功揭晓 + 模型主动停止 → verified，2 次请求 / 1 次揭晓"
+    },
+    {
+      "id": "verified_two_reveals",
+      "status": "pass",
+      "detail": "两次成功揭晓 + 最终回复 → verified，3 次请求 / 2 次揭晓"
+    },
+    {
+      "id": "partial_final_failure",
+      "status": "pass",
+      "detail": "已有两次揭晓后最终回复超时 → partial，保留结果与轨迹"
+    },
+    {
+      "id": "partial_duplicate",
+      "status": "pass",
+      "detail": "第二次重复查询 30/70 被拒绝 → partial，未揭晓第二组指标"
+    },
+    {
+      "id": "partial_reply_truncated_feedback",
+      "status": "pass",
+      "detail": "揭晓一次后 length 停止说明 → partial / reply_truncated；1 次揭晓、1 次剩余预算、not_judged"
+    },
+    {
+      "id": "partial_reply_truncated_final",
+      "status": "pass",
+      "detail": "揭晓两次后 length 最终回复 → partial / reply_truncated；2 次揭晓、0 剩余预算、not_judged"
+    },
+    {
+      "id": "incomplete_no_tool",
+      "status": "pass",
+      "detail": "首轮无工具调用 → incomplete，0 次揭晓"
+    },
+    {
+      "id": "incomplete_illegal",
+      "status": "pass",
+      "detail": "首轮非法配额 60/40 → incomplete，未揭晓指标"
+    },
+    {
+      "id": "partial_final_tool_call",
+      "status": "pass",
+      "detail": "预算用尽后最终回复再次请求工具 → partial，拒绝且不揭晓第三组"
+    },
+    {
+      "id": "over_budget_session",
+      "status": "pass",
+      "detail": "2 次揭晓后第 3 次查询被预算拒绝，无指标泄露"
+    },
+    {
+      "id": "max_request_guard",
+      "status": "pass",
+      "detail": "自检场景的请求数 ≤ 3、揭晓数 ≤ 2"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# 默认推荐链路：完整复现既有 recsys_mvp 的双路召回 → 轮流融合 → LightGBM → 类目重排。
+# 该配置的 128 用户、100 召回、20 最终、类目上限 5 与 experiments/2026-11-08-kuasar_small-recsys-mvp 一致。
+
+[run]
+dataset = "kuasar_small"
+data_dir = "data"
+artifacts_dir = "artifacts"
+output_name = "pipeline"
+split = "validation"
+users = 128
+seed = 42
+k_recall = 100
+k_final = 20
+include_validation_in_test_history = true
+device = "cpu"
+
+[recall.two_tower]
+model = "two_tower"
+checkpoint = "artifacts/kuasar_small/two_tower_features.pt"
+k = 100
+weight = 1.0
+
+[recall.mind]
+model = "mind"
+checkpoint = "artifacts/kuasar_small/mind20.pt"
+k = 100
+weight = 1.0
+
+[fusion]
+mode = "round_robin"
+limit = 100
+
+[ranking]
+model = "lightgbm_ranker"
+checkpoint = "artifacts/kuasar_small/mvp/lgbm_ranker.txt"
+train_if_missing = true
+num_boost_round = 20
+max_rows = 10000
+parent_ranking = "data/kuasar/processed/ranking"
+
+[rerank]
+category_cap = 5
+author_cap = 0
+diversity = true

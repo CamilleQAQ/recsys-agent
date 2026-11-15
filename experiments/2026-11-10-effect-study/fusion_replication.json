@@ -1,0 +1,307 @@
+{
+  "note": "只复验 rank/位置类融合；候选文件没有分数，z-score 相加无法复验。",
+  "per_seed": {
+    "42": {
+      "round_robin__fusion": {
+        "arm": "round_robin__fusion",
+        "Recall@20": 0.005967,
+        "Recall@100": 0.015325,
+        "hits@20": 25
+      },
+      "round_robin__cap3": {
+        "arm": "round_robin__cap3",
+        "Recall@20": 0.005492,
+        "Recall@100": 0.005492,
+        "hits@20": 22
+      },
+      "round_robin__cap5": {
+        "arm": "round_robin__cap5",
+        "Recall@20": 0.005592,
+        "Recall@100": 0.005592,
+        "hits@20": 23
+      },
+      "round_robin__cap10": {
+        "arm": "round_robin__cap10",
+        "Recall@20": 0.005967,
+        "Recall@100": 0.005967,
+        "hits@20": 25
+      },
+      "round_robin__capnone": {
+        "arm": "round_robin__capnone",
+        "Recall@20": 0.005967,
+        "Recall@100": 0.005967,
+        "hits@20": 25
+      },
+      "rrf_k60__fusion": {
+        "arm": "rrf_k60__fusion",
+        "Recall@20": 0.006258,
+        "Recall@100": 0.014283,
+        "hits@20": 27
+      },
+      "rrf_k60__cap3": {
+        "arm": "rrf_k60__cap3",
+        "Recall@20": 0.006033,
+        "Recall@100": 0.006033,
+        "hits@20": 25
+      },
+      "rrf_k60__cap5": {
+        "arm": "rrf_k60__cap5",
+        "Recall@20": 0.006008,
+        "Recall@100": 0.006008,
+        "hits@20": 26
+      },
+      "rrf_k60__cap10": {
+        "arm": "rrf_k60__cap10",
+        "Recall@20": 0.006258,
+        "Recall@100": 0.006258,
+        "hits@20": 27
+      },
+      "rrf_k60__capnone": {
+        "arm": "rrf_k60__capnone",
+        "Recall@20": 0.006258,
+        "Recall@100": 0.006258,
+        "hits@20": 27
+      },
+      "quota_30_70__fusion": {
+        "arm": "quota_30_70__fusion",
+        "Recall@20": 0.004408,
+        "Recall@100": 0.017342,
+        "hits@20": 17
+      },
+      "quota_30_70__cap3": {
+        "arm": "quota_30_70__cap3",
+        "Recall@20": 0.003433,
+        "Recall@100": 0.003433,
+        "hits@20": 13
+      },
+      "quota_30_70__cap5": {
+        "arm": "quota_30_70__cap5",
+        "Recall@20": 0.004158,
+        "Recall@100": 0.004158,
+        "hits@20": 16
+      },
+      "quota_30_70__cap10": {
+        "arm": "quota_30_70__cap10",
+        "Recall@20": 0.004408,
+        "Recall@100": 0.004408,
+        "hits@20": 17
+      },
+      "quota_30_70__capnone": {
+        "arm": "quota_30_70__capnone",
+        "Recall@20": 0.004408,
+        "Recall@100": 0.004408,
+        "hits@20": 17
+      }
+    },
+    "43": {
+      "round_robin__fusion": {
+        "arm": "round_robin__fusion",
+        "Recall@20": 0.005542,
+        "Recall@100": 0.016025,
+        "hits@20": 25
+      },
+      "round_robin__cap3": {
+        "arm": "round_robin__cap3",
+        "Recall@20": 0.0055,
+        "Recall@100": 0.0055,
+        "hits@20": 23
+      },
+      "round_robin__cap5": {
+        "arm": "round_robin__cap5",
+        "Recall@20": 0.005417,
+        "Recall@100": 0.005417,
+        "hits@20": 24
+      },
+      "round_robin__cap10": {
+        "arm": "round_robin__cap10",
+        "Recall@20": 0.005542,
+        "Recall@100": 0.005542,
+        "hits@20": 25
+      },
+      "round_robin__capnone": {
+        "arm": "round_robin__capnone",
+        "Recall@20": 0.005542,
+        "Recall@100": 0.005542,
+        "hits@20": 25
+      },
+      "rrf_k60__fusion": {
+        "arm": "rrf_k60__fusion",
+        "Recall@20": 0.005233,
+        "Recall@100": 0.0164,
+        "hits@20": 24
+      },
+      "rrf_k60__cap3": {
+        "arm": "rrf_k60__cap3",
+        "Recall@20": 0.0054,
+        "Recall@100": 0.0054,
+        "hits@20": 25
+      },
+      "rrf_k60__cap5": {
+        "arm": "rrf_k60__cap5",
+        "Recall@20": 0.005108,
+        "Recall@100": 0.005108,
+        "hits@20": 23
+      },
+      "rrf_k60__cap10": {
+        "arm": "rrf_k60__cap10",
+        "Recall@20": 0.005108,
+        "Recall@100": 0.005108,
+        "hits@20": 23
+      },
+      "rrf_k60__capnone": {
+        "arm": "rrf_k60__capnone",
+        "Recall@20": 0.005233,
+        "Recall@100": 0.005233,
+        "hits@20": 24
+      },
+      "quota_30_70__fusion": {
+        "arm": "quota_30_70__fusion",
+        "Recall@20": 0.005133,
+        "Recall@100": 0.017108,
+        "hits@20": 23
+      },
+      "quota_30_70__cap3": {
+        "arm": "quota_30_70__cap3",
+        "Recall@20": 0.004575,
+        "Recall@100": 0.004575,
+        "hits@20": 21
+      },
+      "quota_30_70__cap5": {
+        "arm": "quota_30_70__cap5",
+        "Recall@20": 0.005075,
+        "Recall@100": 0.005075,
+        "hits@20": 22
+      },
+      "quota_30_70__cap10": {
+        "arm": "quota_30_70__cap10",
+        "Recall@20": 0.005133,
+        "Recall@100": 0.005133,
+        "hits@20": 23
+      },
+      "quota_30_70__capnone": {
+        "arm": "quota_30_70__capnone",
+        "Recall@20": 0.005133,
+        "Recall@100": 0.005133,
+        "hits@20": 23
+      }
+    },
+    "44": {
+      "round_robin__fusion": {
+        "arm": "round_robin__fusion",
+        "Recall@20": 0.003392,
+        "Recall@100": 0.010408,
+        "hits@20": 13
+      },
+      "round_robin__cap3": {
+        "arm": "round_robin__cap3",
+        "Recall@20": 0.00335,
+        "Recall@100": 0.00335,
+        "hits@20": 13
+      },
+      "round_robin__cap5": {
+        "arm": "round_robin__cap5",
+        "Recall@20": 0.00335,
+        "Recall@100": 0.00335,
+        "hits@20": 13
+      },
+      "round_robin__cap10": {
+        "arm": "round_robin__cap10",
+        "Recall@20": 0.003267,
+        "Recall@100": 0.003267,
+        "hits@20": 12
+      },
+      "round_robin__capnone": {
+        "arm": "round_robin__capnone",
+        "Recall@20": 0.003392,
+        "Recall@100": 0.003392,
+        "hits@20": 13
+      },
+      "rrf_k60__fusion": {
+        "arm": "rrf_k60__fusion",
+        "Recall@20": 0.003392,
+        "Recall@100": 0.010408,
+        "hits@20": 13
+      },
+      "rrf_k60__cap3": {
+        "arm": "rrf_k60__cap3",
+        "Recall@20": 0.00335,
+        "Recall@100": 0.00335,
+        "hits@20": 13
+      },
+      "rrf_k60__cap5": {
+        "arm": "rrf_k60__cap5",
+        "Recall@20": 0.003225,
+        "Recall@100": 0.003225,
+        "hits@20": 12
+      },
+      "rrf_k60__cap10": {
+        "arm": "rrf_k60__cap10",
+        "Recall@20": 0.003267,
+        "Recall@100": 0.003267,
+        "hits@20": 12
+      },
+      "rrf_k60__capnone": {
+        "arm": "rrf_k60__capnone",
+        "Recall@20": 0.003392,
+        "Recall@100": 0.003392,
+        "hits@20": 13
+      },
+      "quota_30_70__fusion": {
+        "arm": "quota_30_70__fusion",
+        "Recall@20": 0.001125,
+        "Recall@100": 0.013442,
+        "hits@20": 3
+      },
+      "quota_30_70__cap3": {
+        "arm": "quota_30_70__cap3",
+        "Recall@20": 0.002083,
+        "Recall@100": 0.002083,
+        "hits@20": 7
+      },
+      "quota_30_70__cap5": {
+        "arm": "quota_30_70__cap5",
+        "Recall@20": 0.001458,
+        "Recall@100": 0.001458,
+        "hits@20": 5
+      },
+      "quota_30_70__cap10": {
+        "arm": "quota_30_70__cap10",
+        "Recall@20": 0.001333,
+        "Recall@100": 0.001333,
+        "hits@20": 4
+      },
+      "quota_30_70__capnone": {
+        "arm": "quota_30_70__capnone",
+        "Recall@20": 0.001125,
+        "Recall@100": 0.001125,
+        "hits@20": 3
+      }
+    }
+  },
+  "deltas": [
+    {
+      "seed": 42,
+      "rrf_minus_rr_hits": 2,
+      "rrf_minus_rr_recall20": 0.000291,
+      "cap5_minus_none_hits": -2
+    },
+    {
+      "seed": 43,
+      "rrf_minus_rr_hits": -1,
+      "rrf_minus_rr_recall20": -0.000309,
+      "cap5_minus_none_hits": -1
+    },
+    {
+      "seed": 44,
+      "rrf_minus_rr_hits": 0,
+      "rrf_minus_rr_recall20": 0.0,
+      "cap5_minus_none_hits": 0
+    }
+  ],
+  "summary": {
+    "rrf_beats_rr_seeds": 1,
+    "seeds": 3,
+    "mean_rrf_minus_rr_hits": 0.33,
+    "mean_cap5_minus_none_hits": -1.0
+  }
+}

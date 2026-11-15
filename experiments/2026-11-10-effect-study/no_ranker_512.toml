@@ -1,0 +1,38 @@
+# 只用于 512 用户内存校验的临时配置（正式产物用 configs/pipeline/kuasar_small_no_ranker.toml）。
+
+[run]
+dataset = "kuasar_small"
+data_dir = "data"
+artifacts_dir = "artifacts"
+output_name = "pipeline_no_ranker_512"
+split = "test"
+users = 512
+seed = 42
+k_recall = 100
+k_final = 20
+include_validation_in_test_history = true
+device = "cpu"
+
+[recall.two_tower]
+model = "two_tower"
+checkpoint = "artifacts/kuasar_small/two_tower_features.pt"
+k = 100
+weight = 1.0
+
+[recall.mind]
+model = "mind"
+checkpoint = "artifacts/kuasar_small/mind20.pt"
+k = 100
+weight = 1.0
+
+[fusion]
+mode = "round_robin"
+limit = 100
+
+[ranking]
+model = "none"
+
+[rerank]
+category_cap = 100
+author_cap = 0
+diversity = false

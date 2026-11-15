@@ -44,6 +44,7 @@ class SASRecTrainConfig:
     positive_threshold: float | None = None
     seed: int = 42
     device: str = "auto"
+    validation_users: int = 0
 
 
 def train_one_sasrec_epoch(
@@ -107,6 +108,11 @@ def train_sasrec(config: SASRecTrainConfig) -> tuple[SASRec, dict]:
         dataset=config.dataset,
         data_dir=config.data_dir,
         positive_threshold=positive_threshold,
+    )
+    from recsys.training.subsets import limit_validation_users
+
+    prepared_data = limit_validation_users(
+        prepared_data, config.validation_users, config.seed
     )
     dataset = SASRecTrainDataset(
         prepared_data.train_interactions,
@@ -239,6 +245,7 @@ def parse_args() -> SASRecTrainConfig:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--validation-users", type=int, default=0)
     return SASRecTrainConfig(**vars(parser.parse_args()))
 
 

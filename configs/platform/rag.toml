@@ -1,0 +1,89 @@
+# Phase 4 本地 RAG 配置
+#
+# 索引目录独立于推荐物品向量索引与搜索 FAISS 索引。
+# 只收录少量本地资料，不下载模型权重，不重建大索引。
+
+[rag]
+index_dir = "artifacts/rag/phase4"
+top_k = 3
+max_chunk_chars = 1400
+chunk_lines = 24
+overlap_lines = 4
+
+[[sources]]
+path = "README.md"
+kind = "project"
+
+[[sources]]
+path = "PROJECT_MASTER_v2.md"
+kind = "manual"
+
+[[sources]]
+path = "docs/architecture.md"
+kind = "project"
+
+[[sources]]
+path = "docs/rec-agent.md"
+kind = "project"
+
+[[sources]]
+path = "docs/search-agent.md"
+kind = "project"
+
+[[sources]]
+path = "docs/ads-agent.md"
+kind = "project"
+
+[[sources]]
+path = "docs/model-zoo.md"
+kind = "model_registry"
+
+[[sources]]
+path = "docs/models/two_tower.md"
+kind = "model"
+
+[[sources]]
+path = "docs/models/mind.md"
+kind = "model"
+
+[[sources]]
+path = "docs/models/faiss.md"
+kind = "model"
+
+[[sources]]
+path = "docs/models/deepfm.md"
+kind = "model"
+
+[[sources]]
+path = "third_party/SOURCES.toml"
+kind = "open_source"
+
+[[sources]]
+path = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/report.md"
+kind = "experiment"
+
+[[sources]]
+path = "experiments/2026-11-08-kuasar_small-history-first-agent/report.md"
+kind = "experiment"
+
+[[sources]]
+path = "experiments/2026-11-09-kuasar-search-agent/report.md"
+kind = "experiment"
+
+[[sources]]
+path = "experiments/2026-11-09-kuasar_small-ads-phase3/report.md"
+kind = "experiment"
+
+# 失败/回归记录也进知识库，便于查失败原因和修复历史。
+[[sources]]
+path = "experiments/2026-11-09-kuasar_small-offline-replay-llm-regression/report.md"
+kind = "experiment_failure"
+
+[[sources]]
+path = "experiments/2026-11-08-kuasar_small-experiment-memory/report.md"
+kind = "experiment"
+
+# Phase 4 新增的适配记录/技术决策放在这个目录，增量更新会自动收录。
+[[sources]]
+dir = "docs/phase4"
+kind = "project"

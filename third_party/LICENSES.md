@@ -18,6 +18,9 @@
 | generative-recommenders | Apache-2.0 | 根 `LICENSE` + `generative_recommenders/research/cppilot/LICENSE` | 子目录另有许可，需一并保留 |
 | OpenOneRec | **根 LICENSE 缺失**（README 声明 Apache-2.0） | `benchmarks/LICENSE`、`verl_distillation/LICENSE`、`verl_rl/LICENSE` | 许可以子目录文件为准；根仓库再分发前须向作者确认 |
 | recommenders | Apache-2.0 | `recommenders/LICENSE` | 保留声明 |
+| torch-rechub | MIT | `torch-rechub/LICENSE` | 保留版权及许可声明 |
+| skim-search-agent | Apache-2.0 | `skim-search-agent/LICENSE` | 保留许可证和上游声明 |
+| YieldAgent | MIT | `YieldAgent/LICENSE` | 保留许可证和版权声明 |
 
 ## 需要特别留意
 
@@ -37,3 +40,7 @@
 ## 本项目自身代码
 
 `src/` 下的代码来自本项目，与上表无关。对外发布前请另行补充项目级 LICENSE。
+
+## 自动研究参考快照
+
+`autoresearch/README.md` 声明 MIT；选取的上游快照没有独立 LICENSE 文件，来源与文件哈希见 `autoresearch/UPSTREAM.json`。使用时应保留来源声明并核对上游授权范围。

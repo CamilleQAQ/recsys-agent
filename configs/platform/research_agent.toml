@@ -1,0 +1,72 @@
+# Phase 4 Research Agent / Master Agent 配置
+#
+# Research Agent 是 Phase 4 的统一入口，同时承担总控调度；三个业务仍由
+# recsys.experiments.rec_agent / search_agent / recsys.ads.agent 执行。
+# 所有路径相对仓库根目录；预算由程序在每次请求/工具前检查。
+
+[paths]
+experiment_root = "experiments/2026-11-10-kuasar_small-platform-phase4"
+shared_store = "experiments/2026-11-10-kuasar_small-platform-phase4/shared"
+rag_index_dir = "artifacts/rag/phase4"
+
+[history]
+# 推荐历史继续读 Phase 11 JSON 与实验记忆索引；不复制、不改写旧记录。
+cache_dir = "artifacts/kuasar_small/mvp"
+history_root = "experiments/2026-11-08-kuasar_small-fusion-quota-agent"
+memory_dir = "experiments/2026-11-08-kuasar_small-experiment-memory/memory"
+
+# 一个研究任务的全局预算。总控和子 Agent 共用，子 Agent 只能更小。
+[budget]
+max_llm_requests = 8
+max_tool_calls = 8
+max_experiments = 3
+max_history_lookups = 3
+max_artifact_reads = 3
+max_seconds = 300.0
+
+# 最多决策步数（含历史查询与每次业务调用）。
+max_steps = 6
+
+[subagents.recommendation]
+max_llm_requests = 1
+max_tool_calls = 4
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 120.0
+
+[subagents.search]
+max_llm_requests = 1
+max_tool_calls = 3
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 90.0
+
+[subagents.ads]
+max_llm_requests = 1
+max_tool_calls = 6
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 120.0
+
+[intent.recommendation]
+users = 8
+split = "validation"
+recall_models = ["popularity"]
+ranker = "lightgbm_ranker"
+k_recall = 20
+k_final = 10
+
+[intent.search]
+mode = "bm25"
+top_k = 5
+session_id = "11208"
+
+[intent.ads]
+model = "din"
+split = "test"
+requests = 2
+limit = 200
+simulate_auction = true

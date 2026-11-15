@@ -1,0 +1,30 @@
+{
+  "split": "test",
+  "cutoff": 1598418194.602,
+  "cutoff_utc": "2020-08-26T05:03:14.602000+00:00",
+  "catalog_items": 3225,
+  "cold_catalog_items": 226,
+  "positive_count": 25083,
+  "cold_positive_count": 14678,
+  "positive_users": 1405,
+  "all_window_positive_count": 75494,
+  "excluded_new_arrival_positives": 50411,
+  "unknown_time_pairs_excluded_from_candidates": 175666,
+  "eligible_candidate_quantiles": [
+    23.0,
+    71.0,
+    228.0
+  ],
+  "ambiguous_first_labels_excluded": 0,
+  "cold_positive_fraction": 0.5851772116572977,
+  "warm_pool_quantiles": [
+    5.0,
+    36.0,
+    134.0
+  ],
+  "cold_pool_quantiles": [
+    12.0,
+    34.0,
+    149.0
+  ]
+}

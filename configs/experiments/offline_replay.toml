@@ -1,0 +1,168 @@
+# Phase 13 Offline Replay MVP：融合配额受控回放（2026-11-09）
+#
+# 只读已有汇总 JSON；不训练、不重新召回、不重新评测、不调用真实 LLM。
+# 配额统一按「双塔 / MIND」解释。
+
+schema_version = 1
+
+[replay]
+phase = "Phase 13 Offline Replay MVP"
+question = "在 kuasar_small 的 128 个验证用户上，给定同一份 50/50 起始历史与 2 次揭晓预算，Rec Agent 与固定策略各自会选择哪个融合配额？"
+dataset = "kuasar_small"
+split = "validation"
+split_strategy = "per_user_last_two_requests"
+split_evidence = "128 个固定用户 / 362 个验证目标；per_user_last_two_requests；所有来源的 split_sha256 完全一致"
+baseline_quota = "50/50"
+allowed_quotas = ["70/30", "30/70", "20/80", "80/20"]
+budget_reveals_per_side = 2
+candidate_pool_per_user = 100
+expected_users = 128
+expected_targets = 362
+expected_fills = 0
+fusion_rule_version = "fusion_quota_v1"
+metric_definition = "hits=(user,item) 命中对计数；recall_at_100=evaluate_recommendations(ks=(100,)) 的用户平均 Recall@100"
+
+[best_rule]
+primary = "recall_at_100"
+recall_decimals = 6
+tie_break_1 = "closer_to_50_50"
+tie_break_2 = "two_tower_quota_ascending"
+coverage = "descriptive_only"
+description = "先比较 Recall@100；并列时选更接近 50/50 的配额；仍并列时按双塔配额从小到大；覆盖率仅作描述"
+
+[fixed_policy]
+name = "fixed_symmetric_probe"
+order = ["70/30", "30/70"]
+description = "以 50/50 为中心的对称试探，顺序预先写入配置，不根据回放结果调整"
+stop_rule = "预设顺序执行完毕（预算同时耗尽）"
+
+[agent_policy]
+name = "local_feedback_v1"
+first_step = "在未揭晓候选中选与 50/50 的 L1 距离最小者；并列时双塔配额较小者优先"
+better_step = "若第一步 Recall@100 高于当前最佳，沿同一方向再探一档（30/70→20/80，70/30→80/20）"
+worse_step = "若第一步 Recall@100 低于当前最佳，转向跨 50/50 的镜像配额（30/70→70/30，70/30→30/70）"
+tie_step = "若第一步 Recall@100 与当前最佳持平，视为未显示方向性收益，立即停止"
+stop_rules = [
+  "预算用完",
+  "第一步 Recall@100 与当前最佳持平",
+  "同方向没有未揭晓候选",
+  "没有未揭晓候选",
+]
+feedback_inputs = "起始 50/50 历史 + 本侧已揭晓结果 + 剩余预算；第二步必须读取第一步的工具返回"
+prohibited_inputs = "完整结果表、来源报告、项目全局实验记忆、对方轨迹、已知最优配额、完整试验顺序"
+
+[scope]
+mode = "offline replay over existing summary JSON only"
+training = 0
+recall = 0
+real_evaluation = 0
+llm_requests = 0
+network_requests = 0
+dataset_files_read = 0
+candidate_detail_files_read = 0
+cache_files_read = 0
+memory_index_read = 0
+other_side_trace_read = 0
+old_evidence_modified = false
+
+[commands]
+main = "python -m recsys.experiments.offline_replay"
+self_check = "python -m recsys.experiments.offline_replay --self-check"
+llm_main = "python -m recsys.experiments.offline_replay_llm"
+llm_self_check = "python -m recsys.experiments.offline_replay_llm --self-check"
+
+# 真实 LLM 工作流：只跑一次，最多 3 次模型请求；不自动重试。
+[llm]
+max_model_requests = 3
+max_tool_calls = 2
+request_timeout_s = 30.0
+total_budget_s = 180.0
+tool_name = "get_fusion_result"
+temperature = 0.0
+parallel_tool_calls = false
+model_env = "DSH_AGENT_LLM_MODEL"
+base_url_env = "DSH_AGENT_LLM_BASE_URL"
+api_key_env = "DSH_AGENT_LLM_API_KEY"
+
+# 上一轮已验收的本地规则 Agent 与固定策略轨迹；本轮只引用、不重跑。
+[frozen_baselines]
+previous_run = "experiments/2026-11-09-kuasar_small-offline-replay/run-20261109T020944Z-20800"
+local_agent_trace = "experiments/2026-11-09-kuasar_small-offline-replay/run-20261109T020944Z-20800/agent_trace.json"
+fixed_trace = "experiments/2026-11-09-kuasar_small-offline-replay/run-20261109T020944Z-20800/fixed_trace.json"
+metrics = "experiments/2026-11-09-kuasar_small-offline-replay/run-20261109T020944Z-20800/metrics.json"
+sources = "experiments/2026-11-09-kuasar_small-offline-replay/run-20261109T020944Z-20800/sources.json"
+
+# ---------------------------------------------------------------------------
+# 结果来源清单：每个配额一个 canonical source；重复记录用于一致性核对。
+# 路径均相对项目根目录；pointer 是 JSON 内的点路径（空字符串表示根对象）。
+# ---------------------------------------------------------------------------
+
+[[sources]]
+quota = "50/50"
+label = "Phase 11 fusion-quota run 50/50"
+experiment = "Phase 11 Research Agent MVP"
+acceptance = "已验收：PROJECT_PROGRESS 2.23；128 用户 / 362 目标；0 训练 / 0 重新召回"
+status = "accepted"
+path = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/50_50.json"
+pointer = ""
+
+[[sources.duplicates]]
+label = "Phase 11 real-LLM baseline 50/50"
+path = "experiments/2026-11-08-kuasar_small-llm-tool-call/metrics.json"
+pointer = "baseline"
+
+[[sources.duplicates]]
+label = "Phase 12 experiment-memory run1 baseline 50/50"
+path = "experiments/2026-11-08-kuasar_small-experiment-memory/run1/metrics.json"
+pointer = "baseline"
+
+[[sources]]
+quota = "30/70"
+label = "Phase 11 fusion-quota run 30/70"
+experiment = "Phase 11 Research Agent MVP"
+acceptance = "已验收：PROJECT_PROGRESS 2.23；被 Phase 11.2 历史复用再次核对"
+status = "accepted"
+path = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/30_70.json"
+pointer = ""
+
+[[sources.duplicates]]
+label = "Phase 11.2 history-first 30/70 history result"
+path = "experiments/2026-11-08-kuasar_small-history-first-agent/metrics.json"
+pointer = "history.metrics"
+
+[[sources]]
+quota = "70/30"
+label = "Phase 11.2 LangGraph real-LLM chosen 70/30"
+experiment = "Phase 11 LangGraph tool call"
+acceptance = "已验收：PROJECT_PROGRESS 2.25；真实 tool_call 执行后落盘"
+status = "verified"
+path = "experiments/2026-11-08-kuasar_small-langgraph-tool-call/metrics.json"
+pointer = "chosen"
+
+[[sources.duplicates]]
+label = "Phase 11 real-LLM chosen 70/30"
+path = "experiments/2026-11-08-kuasar_small-llm-tool-call/metrics.json"
+pointer = "chosen"
+
+[[sources]]
+quota = "20/80"
+label = "Phase 11 fusion-quota run 20/80"
+experiment = "Phase 11 Research Agent MVP"
+acceptance = "已验收：PROJECT_PROGRESS 2.23"
+status = "accepted"
+path = "experiments/2026-11-08-kuasar_small-fusion-quota-agent/runs/20_80.json"
+pointer = ""
+
+[[sources]]
+quota = "80/20"
+label = "Phase 12 experiment-memory run1 evaluated 80/20"
+experiment = "Phase 12 Experiment Memory MVP"
+acceptance = "已验收：PROJECT_PROGRESS 2.27；run1 真实评测并发布，run2 复用"
+status = "verified"
+path = "experiments/2026-11-08-kuasar_small-experiment-memory/run1/metrics.json"
+pointer = "evaluation"
+
+[[sources.duplicates]]
+label = "Phase 12 experiment-memory run2 reused 80/20 history result"
+path = "experiments/2026-11-08-kuasar_small-experiment-memory/run2/metrics.json"
+pointer = "history.metrics"

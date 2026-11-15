@@ -18,20 +18,42 @@ from recsys.adapters.base import (
     RecommenderAdapter,
     evaluation_users,
 )
+from recsys.adapters.neural_ranking import (
+    DCNv2Adapter,
+    DIENAdapter,
+    DINAdapter,
+    UltraHSTUAdapter,
+)
 from recsys.adapters.ranking import LightGBMRankerAdapter
+from recsys.adapters.ranking_registry import (
+    RANKERS,
+    describe_rankers,
+    load_ranker,
+    ranker_ids,
+)
 from recsys.adapters.registry import (
+    ADAPTERS,
     adapter_ids,
     describe,
     load_adapter,
 )
 
 __all__ = [
+    "ADAPTERS",
     "AdapterError",
+    "DCNv2Adapter",
+    "DIENAdapter",
+    "DINAdapter",
     "LightGBMRankerAdapter",
+    "RANKERS",
     "RankingAdapter",
     "RecommenderAdapter",
+    "UltraHSTUAdapter",
     "adapter_ids",
     "describe",
+    "describe_rankers",
     "evaluation_users",
     "load_adapter",
+    "load_ranker",
+    "ranker_ids",
 ]

@@ -91,7 +91,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "recommend", help="加载 checkpoint，给指定用户出 Top-K（独立推理，不跑全量评测）"
     )
     recommend.add_argument("--model", choices=adapter_ids(), required=True)
-    recommend.add_argument("--checkpoint", type=Path, required=True)
+    recommend.add_argument("--checkpoint", type=Path, default=None)
     recommend.add_argument("--dataset", choices=SUPPORTED_DATASETS, default=DEFAULT_DATASET)
     recommend.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     recommend.add_argument("--positive-threshold", type=float, default=None)

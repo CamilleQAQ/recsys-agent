@@ -1,0 +1,130 @@
+{
+  "rows": [
+    {
+      "stage": "popularity",
+      "label": "Popularity（全局热度）",
+      "recall20": 0.005425,
+      "recall20_std": 0.0,
+      "ndcg20": 0.002423,
+      "recall100": 0.016325,
+      "hits20": 27,
+      "seeds": "确定性"
+    },
+    {
+      "stage": "itemcf",
+      "label": "ItemCF（共现余弦）",
+      "recall20": 0.00405,
+      "recall20_std": 0.0,
+      "ndcg20": 0.001695,
+      "recall100": 0.008483,
+      "hits20": 16,
+      "seeds": "确定性"
+    },
+    {
+      "stage": "two_tower",
+      "label": "Two-Tower（多 seed）",
+      "recall20": 0.003555,
+      "recall20_std": 0.002136,
+      "ndcg20": 0.002012,
+      "recall100": 0.010967,
+      "hits20": 14,
+      "seeds": "3"
+    },
+    {
+      "stage": "mind",
+      "label": "MIND（多 seed）",
+      "recall20": 0.003853,
+      "recall20_std": 0.000595,
+      "ndcg20": 0.002261,
+      "recall100": 0.017206,
+      "hits20": 16,
+      "seeds": "3"
+    },
+    {
+      "stage": "fusion",
+      "label": "轮流融合（两路 top-100）",
+      "recall20": 0.004967,
+      "recall20_std": 0.00138,
+      "ndcg20": 0.002698,
+      "recall100": 0.013919,
+      "hits20": 21,
+      "seeds": "3"
+    },
+    {
+      "stage": "ranked",
+      "label": "+ 排序器 R5",
+      "recall20": 0.006014,
+      "recall20_std": 0.000783,
+      "ndcg20": 0.00316,
+      "recall100": 0.013919,
+      "hits20": 27,
+      "seeds": "3"
+    },
+    {
+      "stage": "final",
+      "label": "+ 类目重排",
+      "recall20": 0.005406,
+      "recall20_std": 0.000877,
+      "ndcg20": 0.003009,
+      "recall100": 0.005406,
+      "hits20": 25,
+      "seeds": "3"
+    }
+  ],
+  "deltas": [
+    {
+      "from": "popularity",
+      "to": "fusion",
+      "delta": -0.00045833333333333343,
+      "ci_low": -0.0035722222222222223,
+      "ci_high": 0.002580555555555555,
+      "crosses_zero": true,
+      "resamples": 10000
+    },
+    {
+      "from": "itemcf",
+      "to": "fusion",
+      "delta": 0.0009166666666666665,
+      "ci_low": -0.00198625,
+      "ci_high": 0.003811111111111111,
+      "crosses_zero": true,
+      "resamples": 10000
+    },
+    {
+      "from": "two_tower",
+      "to": "fusion",
+      "delta": 0.001411111111111111,
+      "ci_low": 7.499999999999995e-05,
+      "ci_high": 0.0030083333333333338,
+      "crosses_zero": false,
+      "resamples": 10000
+    },
+    {
+      "from": "mind",
+      "to": "fusion",
+      "delta": 0.0011138888888888889,
+      "ci_low": 2.2222222222222227e-05,
+      "ci_high": 0.002283402777777777,
+      "crosses_zero": false,
+      "resamples": 10000
+    },
+    {
+      "from": "fusion",
+      "to": "ranked",
+      "delta": 0.001047222222222222,
+      "ci_low": -0.00038888888888888876,
+      "ci_high": 0.0024611111111111114,
+      "crosses_zero": true,
+      "resamples": 10000
+    },
+    {
+      "from": "ranked",
+      "to": "final",
+      "delta": -0.0006083333333333332,
+      "ci_low": -0.0012502083333333332,
+      "ci_high": -0.0001,
+      "crosses_zero": false,
+      "resamples": 10000
+    }
+  ]
+}

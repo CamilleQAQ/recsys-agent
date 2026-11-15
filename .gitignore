@@ -24,6 +24,7 @@ env/
 data/raw/
 data/processed/
 data/kuairec/
+data/kuairec_small/
 data/kuasar/
 data/kuasar_small/
 artifacts/*
@@ -47,3 +48,55 @@ Thumbs.db
 
 # 第三方仓库的本地改动记录（如需保留补丁，放到 patches/ 而不是直接改 third_party/）
 patches/*.rej
+
+# 本地复习、求职资料与编辑器知识库（只留本机）
+/docs/technical_kb/
+/docs/rec_agent_kb/
+/导学-*.md
+/面经-*.md
+/简历*.md
+/DEVELOPMENT_STORY.md
+/project_report.md
+/docs/*-prompt.md
+.obsidian/
+
+# 临时审计与实验目录
+/paired-audit-*/
+/experiments/tmp*/
+*.log
+*.err
+*.tmp
+*.bak
+
+# 实验保留脚本、配置、报告和目录首层指标；逐请求轨迹留本地
+/experiments/**/*
+!/experiments/**/
+!/experiments/**/*.py
+!/experiments/**/*.md
+!/experiments/**/*.toml
+!/experiments/*/*.json
+/experiments/**/logs/
+/experiments/**/tasks/
+/experiments/**/live/
+/experiments/**/shared/
+/experiments/**/memory/
+/experiments/**/run-*/
+
+# 数据快照、压缩包及本地证书不入库
+/experiments/**/*.npy
+/experiments/**/*.npz
+/experiments/**/*.parquet
+/experiments/**/*.pkl
+*.pem
+*.key
+/data/**/*.zip
+/data/**/*.gz
+
+# 放在实验白名单之后，避免重新纳入临时目录
+/experiments/tmp*/
+
+# checkpoint.txt 只保存路径与指纹
+!/experiments/**/checkpoint.txt
+# 原始逐用户研究快照（报告保留汇总数字）
+/experiments/**/validation_case.json
+/experiments/2026-11-13-kuairec-fair-study/result.json

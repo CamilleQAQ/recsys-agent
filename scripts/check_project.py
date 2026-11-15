@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tomllib
 from dataclasses import fields
@@ -58,10 +59,20 @@ def check_dataset_configs() -> list[str]:
     """数据集配置里的阈值/切分/去重必须与代码常量一致。"""
     from recsys.config import (
         KUAIREC_DEDUPLICATE_USER_ITEM_PAIRS,
+        KUAIREC_SMALL_MATRIX_ITEMS,
+        KUAIREC_SMALL_MATRIX_ROWS,
+        KUAIREC_SMALL_MATRIX_USERS,
+        KUAIREC_SMALL_POSITIVE_ITEMS,
         KUAIREC_WATCH_RATIO_THRESHOLD,
         SPLIT_STRATEGY,
     )
-    from recsys.data.kuairec import KUAIREC_ARCHIVE_MD5, KUAIREC_ARCHIVE_URL
+    from recsys.data.kuairec import (
+        KUAIREC_ARCHIVE_MD5,
+        KUAIREC_ARCHIVE_URL,
+        KUAIREC_SMALL_ARCHIVE_MEMBER,
+        KUAIREC_SMALL_MATRIX_CRC32,
+        KUAIREC_SMALL_MATRIX_FILENAME,
+    )
     from recsys.data.kuasar import (
         KUASAR_ARCHIVE_MD5,
         KUASAR_ARCHIVE_URL,
@@ -71,6 +82,9 @@ def check_dataset_configs() -> list[str]:
 
     errors: list[str] = []
     kuairec = load_toml(PROJECT_ROOT / "configs" / "datasets" / "kuairec.toml")
+    kuairec_small = load_toml(
+        PROJECT_ROOT / "configs" / "datasets" / "kuairec_small.toml"
+    )
     kuasar = load_toml(PROJECT_ROOT / "configs" / "datasets" / "kuasar.toml")
 
     pairs = [
@@ -79,6 +93,17 @@ def check_dataset_configs() -> list[str]:
         ("kuairec 下载地址", kuairec["dataset"]["source_url"], KUAIREC_ARCHIVE_URL),
         ("kuairec 压缩包 md5", kuairec["dataset"]["archive_md5"], KUAIREC_ARCHIVE_MD5),
         ("kuairec 切分协议", kuairec["split"]["strategy"], SPLIT_STRATEGY),
+        ("kuairec_small 正反馈阈值", kuairec_small["labels"]["positive_threshold"], KUAIREC_WATCH_RATIO_THRESHOLD),
+        ("kuairec_small 去重开关", kuairec_small["labels"]["deduplicate_user_item_pairs"], KUAIREC_DEDUPLICATE_USER_ITEM_PAIRS),
+        ("kuairec_small 下载地址", kuairec_small["dataset"]["source_url"], KUAIREC_ARCHIVE_URL),
+        ("kuairec_small 压缩包成员", kuairec_small["dataset"]["archive_member"], KUAIREC_SMALL_ARCHIVE_MEMBER),
+        ("kuairec_small 矩阵 CRC32", kuairec_small["dataset"]["matrix_crc32"], KUAIREC_SMALL_MATRIX_CRC32),
+        ("kuairec_small 矩阵文件名", kuairec_small["layout"]["matrix_candidates"][0], KUAIREC_SMALL_MATRIX_FILENAME),
+        ("kuairec_small 切分协议", kuairec_small["split"]["strategy"], SPLIT_STRATEGY),
+        ("kuairec_small 原始行数", kuairec_small["matrix"]["expected_rows"], KUAIREC_SMALL_MATRIX_ROWS),
+        ("kuairec_small 用户数", kuairec_small["matrix"]["expected_users"], KUAIREC_SMALL_MATRIX_USERS),
+        ("kuairec_small 物品数", kuairec_small["matrix"]["expected_items"], KUAIREC_SMALL_MATRIX_ITEMS),
+        ("kuairec_small 正样本物品数", kuairec_small["matrix"]["positive_items"], KUAIREC_SMALL_POSITIVE_ITEMS),
         ("kuasar 下载地址", kuasar["dataset"]["source_url"], KUASAR_ARCHIVE_URL),
         ("kuasar 压缩包 md5", kuasar["dataset"]["archive_md5"], KUASAR_ARCHIVE_MD5),
         ("kuasar small 下载地址", kuasar["dataset"]["small_source_url"], KUASAR_SMALL_ARCHIVE_URL),
@@ -87,6 +112,25 @@ def check_dataset_configs() -> list[str]:
     for label, config_value, code_value in pairs:
         if config_value != code_value:
             errors.append(f"{label}：配置 {config_value!r} ≠ 代码 {code_value!r}")
+    return errors
+
+
+def check_dataset_registry() -> list[str]:
+    """每个 ``configs/datasets/*.toml`` 登记的 name 都必须在 loader 里可用。
+
+    防的是「配置写了、代码没注册」这类漂移：有了这条，新增数据集若只改了一边，
+    检查立刻失败，而不是等到运行 `--dataset` 才报错。
+    """
+    from recsys.data.loader import SUPPORTED_DATASETS
+
+    errors: list[str] = []
+    for path in sorted((PROJECT_ROOT / "configs" / "datasets").glob("*.toml")):
+        name = load_toml(path).get("dataset", {}).get("name")
+        if name not in SUPPORTED_DATASETS:
+            errors.append(
+                f"{path.relative_to(PROJECT_ROOT)}: dataset.name={name!r} "
+                f"未在 recsys.data.loader.SUPPORTED_DATASETS 注册"
+            )
     return errors
 
 
@@ -121,7 +165,19 @@ def check_model_configs() -> list[str]:
 
 
 def discover_markdown() -> list[Path]:
-    paths = [path for path in PROJECT_ROOT.rglob("*.md") if "third_party" not in path.relative_to(PROJECT_ROOT).parts]
+    # 仅检查待分发的文档；本地复习知识库、数据与缓存不属于项目文档。
+    candidates = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=PROJECT_ROOT,
+    ).decode("utf-8").split("\0")
+    ignored = set(subprocess.check_output(
+        ["git", "ls-files", "--cached", "--ignored", "--exclude-standard", "-z"],
+        cwd=PROJECT_ROOT,
+    ).decode("utf-8").split("\0"))
+    paths = [PROJECT_ROOT / name for name in candidates
+             if name.endswith(".md") and name not in ignored
+             and "third_party" not in Path(name).parts
+             and (PROJECT_ROOT / name).is_file()]
     for relative in EXTRA_CHECKED_MARKDOWN:
         path = PROJECT_ROOT / relative
         if path.exists():
@@ -138,6 +194,8 @@ def check_markdown_links() -> list[str]:
             if target.startswith(SKIP_LINK_PREFIXES) or SKIP_LINK_CHARS & set(target):
                 continue
             target_path = unquote(target.split("#", maxsplit=1)[0])
+            # 代码链接常用 ``path.py:123``；行号不是文件系统路径的一部分。
+            target_path = re.sub(r":\d+(?:-\d+)?$", "", target_path)
             if not target_path:
                 continue
             resolved = (path.parent / target_path).resolve()
@@ -249,6 +307,7 @@ def main() -> int:
 
     errors += check_toml_parsing()
     errors += check_dataset_configs()
+    errors += check_dataset_registry()
     errors += check_model_configs()
     errors += check_markdown_links()
     errors += check_generated_docs()

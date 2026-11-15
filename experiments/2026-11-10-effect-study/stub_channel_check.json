@@ -1,0 +1,32 @@
+{
+  "users": 512,
+  "single_channel": {
+    "two_tower": {
+      "Recall@20": 0.000417,
+      "Recall@100": 0.001375,
+      "hits@20": 2
+    },
+    "mind": {
+      "Recall@20": 0.001017,
+      "Recall@100": 0.003717,
+      "hits@20": 4
+    },
+    "sasrec": {
+      "Recall@20": 0.0,
+      "Recall@100": 0.0,
+      "hits@20": 0
+    }
+  },
+  "fusion_two_real": {
+    "Recall@20": 0.000667,
+    "Recall@100": 0.002592,
+    "hits@20": 3
+  },
+  "fusion_with_sasrec": {
+    "Recall@20": 0.000167,
+    "Recall@100": 0.0022,
+    "hits@20": 1
+  },
+  "stub_overlap_with_real_candidates": 0.03,
+  "note": "sasrec.pt 的训练预算是 1 epoch / 2 batch，验证 Recall@20=0；它不是对手，是空转的通道，但融合按名次轮流取，它会稳定占掉约三分之一的候选名额。"
+}

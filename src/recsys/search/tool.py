@@ -1,18 +1,37 @@
-"""Search Agent 的 ``search_bm25`` 工具。
+"""Search Agent 的搜索工具：BM25、FAISS 向量、混合检索与精排。
 
-工具只做三件事：校验查询 token、调用 Search 1 的 ``BM25Index.search``、
-把结果裁剪成最多 5 条（item_id / score / 可读类目）。不加载原始 CSV，
-不重建索引，不保存候选明细。
+``SearchBM25Tool`` 是最早的窄封装，行为保持不变（兼容旧入口）；
+``SearchToolbox`` 注册四个工具并统一校验参数：
+
+- ``search_bm25``：关键词检索，直接调用 ``BM25Index.search``；
+- ``search_vector``：FAISS 向量召回（查询与文档同一套 token 编码）；
+- ``search_hybrid``：BM25 + 向量按 item_id 去重后 RRF 融合，保留来源/名次/分数；
+- ``search_rerank``：对融合候选池重新打分，返回最终 Top-K。
+
+工具只读已加载的索引，不加载原始 CSV、不重建索引、不写盘；候选明细只通过
+tool 消息回传模型，落盘策略由 Search Agent 统一控制。
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from recsys.search.bm25 import BM25Index, SearchHit
+from recsys.search.service import (
+    MODE_BM25,
+    MODE_HYBRID,
+    MODE_RERANK,
+    MODE_VECTOR,
+    SearchService,
+)
 
 TOOL_NAME = "search_bm25"
+TOOL_VECTOR = "search_vector"
+TOOL_HYBRID = "search_hybrid"
+TOOL_RERANK = "search_rerank"
+SEARCH_TOOL_NAMES: tuple[str, ...] = (TOOL_NAME, TOOL_VECTOR, TOOL_HYBRID)
+TOOL_NAMES: tuple[str, ...] = (*SEARCH_TOOL_NAMES, TOOL_RERANK)
 DEFAULT_TOP_K = 5
 MAX_TOP_K = 5
 MAX_QUERY_TOKENS = 64
@@ -160,3 +179,215 @@ class SearchBM25Tool:
                 for hit in hits
             ],
         }
+
+
+# ---------------------------------------------------------------------------
+# 四个搜索工具：schema 与统一调度
+# ---------------------------------------------------------------------------
+
+
+def _search_tool_schema(name: str, description: str) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query_tokens": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "minItems": 1,
+                        "maxItems": MAX_QUERY_TOKENS,
+                        "description": (
+                            "KuaiSAR 查询 token ID。第一次必须原样等于 original_query_tokens；"
+                            "第二次必须是原查询的非空真子集（至少去掉一个 token）。"
+                        ),
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_TOP_K,
+                        "default": DEFAULT_TOP_K,
+                        "description": "返回条数，最多 5。",
+                    },
+                },
+                "required": ["query_tokens"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+TOOL_VECTOR_SCHEMA: dict[str, Any] = _search_tool_schema(
+    TOOL_VECTOR,
+    "在 KuaiSAR 小样本的 FAISS 向量索引里做语义相似度召回（查询与视频描述使用同一套 "
+    "整数 token 编码）。返回最多 5 条 item_id、余弦分数与可读类目。",
+)
+TOOL_HYBRID_SCHEMA: dict[str, Any] = _search_tool_schema(
+    TOOL_HYBRID,
+    "混合检索：BM25 与向量召回各取候选，按物品 ID 去重后用 RRF 融合。"
+    "返回最多 5 条 item_id、融合分、可读类目，以及每条来自哪一路、该路名次和分数。",
+)
+TOOL_RERANK_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": TOOL_RERANK,
+        "description": (
+            "对混合检索候选池重新打分并返回最终 Top-K（按 token 覆盖率与融合先验加权）。"
+            "query_tokens 必须等于本次任务里已经检索过的某个查询。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query_tokens": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 1,
+                    "maxItems": MAX_QUERY_TOKENS,
+                    "description": "要精排的查询 token；必须与之前某次检索的 query_tokens 相同。",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_TOP_K,
+                    "default": DEFAULT_TOP_K,
+                    "description": "最终返回条数，最多 5。",
+                },
+            },
+            "required": ["query_tokens"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+    TOOL_NAME: TOOL_SCHEMA,
+    TOOL_VECTOR: TOOL_VECTOR_SCHEMA,
+    TOOL_HYBRID: TOOL_HYBRID_SCHEMA,
+    TOOL_RERANK: TOOL_RERANK_SCHEMA,
+}
+
+_MODE_BY_TOOL = {
+    TOOL_NAME: MODE_BM25,
+    TOOL_VECTOR: MODE_VECTOR,
+    TOOL_HYBRID: MODE_HYBRID,
+    TOOL_RERANK: MODE_RERANK,
+}
+
+_ALLOWED_ARGUMENTS = {"query_tokens", "top_k"}
+
+
+class SearchToolbox:
+    """把 ``SearchService`` 的四条入口包装成 Agent 可调用的工具集合。"""
+
+    def __init__(self, service: SearchService, *, max_results: int = MAX_TOP_K) -> None:
+        if not isinstance(service, SearchService):
+            raise TypeError("SearchToolbox 需要 SearchService")
+        self._service = service
+        self._max_results = min(max(1, int(max_results)), MAX_TOP_K)
+
+    @property
+    def service(self) -> SearchService:
+        return self._service
+
+    @property
+    def max_results(self) -> int:
+        return self._max_results
+
+    def names(self) -> tuple[str, ...]:
+        return TOOL_NAMES
+
+    def schemas(self) -> list[dict[str, Any]]:
+        return [TOOL_SCHEMAS[name] for name in TOOL_NAMES]
+
+    def schema(self, name: str) -> dict[str, Any]:
+        try:
+            return TOOL_SCHEMAS[name]
+        except KeyError:
+            raise ToolRejected("unknown_tool", f"未知工具：{name}") from None
+
+    @staticmethod
+    def is_search_tool(name: str) -> bool:
+        return name in SEARCH_TOOL_NAMES
+
+    @staticmethod
+    def is_rerank_tool(name: str) -> bool:
+        return name == TOOL_RERANK
+
+    def run(
+        self,
+        name: str,
+        arguments: Mapping[str, Any] | None,
+        *,
+        prior_queries: Sequence[Sequence[int]] = (),
+    ) -> dict[str, Any]:
+        """校验参数并执行一个工具；返回 JSON 友好结果。"""
+        if name not in TOOL_SCHEMAS:
+            raise ToolRejected("unknown_tool", f"未知工具：{name}")
+        arguments = dict(arguments or {})
+        extra = set(arguments) - _ALLOWED_ARGUMENTS
+        if extra:
+            raise ToolRejected("unexpected_arguments", f"工具参数包含未知字段：{sorted(extra)}")
+        tokens = normalize_tokens(arguments.get("query_tokens"))
+        requested_top_k = normalize_top_k(arguments.get("top_k"))
+        effective_top_k = min(requested_top_k, self._max_results)
+
+        if name == TOOL_RERANK:
+            prior = [list(query) for query in prior_queries]
+            if list(tokens) not in prior:
+                raise ToolRejected(
+                    "rerank_query_mismatch",
+                    "精排的 query_tokens 必须等于本次任务里已经检索过的某个查询",
+                )
+
+        hits = self._service.search(_MODE_BY_TOOL[name], tokens, effective_top_k)
+        payload: dict[str, Any] = {
+            "tool": name,
+            "query_tokens": list(tokens),
+            "requested_top_k": requested_top_k,
+            "top_k": effective_top_k,
+            "count": len(hits),
+            "results": [
+                _result_payload(hit.as_dict(with_sources=True)) for hit in hits
+            ],
+        }
+        if name == TOOL_HYBRID:
+            payload["retrievers"] = list(self._service.hybrid.describe()["retrievers"])
+            payload["fusion"] = {
+                "name": "rrf",
+                "rrf_k": self._service.hybrid.rrf_k,
+                "pool": self._service.hybrid.pool,
+            }
+        if name == TOOL_RERANK:
+            payload["rerank"] = {
+                "method": self._service.reranker.describe()["reranker"],
+                "pool": self._service.reranker.pool,
+            }
+        return payload
+
+
+def _result_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """裁剪单条候选：只保留模型需要的字段，分数保留 6 位。"""
+    out = {
+        "rank": int(payload["rank"]),
+        "item_id": int(payload["item_id"]),
+        "score": round(float(payload["score"]), 6),
+        "category": str(payload.get("category") or ""),
+        "sources": [
+            {
+                "source": str(source.get("source")),
+                "rank": int(source.get("rank", 0)),
+                "score": round(float(source.get("score", 0.0)), 6),
+            }
+            for source in payload.get("sources") or []
+        ],
+    }
+    details = payload.get("details") or {}
+    if details:
+        out["details"] = {
+            key: (round(float(value), 6) if isinstance(value, (int, float)) else value)
+            for key, value in details.items()
+        }
+    return out

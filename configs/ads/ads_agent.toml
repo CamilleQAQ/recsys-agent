@@ -1,0 +1,16 @@
+# Ads Agent 配置：工具/模型调用预算、默认任务参数。
+# 模型选择由 LLM（真实调用）或任务文本（离线计划器）决定，这里只给默认值与上限。
+
+[agent]
+max_tool_calls = 8
+# 真实 LLM 一轮会先做 3-4 次工具调用，再要一次请求收尾；4 次不够（见实验记录）。
+max_llm_requests = 6
+max_seconds = 180.0
+default_model = "din"
+default_split = "test"
+default_requests = 3
+top_k = 3
+min_candidates = 1
+# 竞价/预算演示优先选择多广告候选请求；kuasar_small 的 train 切分有 278 个这样的请求。
+auction_split = "train"
+auction_min_candidates = 2

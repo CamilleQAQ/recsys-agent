@@ -129,6 +129,11 @@ class BM25Index:
     def b(self) -> float:
         return self._b
 
+    @property
+    def idf(self) -> dict[int, float]:
+        """token → IDF 的只读副本（搜索侧精排做覆盖率加权时使用）。"""
+        return dict(self._idf)
+
     def __len__(self) -> int:
         return len(self._items)
 

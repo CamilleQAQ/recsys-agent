@@ -1,0 +1,9 @@
+{
+  "same_eval_candidate_items": 454717,
+  "parent_train_rows_in_same_catalog": 4232708,
+  "auxiliary_train_rows_from_other_users_in_same_catalog": 3484034,
+  "small_cold_targets": 1759,
+  "small_cold_targets_with_parent_train_click": 1089,
+  "small_cold_targets_with_other_user_parent_click_before_own_test_time": 875,
+  "note": "Coverage check only. No expanded-data model was trained. Earlier timestamp test is per target, not a single global train cutoff."
+}

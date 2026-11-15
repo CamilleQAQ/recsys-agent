@@ -1,0 +1,37 @@
+{
+  "dataset": "KuaiRec 2.0 small_matrix",
+  "matrix": "data\\kuairec_small\\raw\\small_matrix.csv",
+  "positive_rule": "first exposure watch_ratio >= threshold (inclusive)",
+  "seen_filter": "all first exposures strictly before target time, including non-positive plays",
+  "watch_ratio_threshold": 1.0,
+  "duplicate_handling": "first exposure per (user, video); later replays excluded",
+  "observed_scale": {
+    "raw_rows": 4676570,
+    "positive_users": 1411,
+    "positive_items": 3317
+  },
+  "expected_scale": {
+    "raw_rows": 4676570,
+    "positive_users": 1411,
+    "positive_items": 3317
+  },
+  "label_audit": {
+    "raw_rows": 4676570,
+    "rows_missing_timestamp_excluded": 181992,
+    "raw_rows_meeting_threshold": 1515050,
+    "unique_positive_pairs": 1471862,
+    "duplicate_events_on_positive_pairs": 0,
+    "mixed_signal_pairs": 0,
+    "negative_only_pairs": 3022716,
+    "latest_timestamp_has_below_threshold_event_pairs": 0,
+    "raw_rows_meeting_threshold_ratio": 0.3239660691489703,
+    "replays_per_positive_raw_row": 0.0
+  },
+  "split": {
+    "train": 1469040,
+    "validation": 1411,
+    "test": 1411,
+    "users": 1411,
+    "items": 3317
+  }
+}

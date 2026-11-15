@@ -1,0 +1,50 @@
+{
+  "selected": {
+    "no_memory": {
+      "algorithm": "E:\\PythonProject\\recsys-agent\\experiments\\2026-11-13-kuairec-fair-study\\no_memory\\selected_algorithm.py",
+      "sha256": "8772164a0acef124fe0cf829ef945d1f429a49a2c336b2c797a4912b89c7cbae",
+      "validation_metrics": {
+        "Recall@20": 0.20171302089177,
+        "NDCG@20": 0.3323795816837311,
+        "HitRate@20": 0.9886524822695035,
+        "Precision@20": 0.31744680851063833,
+        "Recall@100": 0.709119890944536,
+        "NDCG@100": 0.5315932075930832,
+        "HitRate@100": 1.0,
+        "Precision@100": 0.24404964539007093
+      },
+      "source_record_id": "1141b38627c24a858dd4472b1b78733b"
+    },
+    "memory": {
+      "algorithm": "E:\\PythonProject\\recsys-agent\\experiments\\2026-11-13-kuairec-fair-study\\memory\\selected_algorithm.py",
+      "sha256": "972505ffe7b2cc81d5d5afd40ff779200044063de2b8173f6c0624a9433cbbeb",
+      "validation_metrics": {
+        "Recall@20": 0.2029114296895524,
+        "NDCG@20": 0.3340520390214022,
+        "HitRate@20": 0.9900709219858156,
+        "Precision@20": 0.31968085106382976,
+        "Recall@100": 0.707518081291167,
+        "NDCG@100": 0.5311001470928841,
+        "HitRate@100": 1.0,
+        "Precision@100": 0.24353191489361703
+      },
+      "source_record_id": "89dc6cfdae3140c0846e21445bff5ac1"
+    },
+    "fixed": {
+      "algorithm": "E:\\PythonProject\\recsys-agent\\experiments\\2026-11-13-kuairec-fair-study\\fixed_algorithm.py",
+      "sha256": "77a59d45b148daad6bcf17d402d0df1044dba318b7a6d29b3ab149915774fe0c",
+      "validation_metrics": {
+        "Recall@20": 0.15615212097640127,
+        "NDCG@20": 0.2514213888638816,
+        "HitRate@20": 0.975177304964539,
+        "Precision@20": 0.24843971631205675,
+        "Recall@100": 0.7082468383375157,
+        "NDCG@100": 0.49548940524168805,
+        "HitRate@100": 0.999290780141844,
+        "Precision@100": 0.2424255319148936
+      }
+    }
+  },
+  "locked_at_utc": "2026-11-13T15:04:59.747959+00:00",
+  "test_outcomes_not_evaluated": true
+}

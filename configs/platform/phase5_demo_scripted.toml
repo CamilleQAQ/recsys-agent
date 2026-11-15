@@ -1,0 +1,106 @@
+# Phase 5 三业务协作演示配置（真实 LLM 规划器版）
+#
+# 与 phase5_demo.toml 的唯一差别是「决策由谁做」与预算：
+# - planner = "scripted"：总控 Research Agent 真实调用 deepseek 选择业务与工具；
+# - 放开 LLM 预算（原配置为 0，只会走离线脚本替身）；
+# - 输出单独落盘，不覆盖离线演示的既有证据。
+#
+# 用法（仓库根目录，PowerShell）：
+#   $env:PYTHONPATH = "src"
+#   python -m recsys.platform --phase5-demo --phase5-config configs/platform/phase5_demo_llm.toml
+#
+# 业务工具、工件、预期 sha256 与离线版完全一致：换的只是决策来源，
+# 因此两条路径的结果可以互相核对。
+
+# 总控最多 8 步：3 次业务分发 + 可能的读取/复核 + 1 次停止。
+max_steps = 8
+
+[paths]
+experiment_root = "experiments/2026-11-13-full-pipeline-agents-scripted"
+shared_store = "experiments/2026-11-13-full-pipeline-agents-scripted/shared"
+rag_index_dir = "artifacts/rag/phase4"
+
+[history]
+cache_dir = "artifacts/kuasar_small/mvp"
+history_root = "experiments/2026-11-08-kuasar_small-fusion-quota-agent"
+memory_dir = "experiments/2026-11-08-kuasar_small-experiment-memory/memory"
+
+[budget]
+# 总控自己的 LLM 轮次：规划 + 收尾各留余量。
+max_llm_requests = 6
+max_tool_calls = 20
+max_experiments = 3
+max_history_lookups = 2
+max_artifact_reads = 2
+max_seconds = 900.0
+
+[demo]
+task = "用已有权重依次跑推荐、搜索、广告三业务演示：8 用户双塔+MIND 召回与 LightGBM 排序、会话 11208 混合检索与精排、din 广告预测排序与竞价预算模拟"
+planner = "scripted"
+history_first = false
+manifest = "configs/platform/phase5_artifacts.toml"
+
+# ---------------------------------------------------------------- 子 Agent 预算
+# 子 Agent 仍走各自的确定性工具链，只保留极小 LLM 额度以便失败时解释。
+[subagents.recommendation]
+max_llm_requests = 1
+max_tool_calls = 5
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 1
+max_seconds = 240.0
+
+[subagents.search]
+max_llm_requests = 1
+max_tool_calls = 4
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 1
+max_seconds = 120.0
+
+[subagents.ads]
+max_llm_requests = 1
+max_tool_calls = 7
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 1
+max_seconds = 180.0
+
+# ---------------------------------------------------------------- 三业务意图
+[intent.recommendation]
+users = 8
+split = "validation"
+recall_models = ["two_tower", "mind"]
+ranker = "lightgbm_ranker"
+fusion = "round_robin"
+k_recall = 50
+k_final = 10
+category_cap = 5
+artifact_policy = "existing_only"
+ranker_checkpoint = "artifacts/kuasar_small/mvp/lgbm_ranker.txt"
+expected_ranker_sha256 = "a79d9d451d3833460f3160fe4d76c32f76a1aee49458aa8ab9d252510cf1ac60"
+
+[intent.search]
+mode = "rerank"
+top_k = 5
+session_id = "11208"
+planner = "scripted"
+require_existing_index = true
+search_config = "configs/experiments/search_agent.toml"
+
+[intent.ads]
+model = "din"
+split = "test"
+requests = 2
+limit = 200
+simulate_auction = true
+
+[restore]
+users = 2
+k_recall = 20
+k_final = 5
+search_session_id = "11208"
+search_top_k = 3
+ads_limit = 32
+rag_query = "实验记忆 指纹 复用 预算"
+rag_top_k = 2

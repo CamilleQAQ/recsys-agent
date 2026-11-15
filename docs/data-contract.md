@@ -128,7 +128,7 @@ PreparedData(train/validation/test_interactions, mappings,
 4. 阈值写进 `configs/datasets/<name>.toml` 与 `recsys.config` 常量，两边由 `scripts/check_project.py` 校验一致；
 5. 训练前必须固定阈值——**阈值变了，用户/物品词表就变了，历史 checkpoint 全部失效**。
 
-## 7. 两个数据集的读取入口
+## 7. 各数据集的读取入口
 
 ```python
 from recsys.data.loader import prepare_dataset
@@ -136,9 +136,16 @@ from recsys.data.loader import prepare_dataset
 # KuaiSAR：读 data/kuasar/processed/（先跑 python -m recsys.data.kuasar_store）
 data = prepare_dataset("kuasar", Path("data"))
 
-# KuaiRec：解析原始 CSV（流程模板）
+# KuaiRec big_matrix：解析原始 CSV（流程模板）
 data = prepare_dataset("kuairec", Path("data"))
+
+# KuaiRec small_matrix：同一读取器 + CRC32/规模校验（正式小样本线，1,411 × 3,317）
+data = prepare_dataset("kuairec_small", Path("data"))
 ```
+
+`kuairec_small` 与 `kuairec` 共用 `per_user_last_two_strict_timestamp_v2`
+（同一份 `SPLIT_STRATEGY`），因此两者的 checkpoint 在协议校验层面等价；
+但**物品词表与候选集规模不同，指标不能横向相加或直接比较**。
 
 指标下游一律走 `recsys.adapters.evaluate` 或 `recsys.evaluation.*`，
 `PreparedData` 的两种后端（list / 数组）对它们透明。

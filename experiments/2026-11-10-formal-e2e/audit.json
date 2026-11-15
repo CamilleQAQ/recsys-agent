@@ -1,0 +1,182 @@
+{
+  "recommendation_recount": {
+    "users": 2000,
+    "target_pairs": 4275,
+    "union_hits": 126,
+    "fusion_pool_hits": 69,
+    "fusion_top20_hits": 25,
+    "ranked_top20_hits": 11,
+    "final_top20_hits": 12,
+    "final_users_with_hits": 12,
+    "continuous_survivors": 4,
+    "final_hit_recovery_stage": {
+      "in_fusion_pool_not_top20": 8,
+      "survived": 4
+    }
+  },
+  "research_recommendation_rounds": [
+    {
+      "dir": "experiments\\2026-11-10-formal-e2e\\research\\tasks\\task-20261110T144123-6430f6\\business_recommendation\\pipeline\\platform_3-6430f6_s3",
+      "users": 64,
+      "target_pairs": 175,
+      "union_hits": 3,
+      "fusion_pool_hits": 2,
+      "fusion_top20_hits": 0,
+      "ranked_top20_hits": 0,
+      "final_top20_hits": 0,
+      "final_users_with_hits": 0,
+      "continuous_survivors": 0,
+      "final_hit_recovery_stage": {}
+    },
+    {
+      "dir": "experiments\\2026-11-10-formal-e2e\\research\\tasks\\task-20261110T144123-6430f6\\business_recommendation\\pipeline\\platform_3-6430f6_s5",
+      "users": 64,
+      "target_pairs": 175,
+      "union_hits": 14,
+      "fusion_pool_hits": 6,
+      "fusion_top20_hits": 1,
+      "ranked_top20_hits": 0,
+      "final_top20_hits": 0,
+      "final_users_with_hits": 0,
+      "continuous_survivors": 0,
+      "final_hit_recovery_stage": {}
+    }
+  ],
+  "ad_budget_reason_check": {
+    "total_only": {
+      "remaining_after_last_charge": 0.2568,
+      "reserve": 0.3,
+      "last_charged_request_position": 2126,
+      "later_requests_mislabeled": 3150
+    },
+    "with_advertiser_cap": {
+      "remaining_after_last_charge": 0.0025,
+      "reserve": 0.3,
+      "last_charged_request_position": 2177,
+      "later_requests_mislabeled": 3099
+    }
+  },
+  "memory_reuse": {
+    "record": "1c19084f013e4f4ca3200ed9f12a7ef8",
+    "new_experiments": 0
+  },
+  "budget_rejection": {
+    "status": "failed",
+    "new_experiments": 0
+  },
+  "search_index_sha256": {
+    "search\\index.json": "8ac0bd1e2a643eb96e0ff213756dff488fe42cf960f47d82c33ec401ac7a0143",
+    "search\\vector\\ann.faiss": "ef110de36dd31f426890a870e36225c8f84f2b82f4d5206b848cda844237ff98",
+    "search\\vector\\doc_ids.json": "73fa00ac8f6ab545c907367a37ef5ac5e0ff5f778b17882d3b5e0679fb48781b",
+    "search\\vector\\meta.json": "c32d7cb962ab717320fd4ceb52e6f1209aac903345007412c4e691f520fc4e38"
+  },
+  "research_order": [
+    {
+      "step": 1,
+      "tool": "search_experiment_history",
+      "args": {
+        "business": "recommendation",
+        "quota": [
+          30,
+          70
+        ],
+        "dataset": "kuasar_small"
+      },
+      "ok": true,
+      "status": "hit",
+      "record_id": null,
+      "elapsed_s": 0.21
+    },
+    {
+      "step": 2,
+      "tool": "retrieve_knowledge",
+      "args": {
+        "query": "KuaiSAR 双塔 MIND 融合配额 30/70 召回 候选深度 命中 recall@100 先验",
+        "top_k": 3
+      },
+      "ok": true,
+      "status": null,
+      "record_id": null,
+      "elapsed_s": 0.01
+    },
+    {
+      "step": 3,
+      "tool": "run_recommendation_experiment",
+      "args": {
+        "users": 64,
+        "split": "validation",
+        "recall_models": [
+          "two_tower",
+          "mind"
+        ],
+        "ranker": "lightgbm_ranker",
+        "k_recall": 100,
+        "k_final": 20
+      },
+      "ok": true,
+      "status": "success",
+      "record_id": "4cac4ffe70a148679aa349aa5dde3df3",
+      "elapsed_s": 6.49
+    },
+    {
+      "step": 4,
+      "tool": "read_experiment_result",
+      "args": {
+        "record_id": "4cac4ffe70a148679aa349aa5dde3df3",
+        "field": "result"
+      },
+      "ok": true,
+      "status": null,
+      "record_id": "4cac4ffe70a148679aa349aa5dde3df3",
+      "elapsed_s": 0.02
+    },
+    {
+      "step": 5,
+      "tool": "run_recommendation_experiment",
+      "args": {
+        "k_final": 20,
+        "k_recall": 200,
+        "ranker": "lightgbm_ranker",
+        "recall_models": [
+          "two_tower",
+          "mind",
+          "popularity"
+        ],
+        "split": "validation",
+        "users": 64
+      },
+      "ok": true,
+      "status": "success",
+      "record_id": "1c19084f013e4f4ca3200ed9f12a7ef8",
+      "elapsed_s": 6.22
+    },
+    {
+      "step": 6,
+      "tool": "run_search_task",
+      "args": {
+        "mode": "hybrid",
+        "session_id": "11208",
+        "top_k": 5,
+        "include_knowledge": false
+      },
+      "ok": true,
+      "status": "success",
+      "record_id": "093c345c1dd7416fb1837c85548b623f",
+      "elapsed_s": 0.08
+    },
+    {
+      "step": 7,
+      "tool": "run_ads_experiment",
+      "args": {
+        "model": "din",
+        "requests": 5,
+        "split": "validation",
+        "simulate_auction": true
+      },
+      "ok": true,
+      "status": "success",
+      "record_id": "4afa1c2f52f244e49d998828dfcb5124",
+      "elapsed_s": 3.6
+    }
+  ]
+}

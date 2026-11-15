@@ -1,0 +1,280 @@
+{
+  "data": {
+    "splits": {
+      "train": {
+        "candidates": 5483,
+        "requests": 5186,
+        "click_rate": 0.701076,
+        "groups_sum_ok": true,
+        "requests_with_2plus_ads": 278
+      },
+      "validation": {
+        "candidates": 51,
+        "requests": 49,
+        "click_rate": 0.686275,
+        "groups_sum_ok": true,
+        "requests_with_2plus_ads": 2
+      },
+      "test": {
+        "candidates": 43,
+        "requests": 41,
+        "click_rate": 0.837209,
+        "groups_sum_ok": true,
+        "requests_with_2plus_ads": 2
+      }
+    },
+    "label_audit": {
+      "click": "click",
+      "conversion_available": false,
+      "cvr_mode": "simulated"
+    },
+    "simulated": {
+      "rows": 304,
+      "conversions": 50,
+      "synthetic": true
+    },
+    "passed": true
+  },
+  "models": {
+    "models": {
+      "deepfm": {
+        "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\deepfm.pt",
+        "weight_kind": "interface_test",
+        "status": "interface_test",
+        "inference_rows": 8,
+        "ctr_range_ok": true,
+        "ctr_mean": 0.209036,
+        "tasks": [
+          "ctr"
+        ],
+        "is_trained": false,
+        "ok": true
+      },
+      "din": {
+        "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\din.pt",
+        "weight_kind": "interface_test",
+        "status": "interface_test",
+        "inference_rows": 8,
+        "ctr_range_ok": true,
+        "ctr_mean": 0.394827,
+        "tasks": [
+          "ctr"
+        ],
+        "is_trained": false,
+        "ok": true
+      },
+      "dien": {
+        "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\dien.pt",
+        "weight_kind": "interface_test",
+        "status": "interface_test",
+        "inference_rows": 8,
+        "ctr_range_ok": true,
+        "ctr_mean": 0.509628,
+        "tasks": [
+          "ctr"
+        ],
+        "is_trained": false,
+        "ok": true
+      },
+      "dcnv2": {
+        "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\dcnv2.pt",
+        "weight_kind": "interface_test",
+        "status": "interface_test",
+        "inference_rows": 8,
+        "ctr_range_ok": true,
+        "ctr_mean": 0.960563,
+        "tasks": [
+          "ctr"
+        ],
+        "is_trained": false,
+        "ok": true
+      },
+      "mmoe": {
+        "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\mmoe.pt",
+        "weight_kind": "interface_test",
+        "status": "interface_test",
+        "inference_rows": 8,
+        "ctr_range_ok": true,
+        "ctr_mean": 0.411926,
+        "tasks": [
+          "ctr",
+          "cvr"
+        ],
+        "is_trained": false,
+        "ok": true
+      },
+      "ple": {
+        "checkpoint": "artifacts\\kuasar_small\\ads\\interface_weights\\ple.pt",
+        "weight_kind": "interface_test",
+        "status": "interface_test",
+        "inference_rows": 8,
+        "ctr_range_ok": true,
+        "ctr_mean": 0.573441,
+        "tasks": [
+          "ctr",
+          "cvr"
+        ],
+        "is_trained": false,
+        "ok": true
+      }
+    },
+    "passed": true
+  },
+  "ranking": {
+    "split": "train",
+    "requests": [
+      {
+        "request_index": 355,
+        "candidate_count": 3,
+        "ranking": [
+          {
+            "rank": 1,
+            "item": 16414,
+            "ctr": 0.375297
+          },
+          {
+            "rank": 2,
+            "item": 171598,
+            "ctr": 0.372979
+          },
+          {
+            "rank": 3,
+            "item": 193693,
+            "ctr": 0.363774
+          }
+        ],
+        "order_ok": true
+      },
+      {
+        "request_index": 356,
+        "candidate_count": 3,
+        "ranking": [
+          {
+            "rank": 1,
+            "item": 105649,
+            "ctr": 0.354686
+          },
+          {
+            "rank": 2,
+            "item": 176626,
+            "ctr": 0.35285
+          },
+          {
+            "rank": 3,
+            "item": 86176,
+            "ctr": 0.237026
+          }
+        ],
+        "order_ok": true
+      },
+      {
+        "request_index": 362,
+        "candidate_count": 3,
+        "ranking": [
+          {
+            "rank": 1,
+            "item": 119509,
+            "ctr": 0.386826
+          },
+          {
+            "rank": 2,
+            "item": 29367,
+            "ctr": 0.378619
+          },
+          {
+            "rank": 3,
+            "item": 11940,
+            "ctr": 0.345175
+          }
+        ],
+        "order_ok": true
+      }
+    ],
+    "passed": true
+  },
+  "auction": {
+    "normal": {
+      "requests": 3,
+      "winners": 3,
+      "clicks": 2,
+      "spend": 2.1672,
+      "mean_charge": 0.7224,
+      "ctr": 0.666667,
+      "mean_clearing_cpc": 1.097,
+      "no_winner_requests": 0,
+      "no_winner_reasons": [],
+      "partial_charges": 0,
+      "budget": {
+        "currency": "CNY",
+        "total": 20.0,
+        "spent": 2.1672,
+        "remaining": 17.8328,
+        "per_advertiser_budget": 8.0,
+        "served": 3,
+        "clicks": 2,
+        "advertiser_spent_top": {
+          "22253": 1.0943,
+          "11827": 1.0729
+        },
+        "budget_exhausted_requests": 0
+      },
+      "pricing_rule": "second_price_gsp",
+      "billing_unit": "CPC",
+      "charge_timing": "click"
+    },
+    "zero_budget": {
+      "requests": 3,
+      "winners": 0,
+      "clicks": 0,
+      "spend": 0.0,
+      "mean_charge": 0.0,
+      "ctr": 0.0,
+      "mean_clearing_cpc": 0.0,
+      "no_winner_requests": 3,
+      "no_winner_reasons": [
+        "budget_exhausted_total",
+        "budget_exhausted_total",
+        "budget_exhausted_total"
+      ],
+      "partial_charges": 0,
+      "budget": {
+        "currency": "CNY",
+        "total": 0.0,
+        "spent": 0.0,
+        "remaining": 0.0,
+        "per_advertiser_budget": 0.0,
+        "served": 0,
+        "clicks": 0,
+        "advertiser_spent_top": {},
+        "budget_exhausted_requests": 3
+      },
+      "pricing_rule": "second_price_gsp",
+      "billing_unit": "CPC",
+      "charge_timing": "click"
+    },
+    "checks": {
+      "normal_has_winner": true,
+      "normal_spend_positive": true,
+      "remaining_consistent": true,
+      "zero_budget_no_winner": true,
+      "zero_budget_no_spend": true,
+      "zero_budget_reason": true,
+      "billing_unit_cpc": true,
+      "charge_timing_click": true
+    },
+    "passed": true
+  },
+  "agent_self_check": {
+    "passed": 14,
+    "total": 14,
+    "ok": true
+  },
+  "checks": {
+    "data": true,
+    "models": true,
+    "ranking": true,
+    "auction": true,
+    "agent_self_check": true
+  },
+  "passed": true
+}

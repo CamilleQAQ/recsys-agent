@@ -1,0 +1,49 @@
+# 多路召回示例：Two-Tower + MIND + LightGCN，RRF 融合，DIN 精排，类目+作者多样性重排。
+# 需要先训练 artifacts/kuasar_small/lightgcn.pt 与 artifacts/kuasar_small/din.pt。
+# 未训练时 `python -m recsys.experiments.rec_agent --train ...` 或对应训练入口可生成。
+
+[run]
+dataset = "kuasar_small"
+data_dir = "data"
+artifacts_dir = "artifacts"
+output_name = "pipeline_multi_recall"
+split = "validation"
+users = 128
+seed = 42
+k_recall = 100
+k_final = 20
+include_validation_in_test_history = true
+device = "cpu"
+
+[recall.two_tower]
+model = "two_tower"
+checkpoint = "artifacts/kuasar_small/two_tower_features.pt"
+k = 100
+weight = 1.0
+
+[recall.mind]
+model = "mind"
+checkpoint = "artifacts/kuasar_small/mind20.pt"
+k = 100
+weight = 1.0
+
+[recall.lightgcn]
+model = "lightgcn"
+checkpoint = "artifacts/kuasar_small/lightgcn.pt"
+k = 100
+weight = 1.0
+
+[fusion]
+mode = "rrf"
+limit = 100
+rrf_k = 60
+
+[ranking]
+model = "din"
+checkpoint = "artifacts/kuasar_small/din.pt"
+train_if_missing = false
+
+[rerank]
+category_cap = 5
+author_cap = 3
+diversity = true

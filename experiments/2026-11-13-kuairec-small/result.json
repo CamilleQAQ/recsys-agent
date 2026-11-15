@@ -1,0 +1,160 @@
+{
+  "protocol": {
+    "dataset": "KuaiRec 2.0 official small_matrix",
+    "raw_rows": 4676570,
+    "users": 1411,
+    "items": 3327,
+    "unique_first_exposures": 4494578,
+    "ambiguous_first_labels_excluded": 0,
+    "missing_timestamp_rows": 181992,
+    "unknown_time_pairs_excluded": 181992,
+    "positive_rule": "first playback watch_ratio >= 1.0, frozen before modeling",
+    "split": "Per-user distinct first-exposure timestamps: earliest 80% train, next 10% validation, last 10% test; equal timestamps kept together; boundary times from exposure times, without reading labels.",
+    "seen_filter": "All first playbacks strictly before each evaluation cutoff, including negatives. Validation observations used only as known history/mask in test, not for optimizer updates.",
+    "rationale": "Block holdout avoids an almost fully exposed user's last single positive creating only a handful of available candidates.",
+    "split_counts": {
+      "train": 1177823,
+      "validation": 140775,
+      "test": 153264
+    },
+    "eval_users": 1410,
+    "cold_test_targets": 120308,
+    "train_items": 2999,
+    "train_item_frequency_quantiles": [
+      1.0,
+      318.0,
+      893.0,
+      1243.0
+    ],
+    "test_unseen_candidate_quantiles": [
+      356.0,
+      463.0,
+      597.0
+    ],
+    "two_tower": {
+      "embedding_dim": 32,
+      "output_dim": 32,
+      "tower_type": "embedding",
+      "temperature": 0.1,
+      "lr": 0.01,
+      "batch_size": 1024,
+      "epochs": 5,
+      "seed": 42,
+      "selection": "best validation NDCG@20",
+      "mask_train_positive_false_negatives": true
+    },
+    "training_history": "Only this dataset; new initialization and independent mappings."
+  },
+  "metrics": {
+    "popularity": {
+      "Recall@20": 0.027469407067094567,
+      "Recall@100": 0.12596692928897837,
+      "NDCG@20": 0.12582543836435958,
+      "hits@20": 3934,
+      "hits@100": 19210
+    },
+    "itemcf": {
+      "Recall@20": 0.023864812627450223,
+      "Recall@100": 0.12088359855885766,
+      "NDCG@20": 0.11008990719952712,
+      "hits@20": 3422,
+      "hits@100": 18425
+    },
+    "two_tower": {
+      "Recall@20": 0.06128033062260998,
+      "Recall@100": 0.27015875873602835,
+      "NDCG@20": 0.3307430296055533,
+      "hits@20": 9233,
+      "hits@100": 40762
+    }
+  },
+  "training_history": [
+    {
+      "epoch": 1,
+      "loss": 6.957641301208946,
+      "val_NDCG@20": 0.06471165803313075
+    },
+    {
+      "epoch": 2,
+      "loss": 5.956125172400454,
+      "val_NDCG@20": 0.05137282474705198
+    },
+    {
+      "epoch": 3,
+      "loss": 5.826911826013586,
+      "val_NDCG@20": 0.04807122175204877
+    },
+    {
+      "epoch": 4,
+      "loss": 5.7575986093277525,
+      "val_NDCG@20": 0.04607901779821374
+    },
+    {
+      "epoch": 5,
+      "loss": 5.711622029775956,
+      "val_NDCG@20": 0.0447474570929096
+    }
+  ],
+  "best_epoch": 1,
+  "wall_s": 65.559,
+  "cold_warm_metrics": {
+    "popularity": {
+      "warm": {
+        "users": 1409,
+        "targets": 32956,
+        "Recall@20": 0.14630076633476619,
+        "Recall@100": 0.6141146506401542,
+        "NDCG@20": 0.14378733999479718
+      },
+      "cold": {
+        "users": 1410,
+        "targets": 120308,
+        "Recall@20": 0.0,
+        "Recall@100": 0.00037840463970225465,
+        "NDCG@20": 0.0
+      }
+    },
+    "itemcf": {
+      "warm": {
+        "users": 1409,
+        "targets": 32956,
+        "Recall@20": 0.12767822367527004,
+        "Recall@100": 0.5928067581760105,
+        "NDCG@20": 0.12584970286923636
+      },
+      "cold": {
+        "users": 1410,
+        "targets": 120308,
+        "Recall@20": 0.0,
+        "Recall@100": 0.0,
+        "NDCG@20": 0.0
+      }
+    },
+    "two_tower": {
+      "warm": {
+        "users": 1409,
+        "targets": 32956,
+        "Recall@20": 0.010291682011310059,
+        "Recall@100": 0.1434448045426976,
+        "NDCG@20": 0.010027974464452184
+      },
+      "cold": {
+        "users": 1410,
+        "targets": 120308,
+        "Recall@20": 0.07524122589965684,
+        "Recall@100": 0.3042929180087638,
+        "NDCG@20": 0.3218242416496891
+      }
+    }
+  },
+  "download": {
+    "source": "https://zenodo.org/records/18164998/files/KuaiRec.zip",
+    "archive_bytes": 431964858,
+    "member": "KuaiRec 2.0/data/small_matrix.csv",
+    "member_crc32": 77673810,
+    "csv_bytes": 406155844,
+    "compressed_download_bytes": 119146250,
+    "elapsed_s": 88.87,
+    "method": "HTTP range extraction; member CRC32 verified"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "metric": "Top-20 集合的 Jaccard（每个用户先算，再对 2,000 用户平均）",
+  "vs_popularity": [
+    {
+      "seed": 42,
+      "ranked_vs_popularity_jaccard20": 0.0008,
+      "fusion_vs_popularity_jaccard20": 0.0002
+    },
+    {
+      "seed": 43,
+      "ranked_vs_popularity_jaccard20": 0.001,
+      "fusion_vs_popularity_jaccard20": 0.0002
+    },
+    {
+      "seed": 44,
+      "ranked_vs_popularity_jaccard20": 0.0008,
+      "fusion_vs_popularity_jaccard20": 0.0001
+    }
+  ],
+  "cross_seed": [
+    {
+      "pair": "42-43",
+      "ranked_jaccard20": 0.0441,
+      "fusion_jaccard20": 0.0223
+    },
+    {
+      "pair": "42-44",
+      "ranked_jaccard20": 0.0245,
+      "fusion_jaccard20": 0.0074
+    },
+    {
+      "pair": "43-44",
+      "ranked_jaccard20": 0.0263,
+      "fusion_jaccard20": 0.0079
+    }
+  ],
+  "reading": "ranked 与热度榜的重合度、以及 ranked 跨种子的重合度，如果都明显高于 fusion，说明排序器主要在输出一个与候选无关的先验，这正是它方差小的原因。"
+}

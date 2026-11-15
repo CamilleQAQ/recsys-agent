@@ -1,0 +1,23 @@
+# 独立测试集召回融合验证（只读 checkpoints，不训练、不排序、不重排）。
+# 运行前冻结；正式命令只执行一次。
+
+[experiment]
+dataset = "kuasar_small"
+split = "test"
+seed = 42
+max_users = 128
+k_recall = 100
+threads = 4
+max_wall_seconds = 300
+
+[quotas]
+labels = ["50/50", "30/70"]
+values = [[50, 50], [30, 70]]
+
+[checkpoints]
+two_tower = "artifacts/kuasar_small/two_tower_features.pt"
+mind = "artifacts/kuasar_small/mind20.pt"
+routing_seed = 1234
+
+[output]
+root = "experiments/2026-11-09-kuasar_small-test-fusion"

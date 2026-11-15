@@ -183,3 +183,39 @@ coverage = "召回/排序 30+ 模型，我们用其中的 MIND（多兴趣）；
 usability = "纯 PyTorch，Windows + Python 3.14 已跑通；运行时用 pip 包 torch-rechub==1.0.0，这里保留同版本源码作审计"
 local_changes = ["sparse-checkout：只保留 torch_rechub/ 源码与根目录许可证/说明，删除 .git"]
 added = "2026-11-07"
+
+[[repos]]
+name = "skim-search-agent"
+url = "https://github.com/ielab/skim-search-agent"
+branch = "main"
+commit = "4794575e5de52251e97b3dd6bb1482f3b142a960"
+license = "Apache-2.0"
+license_file = "LICENSE"
+coverage = "搜索向量编码、FAISS 索引、混合检索、精排与 Agent 工具"
+usability = "Phase 2 已集成：复用 vector_index（保存/加载/元数据）、RRF 融合、Reranker 契约与 RerankedEngine；预训练编码/精排权重未启用"
+local_changes = ["从固定提交的 GitHub ZIP 选取 agent_search/、根入口与依赖声明、许可证、接入文档、Python 示例和小样本配置；保留上游文件内容"]
+added = "2026-11-09"
+
+[[repos]]
+name = "YieldAgent"
+url = "https://github.com/TensorOpsAI/YieldAgent"
+branch = "main"
+commit = "e79fda03242a6f9627950c7011ad785513e8427f"
+license = "MIT"
+license_file = "LICENSE"
+coverage = "广告 Agent 的 LangGraph 工具调用、平台适配接口、调用事件和投放草稿"
+usability = "Phase 3 源码参考；原投放流程依赖 LinkedIn，尚未接入本地 KuaiSAR"
+local_changes = ["浅克隆后将 .git 移出源码目录；保留上游工作树"]
+added = "2026-11-09"
+
+[[repos]]
+name = "autoresearch"
+url = "https://github.com/karpathy/autoresearch"
+branch = "main"
+commit = "228791fb499afffb54b46200aca536f79142f117"
+license = "MIT（上游 README 声明，快照无独立 LICENSE）"
+license_file = ""
+coverage = "预算内自动实验循环与研究指令参考"
+usability = "只作为研究流程参考；本地平台不运行上游 GPU 训练脚本"
+local_changes = ["选取 README、program、prepare、train、pyproject 原始文件，新增 UPSTREAM.json 记录来源与 SHA256"]
+added = "2026-11-13"

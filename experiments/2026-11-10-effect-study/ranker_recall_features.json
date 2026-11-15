@@ -1,0 +1,152 @@
+{
+  "protocol": {
+    "dataset": "kuasar_small",
+    "split": "test (2000 users / 4275 targets)",
+    "candidate_pool": "E:\\PythonProject\\recsys-agent\\experiments\\2026-11-10-formal-e2e\\recommendation\\fusion.json",
+    "features": {
+      "two_tower_score": "dot(user_emb, item_emb)，用户塔只用 ID，与时间无关",
+      "mind_score": "max over K interests of dot(interest, item_emb)，历史严格早于请求"
+    },
+    "leakage_note": "排序训练行来自父表 train 请求；召回分数用该请求时间戳之前的历史，与推理侧同一构造；两个召回模型本身是用 train 切分训练的。"
+  },
+  "arms": {
+    "R0": {
+      "arm": "R0_fusion_order",
+      "metrics": {
+        "Recall@20": 0.005967,
+        "NDCG@20": 0.003457,
+        "HitRate@20": 0.0125,
+        "Precision@20": 0.000625,
+        "Recall@100": 0.015325,
+        "NDCG@100": 0.005489,
+        "HitRate@100": 0.033,
+        "Precision@100": 0.000345
+      },
+      "hit_targets_at20": 25
+    },
+    "R5": {
+      "arm": "R5_retrained",
+      "metrics": {
+        "Recall@20": 0.00515,
+        "NDCG@20": 0.002576,
+        "HitRate@20": 0.0115,
+        "Precision@20": 0.0006,
+        "Recall@100": 0.015325,
+        "NDCG@100": 0.004849,
+        "HitRate@100": 0.033,
+        "Precision@100": 0.000345
+      },
+      "hit_targets_at20": 24,
+      "importance": {
+        "author_freq": 3418,
+        "author_pop_before": 7328,
+        "caption_tokens": 3150,
+        "category_first_code": 3407,
+        "category_second_code": 1655,
+        "is_ad": 48,
+        "item_pop_before": 65197,
+        "item_type_code": 11,
+        "mind_score": 1162427,
+        "two_tower_score": 395695,
+        "upload_days": 5439,
+        "upload_type_code": 2019,
+        "upload_valid": 0,
+        "user_activity_before": 9690,
+        "user_author_before": 1217,
+        "user_category_before": 4141
+      },
+      "best_iteration": 105
+    },
+    "R5_rerank": {
+      "arm": "R5_retrained+rerank",
+      "metrics": {
+        "Recall@20": 0.00445,
+        "NDCG@20": 0.002384,
+        "HitRate@20": 0.01,
+        "Precision@20": 0.000525,
+        "Recall@100": 0.00445,
+        "NDCG@100": 0.002384,
+        "HitRate@100": 0.01,
+        "Precision@100": 0.000105
+      },
+      "hit_targets_at20": 21
+    },
+    "R5b": {
+      "arm": "R5b_retrained",
+      "metrics": {
+        "Recall@20": 0.004717,
+        "NDCG@20": 0.002313,
+        "HitRate@20": 0.01,
+        "Precision@20": 0.000525,
+        "Recall@100": 0.015325,
+        "NDCG@100": 0.004673,
+        "HitRate@100": 0.033,
+        "Precision@100": 0.000345
+      },
+      "hit_targets_at20": 21,
+      "importance": {
+        "author_freq": 4221,
+        "caption_tokens": 5095,
+        "category_first_code": 7084,
+        "category_second_code": 3207,
+        "is_ad": 102,
+        "item_type_code": 104,
+        "mind_score": 1110937,
+        "two_tower_score": 503665,
+        "upload_days": 8901,
+        "upload_type_code": 4271,
+        "upload_valid": 0
+      },
+      "best_iteration": 100
+    },
+    "R5b_rerank": {
+      "arm": "R5b_retrained+rerank",
+      "metrics": {
+        "Recall@20": 0.004617,
+        "NDCG@20": 0.002273,
+        "HitRate@20": 0.0095,
+        "Precision@20": 0.0005,
+        "Recall@100": 0.004617,
+        "NDCG@100": 0.002273,
+        "HitRate@100": 0.0095,
+        "Precision@100": 0.0001
+      },
+      "hit_targets_at20": 20
+    }
+  },
+  "comparisons_vs_R0": {
+    "R5": {
+      "Recall@20": {
+        "delta": -0.0008166666666666666,
+        "ci_low": -0.0031083333333333336,
+        "ci_high": 0.0014249999999999998,
+        "crosses_zero": true,
+        "resamples": 10000
+      },
+      "NDCG@20": {
+        "delta": -0.0008806522206684681,
+        "ci_low": -0.002550556903995313,
+        "ci_high": 0.0006002900447152894,
+        "crosses_zero": true,
+        "resamples": 10000
+      }
+    },
+    "R5b": {
+      "Recall@20": {
+        "delta": -0.00125,
+        "ci_low": -0.003125208333333333,
+        "ci_high": 0.0004835416666666636,
+        "crosses_zero": true,
+        "resamples": 10000
+      },
+      "NDCG@20": {
+        "delta": -0.0011434319911389208,
+        "ci_low": -0.0027570687326998185,
+        "ci_high": 0.00023969977444003376,
+        "crosses_zero": true,
+        "resamples": 10000
+      }
+    }
+  },
+  "elapsed_s": 30.0
+}

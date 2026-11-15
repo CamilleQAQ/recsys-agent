@@ -1,0 +1,55 @@
+# Phase 13 小规模多场景离线对照（2026-11-09）
+#
+# 只读现有 kuasar_small 融合汇总 JSON；不重训、不重新召回、不重跑评测。
+# 配额统一按「双塔 / MIND」解释。两个场景的本地基线先冻结，再各跑一次真实 LLM。
+
+schema_version = 1
+
+[run]
+phase = "Phase 13 Multi-Scenario Offline Replay"
+base_config = "configs/experiments/offline_replay.toml"
+description = "场景 A 一次揭晓、场景 B 两次揭晓带 70/30 历史；真实 LLM 每场景最多启动一次。"
+
+[scenarios.A]
+label = "一次揭晓"
+starting_quotas = ["50/50"]
+allowed_quotas = ["70/30", "30/70", "80/20", "20/80"]
+budget = 1
+max_model_requests = 2
+observation = "只够试一组时，谁的首选更好"
+
+[scenarios.B]
+label = "两次揭晓，带历史"
+starting_quotas = ["50/50", "70/30"]
+allowed_quotas = ["30/70", "80/20", "20/80"]
+budget = 2
+max_model_requests = 3
+observation = "能否利用已有 70/30 结果避开重复查询，并用更少揭晓达到相同结果"
+
+[fixed_policy]
+name = "fixed_symmetric_probe"
+order = ["70/30", "30/70", "80/20", "20/80"]
+description = "预设顺序，执行时跳过起始历史；场景 A 只揭晓 70/30，场景 B 揭晓 30/70、80/20"
+
+[local_policy]
+name = "local_feedback_v1"
+first_step = "无额外起始历史时选与 50/50 的 L1 距离最小者（并列按双塔配额升序）；若起始历史含 70/30，则将其视为已有反馈：低于 50/50 时转向镜像 30/70"
+better_step = "若新结果 Recall@100 高于当前最佳，沿同一方向再探一档（30/70→20/80，70/30→80/20）"
+worse_step = "若新结果 Recall@100 低于当前最佳，转向跨 50/50 的镜像配额"
+tie_step = "若新结果 Recall@100 与当前最佳持平，停止"
+description = "复用 Phase 13 本地反馈规则；起始历史不消耗预算，70/30 只作为已有反馈参与比较"
+
+[best_rule]
+description = "先比 Recall@100；并列选更接近 50/50 的配额；仍并列按双塔配额升序；Coverage 仅作描述"
+
+[scope]
+mode = "offline replay over existing summary JSON only"
+training = 0
+recall = 0
+real_evaluation = 0
+llm_requests_per_scenario_max = 3
+network_requests = "only configured LLM service"
+
+[commands]
+main = "python -m recsys.experiments.offline_replay_scenarios"
+self_check = "python -m recsys.experiments.offline_replay_scenarios --self-check"

@@ -1,0 +1,46 @@
+{
+  "dataset": "KuaiRec 2.0 official small_matrix",
+  "raw_rows": 4676570,
+  "users": 1411,
+  "items": 3327,
+  "unique_first_exposures": 4494578,
+  "ambiguous_first_labels_excluded": 0,
+  "missing_timestamp_rows": 181992,
+  "unknown_time_pairs_excluded": 181992,
+  "positive_rule": "first playback watch_ratio >= 1.0, frozen before modeling",
+  "split": "Per-user distinct first-exposure timestamps: earliest 80% train, next 10% validation, last 10% test; equal timestamps kept together; boundary times from exposure times, without reading labels.",
+  "seen_filter": "All first playbacks strictly before each evaluation cutoff, including negatives. Validation observations used only as known history/mask in test, not for optimizer updates.",
+  "rationale": "Block holdout avoids an almost fully exposed user's last single positive creating only a handful of available candidates.",
+  "split_counts": {
+    "train": 1177823,
+    "validation": 140775,
+    "test": 153264
+  },
+  "eval_users": 1410,
+  "cold_test_targets": 120308,
+  "train_items": 2999,
+  "train_item_frequency_quantiles": [
+    1.0,
+    318.0,
+    893.0,
+    1243.0
+  ],
+  "test_unseen_candidate_quantiles": [
+    356.0,
+    463.0,
+    597.0
+  ],
+  "two_tower": {
+    "embedding_dim": 32,
+    "output_dim": 32,
+    "tower_type": "embedding",
+    "temperature": 0.1,
+    "lr": 0.01,
+    "batch_size": 1024,
+    "epochs": 5,
+    "seed": 42,
+    "selection": "best validation NDCG@20",
+    "mask_train_positive_false_negatives": true
+  },
+  "training_history": "Only this dataset; new initialization and independent mappings."
+}

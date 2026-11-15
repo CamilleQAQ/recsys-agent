@@ -46,7 +46,7 @@ class MindAdapter(RecommenderAdapter):
         return cls(model, checkpoint, device)
 
     def _histories(self, data: PreparedData, split: str) -> dict[int, list[int]]:
-        # 与 SASRec 一致：测试阶段的历史 = train + validation
+        # 与 SASRec 一致：测试阶段的历史 = train + validation（默认行为）。
         return build_observed_histories(data, split, include_validation_in_test_history=True)
 
     def recommend(
@@ -55,6 +55,7 @@ class MindAdapter(RecommenderAdapter):
         *,
         split: str = "test",
         k: int = 20,
+        include_validation_in_test_history: bool = True,
         **kwargs: object,
     ) -> dict[int, list[int]]:
         from recsys.evaluation.evaluator import get_evaluation_interactions, group_items_by_user
@@ -63,7 +64,11 @@ class MindAdapter(RecommenderAdapter):
         users = sorted(group_items_by_user(targets))
         if not users:
             return {}
-        histories = self._histories(data, split)
+        histories = build_observed_histories(
+            data,
+            split,
+            include_validation_in_test_history=include_validation_in_test_history,
+        )
         config = self.checkpoint["model_config"]
         blocked = seen_items_for_split(data, split)
         routing_seed = int(kwargs.pop("routing_seed", 1234))
@@ -85,6 +90,10 @@ class MindAdapter(RecommenderAdapter):
             "请用 recommend()（内部会取每个候选在 K 个兴趣上的最大相似度）"
         )
 
+    def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.checkpoint, path)
+
     def encode_items(self, item_ids: Sequence[int], *, batch_size: int = 1024) -> np.ndarray:
         tokens = torch.as_tensor([int(item) + 1 for item in item_ids], dtype=torch.long, device=self.device)
         self.model.eval()
@@ -103,7 +112,7 @@ class MindAdapter(RecommenderAdapter):
         from recsys.evaluation.evaluator import evaluate_recommendations, get_evaluation_interactions
         from recsys.evaluation.metrics import catalog_coverage
 
-        recommendations = self.recommend(data, split=split, k=max(ks))
+        recommendations = self.recommend(data, split=split, k=max(ks), **kwargs)
         metrics = evaluate_recommendations(
             recommendations, get_evaluation_interactions(data, split), ks
         )

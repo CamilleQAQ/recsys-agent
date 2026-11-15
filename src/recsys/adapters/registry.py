@@ -1,6 +1,7 @@
 """模型 id → 适配器 的注册表。
 
 只需要适配器类；checkpoint 路径、设备等由调用方决定，因此这里不持有任何状态。
+新增模型一律经本表进入推荐链路和 Agent 工具，避免两条注册路径漂移。
 """
 
 from __future__ import annotations
@@ -10,27 +11,36 @@ from pathlib import Path
 from recsys.adapters.base import AdapterError, RecommenderAdapter
 from recsys.adapters.builtin import (
     BUILTIN_ADAPTERS,
+    DSSMAdapter,
     MatrixFactorizationAdapter,
     PopularityAdapter,
     SASRecAdapter,
     TwoTowerAdapter,
 )
+from recsys.adapters.graph import LightGCNAdapter
+from recsys.adapters.mmrec import MMRecAdapter
 from recsys.adapters.rechub_mind import MindAdapter
+from recsys.adapters.sequence import Bert4RecAdapter, HSTUAdapter
+from recsys.adapters.tiger import TigerAdapter
 from recsys.training.trainer import resolve_device
 
 #: 统一接口里可用的模型（顺序与 Model Zoo 推荐顺序一致）。
 ADAPTERS: dict[str, type[RecommenderAdapter]] = {
-    adapter.model_id: adapter for adapter in (*BUILTIN_ADAPTERS, MindAdapter)
+    adapter.model_id: adapter
+    for adapter in (
+        *BUILTIN_ADAPTERS,
+        MindAdapter,
+        LightGCNAdapter,
+        Bert4RecAdapter,
+        HSTUAdapter,
+        TigerAdapter,
+        MMRecAdapter,
+    )
 }
 
 #: 需要 checkpoint 才能加载的模型。
 CHECKPOINT_REQUIRED = frozenset(
-    {
-        TwoTowerAdapter.model_id,
-        MatrixFactorizationAdapter.model_id,
-        SASRecAdapter.model_id,
-        MindAdapter.model_id,
-    }
+    model_id for model_id in ADAPTERS if model_id != "popularity"
 )
 
 
@@ -77,6 +87,8 @@ def load_adapter(
 __all__ = [
     "ADAPTERS",
     "CHECKPOINT_REQUIRED",
+    "DSSMAdapter",
+    "LightGCNAdapter",
     "MatrixFactorizationAdapter",
     "MindAdapter",
     "PopularityAdapter",

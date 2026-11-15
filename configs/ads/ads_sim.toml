@@ -1,0 +1,46 @@
+# Phase 3 广告系统：模型规模、竞价与预算模拟配置。
+#
+# 重要：KuaiSAR 没有真实广告出价、预算和转化标签。
+# 下面的 [auction] / [budget] 数值全部是**模拟值**，输出会带
+# bid_source=simulated_config / budget_source=simulated_config 标注。
+# 修改这些数字只改变模拟结果，不代表真实广告主出价或投放预算。
+
+[models]
+# 接口验收规模（不是调参结果）：embedding 8 / hidden 32 足够验证前向与保存加载。
+embedding_dim = 8
+hidden_dim = 32
+attention_dim = 16
+dropout = 0.1
+seed = 42
+max_history = 20
+batch_size = 512
+device = "cpu"
+
+[auction]
+# GSP 二价：赢家支付 max(reserve_cpc, 下一名 eCPM / (赢家 pCTR*1000))，且不超过自己的出价。
+mode = "second_price"
+slots = 1
+reserve_cpc = 0.30
+# 模拟 CPC 出价：bid = base_cpc * (1 + step * (author_id % mod))。
+base_cpc = 1.00
+author_multiplier_step = 0.10
+author_multiplier_mod = 3
+currency = "CNY"
+# CPC 计费；realized_click 用样本 click 标签模拟“是否真的点击”，点击才扣费。
+billing_basis = "realized_click"
+bid_source = "simulated_config"
+
+[budget]
+# 模拟总预算与单广告主预算（单位：CNY）。
+total = 20.0
+per_advertiser = 8.0
+# 广告主代理：复用物品特征 author_id（KuaiSAR 作者字段）。
+advertiser_key = "author_id"
+budget_source = "simulated_config"
+
+[sources]
+base_cpc = "模拟值：KuaiSAR 无真实出价"
+budget = "模拟值：KuaiSAR 无真实投放预算"
+reserve_cpc = "模拟值：竞价保留价"
+clicks = "真实标签：KuaiSAR rec_inter.click（0/1）"
+conversion = "缺失：KuaiSAR 无转化标签，CVR 只在 ads_simulated 的 synthetic 样本上验证"

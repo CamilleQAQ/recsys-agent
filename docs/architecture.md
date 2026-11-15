@@ -8,9 +8,9 @@
       ▼
 PreparedData（train/val/test + IdMappings + 曝光 mask）
       │  recsys.data.dataset                            ← 只负责「按模型需要切样本」
-      ├── 序列样本  (SASRec: input/positive/negative 序列)
-      ├── 交互样本  (双塔/MF: (user, item) 对)
-      └── 候选+特征样本（排序模型；Phase 1 未完成）
+      ├── 序列样本  (SASRec / BERT4Rec / HSTU: 序列或掩码序列)
+      ├── 交互样本  (双塔/MF/LightGCN/MMRec: (user, item) 对)
+      └── 候选+特征样本（排序模型：请求级候选 + 物品/用户特征）
       ▼
 模型 (recsys.models / third_party)
       │  recsys.training                               ← 训练循环、损失、负采样、早停
@@ -18,8 +18,15 @@ PreparedData（train/val/test + IdMappings + 曝光 mask）
 checkpoint（权重 + model_config + 切分协议 + provenance + 指标历史）
       │  recsys.adapters                               ← 统一「加载 → 打分/编码 → 评测」
       ▼
-Top-K 推荐 / 候选分数 → recsys.evaluation.metrics → 指标 JSON / 实验记录
+多路召回（recsys.pipeline.recall）→ 融合（fusion）→ 排序（ranking）→ 重排（rerank）
+      │  recsys.pipeline.chain                         ← 统一配置、工件、逐阶段指标
+      ▼
+最终 Top-K + metrics/diagnostics/run_meta → recsys.evaluation.metrics
 ```
+
+Rec Agent（`recsys.experiments.rec_agent` + `rec_tools`）不绕过上述分层：
+它调用的训练、召回、排序、重排、评估都落到同一批函数，只额外加预算、
+工具参数校验与运行日志。
 
 分层的硬边界：
 
@@ -32,12 +39,15 @@ Top-K 推荐 / 候选分数 → recsys.evaluation.metrics → 指标 JSON / 实�
 | 逻辑模块 | 仓库里的位置 | 状态 |
 | --- | --- | --- |
 | 数据层 | `src/recsys/data/` | KuaiSAR 已接入（npy 数组后端 + 稀疏曝光 CSR）；KuaiRec 保留为流程模板 |
-| 召回层 | `src/recsys/models/` + `third_party/` | 4 个模型已接入，另有 8 个 vendor 候选 |
-| 候选融合层 | — | 未实现；适配层的 `retrieve()` 已按「通道」语义预留 |
-| 排序层 | `LightGBMRankerAdapter` + FuxiCTR | 接口就绪，缺特征通道 |
-| 重排层 | — | 未实现（Phase 9） |
-| 评估层 | `src/recsys/evaluation/` | 召回指标 + AUC/LogLoss + 效率基准（faiss_evaluator） |
-| Research Agent | — | 未实现（Phase 11+） |
+| 召回层 | `src/recsys/models/` + `third_party/` + `src/recsys/adapters/` | 11 个模型已接入（Two-Tower/MIND/Popularity/MF/LightGCN/DSSM/SASRec/BERT4Rec/HSTU/TIGER/MMRec） |
+| 候选融合层 | `src/recsys/pipeline/fusion.py` | round_robin / rrf / quota，保留来源与通道内名次 |
+| 排序层 | `src/recsys/adapters/ranking*.py` + `src/recsys/pipeline/ranking.py` | LightGBM + DIN/DIEN/DCNv2/Ultra-HSTU |
+| 重排层 | `src/recsys/pipeline/rerank.py` | 类目上限 + 可选作者多样性 + 补位计数 |
+| 评估层 | `src/recsys/evaluation/` + `src/recsys/pipeline/chain.py` | 召回/排序/重排逐阶段指标、逐目标丢失环节、AUC/LogLoss |
+| Rec Agent | `src/recsys/experiments/rec_agent.py` + `rec_tools.py` | LangGraph + 12 个真实工具 + 预算/日志/失败上报 |
+| 推荐链路 | `src/recsys/pipeline/` | 统一 TOML 配置、默认双路行为、工件保存/读回 |
+| 搜索检索层 | `src/recsys/search/` | BM25 + FAISS 向量（`IndexFlatIP`）+ RRF 混合 + token 精排；搜索索引独立于推荐索引 |
+| Search Agent | `src/recsys/experiments/search_agent.py` + `search/tool.py` | LangGraph + 4 个工具（BM25/向量/混合/精排）+ 预算/空结果/失败/落盘边界 |
 
 ## 关键契约
 
@@ -105,7 +115,12 @@ CLI 评测时会先打印一行 `provenance: data=… code=… users=… items=�
 
 ## 已知限制
 
-- `prepare_dataset` 每次都重新解析原始文件（KuaiRec 约 1 GB），`processed/` 只写不读；
-- 统一 CLI 会重新准备数据，跨模型批量评测需要外部循环；
-- 没有候选融合与重排模块，端到端链路尚未打通（Phase 5 / 9）；
-- TorchEasyRec / OpenOneRec / generative-recommenders / genrec 需要独立 Linux GPU 环境，本仓库只做源码归档与索引。
+- KuaiSAR 读 `data/kuasar_small/processed/` 的 npy 存储（`kuasar_store --check` 可校验），
+  KuaiRec 仍直接解析原始 CSV；
+- 推荐/搜索/广告三套系统各有独立数据与索引目录，跨业务只通过平台层（实验记录、预算、RAG）连接；
+- 需要 Linux GPU 的模型入口（TorchEasyRec 原实现、OpenOneRec、MMRec 上游、TFRS）仍未在本机环境运行，
+  只保留源码、适配说明与替代实现，见 [dependencies.md](dependencies.md) 与 [phase5-integration.md](phase5-integration.md) §8；
+- 推荐侧小样本的 Top-20 命中问题属效果专项（[top20-diagnosis.md](top20-diagnosis.md)），不是链路未打通。
+
+> 本文档早于 Phase 1 v2 / Phase 5；候选融合、重排、统一推荐链路已经交付，见
+> [recsys-pipeline.md](recsys-pipeline.md)；三业务集成与演示见 [phase5-integration.md](phase5-integration.md)。

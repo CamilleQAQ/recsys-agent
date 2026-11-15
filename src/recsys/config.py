@@ -30,3 +30,14 @@ KUAIREC_WATCH_RATIO_THRESHOLD = 1.0
 # 另一部分是同一用户在不同时间重复播放同一个视频。
 # 不合并会让评测目标出现在训练历史里，从而被 Top-K 的「已看过就不推荐」规则过滤掉。
 KUAIREC_DEDUPLICATE_USER_ITEM_PAIRS = True
+
+# KuaiRec small_matrix：与 big_matrix 同一套解析与标签口径，只是矩阵是稠密的
+# （1,411 用户 × 3,327 视频，4,676,570 行播放记录，填充率 95.7%）。
+# 这三个数用于建库时校验「拿到的是完整文件而不是半截下载」；
+# 改动它们等于换了数据集，必须同时改 configs/datasets/kuairec_small.toml。
+KUAIREC_SMALL_MATRIX_ROWS = 4_676_570
+KUAIREC_SMALL_MATRIX_USERS = 1_411
+KUAIREC_SMALL_MATRIX_ITEMS = 3_327
+# 正样本覆盖到的物品数：有 10 个视频没有任何 watch_ratio >= 1.0 的首次曝光，
+# 因此模型物品词表是 3,317 而不是原始目录大小 3,327。
+KUAIREC_SMALL_POSITIVE_ITEMS = 3_317

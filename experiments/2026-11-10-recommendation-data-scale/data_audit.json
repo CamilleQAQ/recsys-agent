@@ -1,0 +1,221 @@
+{
+  "kuasar_small": {
+    "train_interactions": 748674,
+    "validation_interactions": 5775,
+    "test_interactions": 4275,
+    "catalog_items": 454717,
+    "users_in_mapping": 2000,
+    "active_train_users": 2000,
+    "train_clicked_items": 450767,
+    "test_positive_users": 2000,
+    "test_unique_target_items": 4142,
+    "train_item_interaction_distribution": {
+      "0": 3950,
+      "1": 345640,
+      "2-5": 91735,
+      "6-20": 11792,
+      "21+": 1600
+    },
+    "train_clicked_item_quantiles": {
+      "p25": 1.0,
+      "p50": 1.0,
+      "p75": 1.0,
+      "p90": 3.0,
+      "p95": 4.0,
+      "p99": 11.0,
+      "max": 169.0
+    },
+    "train_interactions_per_clicked_item": 1.660889106789095,
+    "train_interactions_per_active_user": 374.337,
+    "matrix_density": 0.0008232307127290161,
+    "test_targets_by_train_item_frequency": {
+      "0": 1759,
+      "1": 630,
+      "2-5": 846,
+      "6-20": 612,
+      "21+": 428
+    },
+    "unique_test_items_by_train_item_frequency": {
+      "0": 1755,
+      "1": 627,
+      "2-5": 826,
+      "6-20": 577,
+      "21+": 357
+    },
+    "test_cold_share": 0.4114619883040936,
+    "test_targets_without_train_or_validation_click": 1746,
+    "catalog_items_without_train_click": 3950,
+    "test_targets_filtered_as_seen": 4
+  },
+  "used_checkpoints": {
+    "two_tower": {
+      "path": "artifacts\\kuasar_small\\two_tower_features.pt",
+      "dataset": "kuasar_small",
+      "model_config": {
+        "num_users": 2000,
+        "num_items": 454717,
+        "embedding_dim": 64,
+        "hidden_dim": 128,
+        "output_dim": 64,
+        "temperature": 0.1,
+        "tower_type": "embedding",
+        "item_cat_cardinalities": [
+          38,
+          294,
+          4,
+          29
+        ],
+        "item_numeric_count": 5,
+        "feature_dim": 16
+      },
+      "train_config": {
+        "dataset": "kuasar_small",
+        "data_dir": "data",
+        "artifacts_dir": "artifacts",
+        "epochs": 20,
+        "batch_size": 2048,
+        "learning_rate": 0.01,
+        "embedding_dim": 64,
+        "hidden_dim": 128,
+        "output_dim": 64,
+        "temperature": 0.1,
+        "tower_type": "embedding",
+        "mask_false_negatives": false,
+        "use_item_features": true,
+        "feature_dim": 16,
+        "checkpoint_name": "two_tower_features",
+        "positive_threshold": null,
+        "weight_decay": 0.0,
+        "seed": 42,
+        "device": "auto",
+        "max_batches_per_epoch": null
+      },
+      "counts": {
+        "train": 748674,
+        "validation": 5775,
+        "test": 4275
+      },
+      "split_sha256": {
+        "train": "c62df14cbc3e0aacd96b9b57793876d3248c0dbc6677daad3aeacc9e0f5dbd91",
+        "validation": "000681165b44f89984629f87c4d82b16e7b926070794f9805805cf802037119e",
+        "test": "d6b5c0e8a96bef2164ce723b97925b2f15e0ee59f1acd4f84e135eae70cd6dc0"
+      },
+      "id_mapping_sha256": "b7d230622f6b690a8c816cdb6dc6885d43f4715818335bd13582ca2e00094517"
+    },
+    "mind": {
+      "path": "artifacts\\kuasar_small\\mind20.pt",
+      "dataset": "kuasar_small",
+      "model_config": {
+        "num_users": 2000,
+        "num_items": 454717,
+        "embed_dim": 64,
+        "max_length": 20,
+        "interest_num": 4,
+        "temperature": 0.1
+      },
+      "train_config": {
+        "dataset": "kuasar_small",
+        "data_dir": "data",
+        "artifacts_dir": "artifacts",
+        "epochs": 20,
+        "batch_size": 1024,
+        "learning_rate": 0.01,
+        "embed_dim": 64,
+        "max_length": 20,
+        "interest_num": 4,
+        "temperature": 0.1,
+        "checkpoint_name": "mind20",
+        "positive_threshold": null,
+        "weight_decay": 0.0,
+        "seed": 42,
+        "device": "auto",
+        "max_batches_per_epoch": null
+      },
+      "counts": {
+        "train": 748674,
+        "validation": 5775,
+        "test": 4275
+      },
+      "split_sha256": {
+        "train": "c62df14cbc3e0aacd96b9b57793876d3248c0dbc6677daad3aeacc9e0f5dbd91",
+        "validation": "000681165b44f89984629f87c4d82b16e7b926070794f9805805cf802037119e",
+        "test": "d6b5c0e8a96bef2164ce723b97925b2f15e0ee59f1acd4f84e135eae70cd6dc0"
+      },
+      "id_mapping_sha256": "b7d230622f6b690a8c816cdb6dc6885d43f4715818335bd13582ca2e00094517"
+    }
+  },
+  "kuasar": {
+    "train_interactions": 7118891,
+    "validation_interactions": 67517,
+    "test_interactions": 50629,
+    "catalog_items": 4046367,
+    "users_in_mapping": 25877,
+    "active_train_users": 25355,
+    "train_clicked_items": 2092051,
+    "test_positive_users": 24128,
+    "test_unique_target_items": 40921,
+    "train_item_interaction_distribution": {
+      "0": 1954316,
+      "1": 1279013,
+      "2-5": 587649,
+      "6-20": 181987,
+      "21+": 43402
+    },
+    "train_clicked_item_quantiles": {
+      "p25": 1.0,
+      "p50": 1.0,
+      "p75": 2.0,
+      "p90": 6.0,
+      "p95": 11.0,
+      "p99": 35.0,
+      "max": 1705.0
+    },
+    "train_interactions_per_clicked_item": 3.4028286117307847,
+    "train_interactions_per_active_user": 280.76872411753106,
+    "matrix_density": 6.798813801883856e-05,
+    "test_targets_by_train_item_frequency": {
+      "0": 8055,
+      "1": 4023,
+      "2-5": 8045,
+      "6-20": 10541,
+      "21+": 19965
+    },
+    "unique_test_items_by_train_item_frequency": {
+      "0": 8021,
+      "1": 3970,
+      "2-5": 7818,
+      "6-20": 9781,
+      "21+": 11331
+    },
+    "test_cold_share": 0.159098540362243,
+    "test_targets_without_train_or_validation_click": 7972,
+    "catalog_items_without_train_click": 1954316
+  },
+  "separate_search_faiss": {
+    "documents": 120,
+    "overlap_with_small_training_items": 3
+  },
+  "current_pipeline": {
+    "artifact": "experiments\\2026-11-10-formal-e2e\\recommendation\\run_meta.json",
+    "backend": "numpy exact dot product for Two-Tower; MIND score_users exact dot product",
+    "uses_recommendation_faiss": false,
+    "data": {
+      "num_users": 2000,
+      "num_items": 454717,
+      "counts": {
+        "train": 748674,
+        "validation": 5775,
+        "test": 4275
+      },
+      "split_sha256": {
+        "train": "c62df14cbc3e0aacd96b9b57793876d3248c0dbc6677daad3aeacc9e0f5dbd91",
+        "validation": "000681165b44f89984629f87c4d82b16e7b926070794f9805805cf802037119e",
+        "test": "d6b5c0e8a96bef2164ce723b97925b2f15e0ee59f1acd4f84e135eae70cd6dc0"
+      },
+      "seen_masks": {
+        "validation": null,
+        "test": null
+      }
+    }
+  }
+}

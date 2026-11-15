@@ -112,11 +112,14 @@ def log(message: str) -> None:
 # --------------------------------------------------------------------------- 召回
 
 
-def select_users(data, count: int, seed: int) -> np.ndarray:
-    """从验证集用户里用固定种子抽至多 count 个（排序后保存，保证可复现）。"""
-    validation_users = sorted({row.user_idx for row in data.validation_interactions})
+def select_users(data, count: int, seed: int, split: str = "validation") -> np.ndarray:
+    """从指定切分用户里用固定种子抽至多 count 个（排序后保存，保证可复现）。"""
+    if split not in {"validation", "test"}:
+        raise ValueError("split must be 'validation' or 'test'")
+    interactions = data.validation_interactions if split == "validation" else data.test_interactions
+    candidates = sorted({row.user_idx for row in interactions})
     rng = np.random.default_rng(seed)
-    chosen = rng.choice(np.asarray(validation_users), size=min(count, len(validation_users)), replace=False)
+    chosen = rng.choice(np.asarray(candidates), size=min(count, len(candidates)), replace=False)
     return np.sort(chosen.astype(np.int64))
 
 
@@ -133,11 +136,20 @@ def top_k_from_scores(
     return [int(x) for x in top], [round(float(row[x]), 6) for x in top]
 
 
-def recall_two_tower(data, users: np.ndarray, k: int, batch_size: int = 32) -> dict[int, list[dict]]:
-    adapter = load_adapter("two_tower", TWO_TOWER_CHECKPOINT, device_name="cpu")
+def recall_two_tower(
+    data,
+    users: np.ndarray,
+    k: int,
+    batch_size: int = 32,
+    split: str = "validation",
+    checkpoint: Path | None = None,
+) -> dict[int, list[dict]]:
+    if split not in {"validation", "test"}:
+        raise ValueError("split must be 'validation' or 'test'")
+    adapter = load_adapter("two_tower", checkpoint or TWO_TOWER_CHECKPOINT, device_name="cpu")
     item_vectors = adapter.encode_items(range(data.num_items))
     user_vectors = adapter.encode_users([int(u) for u in users])
-    seen = seen_items_for_split(data, "validation")
+    seen = seen_items_for_split(data, split)
     results: dict[int, list[dict]] = {}
     for start in range(0, len(users), batch_size):
         batch = users[start : start + batch_size]
@@ -151,10 +163,18 @@ def recall_two_tower(data, users: np.ndarray, k: int, batch_size: int = 32) -> d
     return results
 
 
-def recall_mind(data, users: np.ndarray, k: int) -> dict[int, list[dict]]:
-    adapter = load_adapter("mind", MIND_CHECKPOINT, device_name="cpu")
-    histories = build_observed_histories(data, "validation")  # 验证输入只用训练历史
-    seen = seen_items_for_split(data, "validation")
+def recall_mind(
+    data,
+    users: np.ndarray,
+    k: int,
+    split: str = "validation",
+    checkpoint: Path | None = None,
+) -> dict[int, list[dict]]:
+    if split not in {"validation", "test"}:
+        raise ValueError("split must be 'validation' or 'test'")
+    adapter = load_adapter("mind", checkpoint or MIND_CHECKPOINT, device_name="cpu")
+    histories = build_observed_histories(data, split)
+    seen = seen_items_for_split(data, split)
     recommendations = rank_users(
         adapter.model,
         [int(u) for u in users],

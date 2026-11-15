@@ -1,9 +1,10 @@
 """各命令行入口共用的数据集选择逻辑。
 
 - `kuasar`：主数据线，读 `data/kuasar/processed/` 的 npy 存储（先跑 `kuasar_store`）；
-- `kuairec`：流程模板/辅助线，直接解析原始 CSV。
+- `kuairec`：流程模板/辅助线，直接解析原始 `big_matrix.csv`；
+- `kuairec_small`：同一读取器的稠密子集（`small_matrix.csv`），口径与 `kuairec` 完全一致。
 
-两个数据集的切分协议不同（KuaiSAR 按请求、KuaiRec 按点击），
+各数据集的切分协议不同（KuaiSAR 按请求、KuaiRec 按点击），
 `split_strategy_for()` 给出「该数据集应该用哪个协议」，checkpoint / 评测都用它校验。
 """
 
@@ -12,11 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from recsys.config import KUAIREC_WATCH_RATIO_THRESHOLD, SPLIT_STRATEGY
-from recsys.data.kuairec import prepare_kuairec
+from recsys.data.kuairec import prepare_kuairec, prepare_kuairec_small
 from recsys.data.kuasar_store import prepare_kuasar
 from recsys.data.schema import PreparedData
 
-SUPPORTED_DATASETS = ("kuairec", "kuasar", "kuasar_small")
+SUPPORTED_DATASETS = ("kuairec", "kuairec_small", "kuasar", "kuasar_small")
 
 #: KuaiSAR 的正样本就是 click == 1，没有阈值概念；这里给一个统一接口需要的数值。
 KUASAR_POSITIVE_CLICK = 1.0
@@ -25,6 +26,7 @@ KUASAR_SPLIT_STRATEGY = "per_user_last_two_requests"
 #: 数据名 → `data/` 下的子目录。`kuasar_small` 是从全量切出来的验证子集，协议与全量一致。
 _DATASET_DIRS = {
     "kuairec": "kuairec",
+    "kuairec_small": "kuairec_small",
     "kuasar": "kuasar",
     "kuasar_small": "kuasar_small",
 }
@@ -34,12 +36,16 @@ def _is_kuasar_family(dataset: str) -> bool:
     return dataset in {"kuasar", "kuasar_small"}
 
 
+def _is_kuairec_family(dataset: str) -> bool:
+    return dataset in {"kuairec", "kuairec_small"}
+
+
 def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -> float:
     """返回该数据集实际使用的正反馈阈值；默认值写在 ``recsys.config`` 里。"""
     if positive_threshold is not None:
         return float(positive_threshold)
     normalized_name = dataset.lower()
-    if normalized_name == "kuairec":
+    if _is_kuairec_family(normalized_name):
         return float(KUAIREC_WATCH_RATIO_THRESHOLD)
     if _is_kuasar_family(normalized_name):
         return KUASAR_POSITIVE_CLICK
@@ -51,7 +57,7 @@ def resolve_positive_threshold(dataset: str, positive_threshold: float | None) -
 def split_strategy_for(dataset: str) -> str:
     """该数据集应使用的切分协议（写进 checkpoint，评测时据此校验）。"""
     normalized_name = dataset.lower()
-    if normalized_name == "kuairec":
+    if _is_kuairec_family(normalized_name):
         return SPLIT_STRATEGY
     if _is_kuasar_family(normalized_name):
         return KUASAR_SPLIT_STRATEGY
@@ -97,4 +103,7 @@ def prepare_dataset(
     if _is_kuasar_family(normalized_name):
         # 全量与子集共用同一份 processed 布局，只是目录不同
         return prepare_kuasar(dataset_dir)
+    if normalized_name == "kuairec_small":
+        # 同一读取器，换 small_matrix 矩阵 + 建库规模/CRC32 校验
+        return prepare_kuairec_small(dataset_dir, watch_ratio_threshold=float(threshold))
     return prepare_kuairec(dataset_dir, watch_ratio_threshold=float(threshold))

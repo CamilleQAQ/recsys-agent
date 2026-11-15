@@ -99,9 +99,9 @@ python -m recsys.experiments.search_agent `
 > 其余集中在高科技数码类目，与查询意图相关性较好。剩余预算仅 1 次，
 > 且去掉任一 token 都可能削弱语义覆盖，收益有限，故停止检索。
 
-完整轨迹：[trace.json](run-20261109T080657Z-19556/trace.json)、
-[metrics.json](run-20261109T080657Z-19556/metrics.json)、
-[run_meta.json](run-20261109T080657Z-19556/run_meta.json)。
+完整轨迹：trace.json（本地文件：`run-20261109T080657Z-19556/trace.json`）、
+metrics.json（本地文件：`run-20261109T080657Z-19556/metrics.json`）、
+run_meta.json（本地文件：`run-20261109T080657Z-19556/run_meta.json`）。
 
 | 证据 | sha256 |
 | --- | --- |

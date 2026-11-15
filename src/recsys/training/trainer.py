@@ -103,6 +103,7 @@ class TrainConfig:
     seed: int = 42
     device: str = "auto"
     max_batches_per_epoch: int | None = None
+    validation_users: int = 0
 
 
 def resolve_device(device: str) -> torch.device:
@@ -224,6 +225,11 @@ def train(config: TrainConfig) -> tuple[TwoTowerModel, list[float]]:
         dataset=config.dataset,
         data_dir=config.data_dir,
         positive_threshold=positive_threshold,
+    )
+    from recsys.training.subsets import limit_validation_users
+
+    prepared_data = limit_validation_users(
+        prepared_data, config.validation_users, config.seed
     )
     train_dataset = InteractionDataset(prepared_data.train_interactions)
     train_loader = create_dataloader(
@@ -425,6 +431,12 @@ def parse_args() -> TrainConfig:
         type=int,
         default=None,
         help="Optional smoke-run limit; omit it for full training.",
+    )
+    parser.add_argument(
+        "--validation-users",
+        type=int,
+        default=0,
+        help="仅训练冒烟时限制验证用户数，0 = 全部验证用户",
     )
     args = parser.parse_args()
     return TrainConfig(**vars(args))

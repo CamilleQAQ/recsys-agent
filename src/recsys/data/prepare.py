@@ -1,4 +1,4 @@
-"""Prepare either supported dataset using the common interaction schema."""
+"""Prepare one supported dataset using the common interaction schema."""
 
 from __future__ import annotations
 

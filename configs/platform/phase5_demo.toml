@@ -1,0 +1,117 @@
+# Phase 5 三业务协作演示配置（可直接运行）
+#
+# 用法（仓库根目录，PowerShell）：
+#   $env:PYTHONPATH = "src"
+#   python -m recsys.platform --phase5-demo
+#
+# 固定内容：小样本、模型、查询、广告请求数、工件路径、输出目录和预算。
+# 预算包含总控分发 + 三个子 Agent 的内部工具，保证三路都能完成；
+# 不放大全局默认值（configs/platform/research_agent.toml 不动）。
+#
+# 决策来源：默认 scripted（离线计划替身），每个决策在 trace 里标注
+# source=scripted_stand_in；三个业务工具仍然是真实代码执行。
+
+# 总控最多 4 步：3 次业务分发 + 1 次停止。
+max_steps = 4
+
+[paths]
+# 演示输出根目录：tasks/<task_id>/ 存总控与子 Agent 记录，shared/ 存共享实验库。
+experiment_root = "experiments/2026-11-10-kuasar_small-platform-phase5/demo"
+shared_store = "experiments/2026-11-10-kuasar_small-platform-phase5/demo/shared"
+rag_index_dir = "artifacts/rag/phase4"
+
+[history]
+# 演示不查历史（history_first=false），这里只保留既有推荐历史的只读入口。
+cache_dir = "artifacts/kuasar_small/mvp"
+history_root = "experiments/2026-11-08-kuasar_small-fusion-quota-agent"
+memory_dir = "experiments/2026-11-08-kuasar_small-experiment-memory/memory"
+
+# 一次运行的总预算：3 个业务 = 3 次实验 + 12 次工具
+# （推荐 3、搜索 3、广告 6，含总控分发），留 2 次余量用于失败重试与读取。
+[budget]
+max_llm_requests = 0
+max_tool_calls = 14
+max_experiments = 3
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 600.0
+
+[demo]
+task = "用已有权重依次跑推荐、搜索、广告三业务演示：8 用户双塔+MIND 召回与 LightGBM 排序、会话 11208 混合检索与精排、din 广告预测排序与竞价预算模拟"
+planner = "scripted"
+history_first = false
+# 三路都完成、工件核对通过才把演示标记为 verified（行为固定，无需开关）。
+manifest = "configs/platform/phase5_artifacts.toml"
+
+# ---------------------------------------------------------------- 子 Agent 预算
+# 推荐：分发 1 + read_data_profile 1 + run_pipeline 1。
+[subagents.recommendation]
+max_llm_requests = 0
+max_tool_calls = 5
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 240.0
+
+# 搜索：分发 1 + search_hybrid 1 + search_rerank 1。
+[subagents.search]
+max_llm_requests = 0
+max_tool_calls = 4
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 120.0
+
+# 广告：分发 1 + list_ad_models / predict_ad_ctr / rank_ads / simulate_auction /
+# get_budget_state = 6。
+[subagents.ads]
+max_llm_requests = 0
+max_tool_calls = 7
+max_experiments = 1
+max_history_lookups = 0
+max_artifact_reads = 0
+max_seconds = 180.0
+
+# ---------------------------------------------------------------- 三业务意图
+# 推荐：既有双塔 + MIND 权重、既有 LightGBM 排序权重；只加载，不训练。
+[intent.recommendation]
+users = 8
+split = "validation"
+recall_models = ["two_tower", "mind"]
+ranker = "lightgbm_ranker"
+fusion = "round_robin"
+k_recall = 50
+k_final = 10
+category_cap = 5
+artifact_policy = "existing_only"
+ranker_checkpoint = "artifacts/kuasar_small/mvp/lgbm_ranker.txt"
+expected_ranker_sha256 = "a79d9d451d3833460f3160fe4d76c32f76a1aee49458aa8ab9d252510cf1ac60"
+
+# 搜索：固定会话 11208（BM25 / 向量共用同一套 KuaiSAR token），混合检索 + 精排。
+[intent.search]
+mode = "rerank"
+top_k = 5
+session_id = "11208"
+planner = "scripted"
+require_existing_index = true
+search_config = "configs/experiments/search_agent.toml"
+
+# 广告：DIN 接口测试权重；test 切分少量候选做 CTR 预测，train 切分选请求做排序/竞价。
+[intent.ads]
+model = "din"
+split = "test"
+requests = 2
+limit = 200
+simulate_auction = true
+
+# ---------------------------------------------------------------- 恢复校验
+# 独立进程恢复时用更小的样本，只证明「从磁盘加载的工件真的进入业务链路」。
+[restore]
+users = 2
+k_recall = 20
+k_final = 5
+search_session_id = "11208"
+search_top_k = 3
+ads_limit = 32
+rag_query = "实验记忆 指纹 复用 预算"
+rag_top_k = 2

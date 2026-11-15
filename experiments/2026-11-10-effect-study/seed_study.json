@@ -1,0 +1,866 @@
+{
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "deterministic": {
+    "popularity": {
+      "stage": "popularity",
+      "metrics": {
+        "Recall@20": 0.005425,
+        "NDCG@20": 0.002423,
+        "HitRate@20": 0.0135,
+        "Precision@20": 0.000675,
+        "Recall@100": 0.016325,
+        "NDCG@100": 0.00465,
+        "HitRate@100": 0.0315,
+        "Precision@100": 0.00033
+      },
+      "hit_targets_at20": 27,
+      "hit_targets_at100": 66
+    },
+    "itemcf": {
+      "stage": "itemcf",
+      "metrics": {
+        "Recall@20": 0.00405,
+        "NDCG@20": 0.001695,
+        "HitRate@20": 0.008,
+        "Precision@20": 0.0004,
+        "Recall@100": 0.008483,
+        "NDCG@100": 0.002816,
+        "HitRate@100": 0.02,
+        "Precision@100": 0.000205
+      },
+      "hit_targets_at20": 16,
+      "hit_targets_at100": 41
+    }
+  },
+  "per_seed": {
+    "42": {
+      "stages": {
+        "two_tower": {
+          "stage": "two_tower",
+          "metrics": {
+            "Recall@20": 0.004408,
+            "NDCG@20": 0.002836,
+            "HitRate@20": 0.0085,
+            "Precision@20": 0.000425,
+            "Recall@100": 0.01165,
+            "NDCG@100": 0.004394,
+            "HitRate@100": 0.026,
+            "Precision@100": 0.00026
+          },
+          "hit_targets_at20": 17,
+          "hit_targets_at100": 52
+        },
+        "mind": {
+          "stage": "mind",
+          "metrics": {
+            "Recall@20": 0.004408,
+            "NDCG@20": 0.0022,
+            "HitRate@20": 0.0085,
+            "Precision@20": 0.000425,
+            "Recall@100": 0.018217,
+            "NDCG@100": 0.005206,
+            "HitRate@100": 0.039,
+            "Precision@100": 0.00041
+          },
+          "hit_targets_at20": 17,
+          "hit_targets_at100": 82
+        },
+        "fusion": {
+          "stage": "fusion",
+          "metrics": {
+            "Recall@20": 0.005967,
+            "NDCG@20": 0.003457,
+            "HitRate@20": 0.0125,
+            "Precision@20": 0.000625,
+            "Recall@100": 0.015325,
+            "NDCG@100": 0.005489,
+            "HitRate@100": 0.033,
+            "Precision@100": 0.000345
+          },
+          "hit_targets_at20": 25,
+          "hit_targets_at100": 69
+        },
+        "ranked": {
+          "stage": "ranked",
+          "metrics": {
+            "Recall@20": 0.00515,
+            "NDCG@20": 0.002576,
+            "HitRate@20": 0.0115,
+            "Precision@20": 0.0006,
+            "Recall@100": 0.015325,
+            "NDCG@100": 0.004849,
+            "HitRate@100": 0.033,
+            "Precision@100": 0.000345
+          },
+          "hit_targets_at20": 24,
+          "hit_targets_at100": 69
+        },
+        "final": {
+          "stage": "final",
+          "metrics": {
+            "Recall@20": 0.00445,
+            "NDCG@20": 0.002384,
+            "HitRate@20": 0.01,
+            "Precision@20": 0.000525,
+            "Recall@100": 0.00445,
+            "NDCG@100": 0.002384,
+            "HitRate@100": 0.01,
+            "Precision@100": 0.000105
+          },
+          "hit_targets_at20": 21,
+          "hit_targets_at100": 21
+        }
+      },
+      "union_hits_at_100": 126,
+      "checkpoints": {
+        "two_tower": "E:\\PythonProject\\recsys-agent\\artifacts\\effect_study\\kuasar_small\\two_tower_seed42.pt",
+        "mind": "E:\\PythonProject\\recsys-agent\\artifacts\\effect_study\\kuasar_small\\mind_seed42.pt"
+      },
+      "seconds": 38.8,
+      "metrics": {
+        "two_tower": {
+          "Recall@20": 0.004408,
+          "NDCG@20": 0.002836,
+          "HitRate@20": 0.0085,
+          "Precision@20": 0.000425,
+          "Recall@100": 0.01165,
+          "NDCG@100": 0.004394,
+          "HitRate@100": 0.026,
+          "Precision@100": 0.00026
+        },
+        "mind": {
+          "Recall@20": 0.004408,
+          "NDCG@20": 0.0022,
+          "HitRate@20": 0.0085,
+          "Precision@20": 0.000425,
+          "Recall@100": 0.018217,
+          "NDCG@100": 0.005206,
+          "HitRate@100": 0.039,
+          "Precision@100": 0.00041
+        },
+        "fusion": {
+          "Recall@20": 0.005967,
+          "NDCG@20": 0.003457,
+          "HitRate@20": 0.0125,
+          "Precision@20": 0.000625,
+          "Recall@100": 0.015325,
+          "NDCG@100": 0.005489,
+          "HitRate@100": 0.033,
+          "Precision@100": 0.000345
+        },
+        "ranked": {
+          "Recall@20": 0.00515,
+          "NDCG@20": 0.002576,
+          "HitRate@20": 0.0115,
+          "Precision@20": 0.0006,
+          "Recall@100": 0.015325,
+          "NDCG@100": 0.004849,
+          "HitRate@100": 0.033,
+          "Precision@100": 0.000345
+        },
+        "final": {
+          "Recall@20": 0.00445,
+          "NDCG@20": 0.002384,
+          "HitRate@20": 0.01,
+          "Precision@20": 0.000525,
+          "Recall@100": 0.00445,
+          "NDCG@100": 0.002384,
+          "HitRate@100": 0.01,
+          "Precision@100": 0.000105
+        }
+      }
+    },
+    "43": {
+      "stages": {
+        "two_tower": {
+          "stage": "two_tower",
+          "metrics": {
+            "Recall@20": 0.005133,
+            "NDCG@20": 0.002397,
+            "HitRate@20": 0.0115,
+            "Precision@20": 0.000575,
+            "Recall@100": 0.016225,
+            "NDCG@100": 0.004671,
+            "HitRate@100": 0.033,
+            "Precision@100": 0.00033
+          },
+          "hit_targets_at20": 23,
+          "hit_targets_at100": 66
+        },
+        "mind": {
+          "stage": "mind",
+          "metrics": {
+            "Recall@20": 0.003925,
+            "NDCG@20": 0.002156,
+            "HitRate@20": 0.0075,
+            "Precision@20": 0.000375,
+            "Recall@100": 0.016108,
+            "NDCG@100": 0.004877,
+            "HitRate@100": 0.0355,
+            "Precision@100": 0.00037
+          },
+          "hit_targets_at20": 15,
+          "hit_targets_at100": 74
+        },
+        "fusion": {
+          "stage": "fusion",
+          "metrics": {
+            "Recall@20": 0.005542,
+            "NDCG@20": 0.00253,
+            "HitRate@20": 0.0125,
+            "Precision@20": 0.000625,
+            "Recall@100": 0.016025,
+            "NDCG@100": 0.004795,
+            "HitRate@100": 0.034,
+            "Precision@100": 0.000345
+          },
+          "hit_targets_at20": 25,
+          "hit_targets_at100": 69
+        },
+        "ranked": {
+          "stage": "ranked",
+          "metrics": {
+            "Recall@20": 0.006675,
+            "NDCG@20": 0.002972,
+            "HitRate@20": 0.0145,
+            "Precision@20": 0.000725,
+            "Recall@100": 0.016025,
+            "NDCG@100": 0.005,
+            "HitRate@100": 0.034,
+            "Precision@100": 0.000345
+          },
+          "hit_targets_at20": 29,
+          "hit_targets_at100": 69
+        },
+        "final": {
+          "stage": "final",
+          "metrics": {
+            "Recall@20": 0.006175,
+            "NDCG@20": 0.002872,
+            "HitRate@20": 0.014,
+            "Precision@20": 0.0007,
+            "Recall@100": 0.006175,
+            "NDCG@100": 0.002872,
+            "HitRate@100": 0.014,
+            "Precision@100": 0.00014
+          },
+          "hit_targets_at20": 28,
+          "hit_targets_at100": 28
+        }
+      },
+      "union_hits_at_100": 128,
+      "checkpoints": {
+        "two_tower": "E:\\PythonProject\\recsys-agent\\artifacts\\effect_study\\kuasar_small\\two_tower_seed43.pt",
+        "mind": "E:\\PythonProject\\recsys-agent\\artifacts\\effect_study\\kuasar_small\\mind_seed43.pt"
+      },
+      "seconds": 5613.6,
+      "metrics": {
+        "two_tower": {
+          "Recall@20": 0.005133,
+          "NDCG@20": 0.002397,
+          "HitRate@20": 0.0115,
+          "Precision@20": 0.000575,
+          "Recall@100": 0.016225,
+          "NDCG@100": 0.004671,
+          "HitRate@100": 0.033,
+          "Precision@100": 0.00033
+        },
+        "mind": {
+          "Recall@20": 0.003925,
+          "NDCG@20": 0.002156,
+          "HitRate@20": 0.0075,
+          "Precision@20": 0.000375,
+          "Recall@100": 0.016108,
+          "NDCG@100": 0.004877,
+          "HitRate@100": 0.0355,
+          "Precision@100": 0.00037
+        },
+        "fusion": {
+          "Recall@20": 0.005542,
+          "NDCG@20": 0.00253,
+          "HitRate@20": 0.0125,
+          "Precision@20": 0.000625,
+          "Recall@100": 0.016025,
+          "NDCG@100": 0.004795,
+          "HitRate@100": 0.034,
+          "Precision@100": 0.000345
+        },
+        "ranked": {
+          "Recall@20": 0.006675,
+          "NDCG@20": 0.002972,
+          "HitRate@20": 0.0145,
+          "Precision@20": 0.000725,
+          "Recall@100": 0.016025,
+          "NDCG@100": 0.005,
+          "HitRate@100": 0.034,
+          "Precision@100": 0.000345
+        },
+        "final": {
+          "Recall@20": 0.006175,
+          "NDCG@20": 0.002872,
+          "HitRate@20": 0.014,
+          "Precision@20": 0.0007,
+          "Recall@100": 0.006175,
+          "NDCG@100": 0.002872,
+          "HitRate@100": 0.014,
+          "Precision@100": 0.00014
+        }
+      }
+    },
+    "44": {
+      "stages": {
+        "two_tower": {
+          "stage": "two_tower",
+          "metrics": {
+            "Recall@20": 0.001125,
+            "NDCG@20": 0.000804,
+            "HitRate@20": 0.0015,
+            "Precision@20": 7.5e-05,
+            "Recall@100": 0.005025,
+            "NDCG@100": 0.001612,
+            "HitRate@100": 0.01,
+            "Precision@100": 0.0001
+          },
+          "hit_targets_at20": 3,
+          "hit_targets_at100": 20
+        },
+        "mind": {
+          "stage": "mind",
+          "metrics": {
+            "Recall@20": 0.003225,
+            "NDCG@20": 0.002426,
+            "HitRate@20": 0.008,
+            "Precision@20": 0.0004,
+            "Recall@100": 0.017292,
+            "NDCG@100": 0.005405,
+            "HitRate@100": 0.0375,
+            "Precision@100": 0.00038
+          },
+          "hit_targets_at20": 16,
+          "hit_targets_at100": 76
+        },
+        "fusion": {
+          "stage": "fusion",
+          "metrics": {
+            "Recall@20": 0.003392,
+            "NDCG@20": 0.002107,
+            "HitRate@20": 0.0065,
+            "Precision@20": 0.000325,
+            "Recall@100": 0.010408,
+            "NDCG@100": 0.003587,
+            "HitRate@100": 0.0225,
+            "Precision@100": 0.000225
+          },
+          "hit_targets_at20": 13,
+          "hit_targets_at100": 45
+        },
+        "ranked": {
+          "stage": "ranked",
+          "metrics": {
+            "Recall@20": 0.006217,
+            "NDCG@20": 0.003932,
+            "HitRate@20": 0.0135,
+            "Precision@20": 0.000675,
+            "Recall@100": 0.010408,
+            "NDCG@100": 0.0049,
+            "HitRate@100": 0.0225,
+            "Precision@100": 0.000225
+          },
+          "hit_targets_at20": 27,
+          "hit_targets_at100": 45
+        },
+        "final": {
+          "stage": "final",
+          "metrics": {
+            "Recall@20": 0.005592,
+            "NDCG@20": 0.003771,
+            "HitRate@20": 0.0125,
+            "Precision@20": 0.000625,
+            "Recall@100": 0.005592,
+            "NDCG@100": 0.003771,
+            "HitRate@100": 0.0125,
+            "Precision@100": 0.000125
+          },
+          "hit_targets_at20": 25,
+          "hit_targets_at100": 25
+        }
+      },
+      "union_hits_at_100": 95,
+      "checkpoints": {
+        "two_tower": "E:\\PythonProject\\recsys-agent\\artifacts\\effect_study\\kuasar_small\\two_tower_seed44.pt",
+        "mind": "E:\\PythonProject\\recsys-agent\\artifacts\\effect_study\\kuasar_small\\mind_seed44.pt"
+      },
+      "seconds": 6121.0,
+      "metrics": {
+        "two_tower": {
+          "Recall@20": 0.001125,
+          "NDCG@20": 0.000804,
+          "HitRate@20": 0.0015,
+          "Precision@20": 7.5e-05,
+          "Recall@100": 0.005025,
+          "NDCG@100": 0.001612,
+          "HitRate@100": 0.01,
+          "Precision@100": 0.0001
+        },
+        "mind": {
+          "Recall@20": 0.003225,
+          "NDCG@20": 0.002426,
+          "HitRate@20": 0.008,
+          "Precision@20": 0.0004,
+          "Recall@100": 0.017292,
+          "NDCG@100": 0.005405,
+          "HitRate@100": 0.0375,
+          "Precision@100": 0.00038
+        },
+        "fusion": {
+          "Recall@20": 0.003392,
+          "NDCG@20": 0.002107,
+          "HitRate@20": 0.0065,
+          "Precision@20": 0.000325,
+          "Recall@100": 0.010408,
+          "NDCG@100": 0.003587,
+          "HitRate@100": 0.0225,
+          "Precision@100": 0.000225
+        },
+        "ranked": {
+          "Recall@20": 0.006217,
+          "NDCG@20": 0.003932,
+          "HitRate@20": 0.0135,
+          "Precision@20": 0.000675,
+          "Recall@100": 0.010408,
+          "NDCG@100": 0.0049,
+          "HitRate@100": 0.0225,
+          "Precision@100": 0.000225
+        },
+        "final": {
+          "Recall@20": 0.005592,
+          "NDCG@20": 0.003771,
+          "HitRate@20": 0.0125,
+          "Precision@20": 0.000625,
+          "Recall@100": 0.005592,
+          "NDCG@100": 0.003771,
+          "HitRate@100": 0.0125,
+          "Precision@100": 0.000125
+        }
+      }
+    }
+  },
+  "elapsed_s": 11739.5,
+  "aggregate": {
+    "two_tower": {
+      "Recall@20": {
+        "mean": 0.003555,
+        "std": 0.002136,
+        "per_seed": [
+          0.004408,
+          0.005133,
+          0.001125
+        ],
+        "spread_ratio": 0.6007
+      },
+      "NDCG@20": {
+        "mean": 0.002012,
+        "std": 0.001069,
+        "per_seed": [
+          0.002836,
+          0.002397,
+          0.000804
+        ],
+        "spread_ratio": 0.5313
+      },
+      "HitRate@20": {
+        "mean": 0.007167,
+        "std": 0.005132,
+        "per_seed": [
+          0.0085,
+          0.0115,
+          0.0015
+        ],
+        "spread_ratio": 0.716
+      },
+      "Precision@20": {
+        "mean": 0.000358,
+        "std": 0.000257,
+        "per_seed": [
+          0.000425,
+          0.000575,
+          7.5e-05
+        ],
+        "spread_ratio": 0.716
+      },
+      "Recall@100": {
+        "mean": 0.010967,
+        "std": 0.005631,
+        "per_seed": [
+          0.01165,
+          0.016225,
+          0.005025
+        ],
+        "spread_ratio": 0.5135
+      },
+      "NDCG@100": {
+        "mean": 0.003559,
+        "std": 0.001692,
+        "per_seed": [
+          0.004394,
+          0.004671,
+          0.001612
+        ],
+        "spread_ratio": 0.4754
+      },
+      "HitRate@100": {
+        "mean": 0.023,
+        "std": 0.01179,
+        "per_seed": [
+          0.026,
+          0.033,
+          0.01
+        ],
+        "spread_ratio": 0.5126
+      },
+      "Precision@100": {
+        "mean": 0.00023,
+        "std": 0.000118,
+        "per_seed": [
+          0.00026,
+          0.00033,
+          0.0001
+        ],
+        "spread_ratio": 0.5126
+      }
+    },
+    "mind": {
+      "Recall@20": {
+        "mean": 0.003853,
+        "std": 0.000595,
+        "per_seed": [
+          0.004408,
+          0.003925,
+          0.003225
+        ],
+        "spread_ratio": 0.1544
+      },
+      "NDCG@20": {
+        "mean": 0.002261,
+        "std": 0.000145,
+        "per_seed": [
+          0.0022,
+          0.002156,
+          0.002426
+        ],
+        "spread_ratio": 0.0641
+      },
+      "HitRate@20": {
+        "mean": 0.008,
+        "std": 0.0005,
+        "per_seed": [
+          0.0085,
+          0.0075,
+          0.008
+        ],
+        "spread_ratio": 0.0625
+      },
+      "Precision@20": {
+        "mean": 0.0004,
+        "std": 2.5e-05,
+        "per_seed": [
+          0.000425,
+          0.000375,
+          0.0004
+        ],
+        "spread_ratio": 0.0625
+      },
+      "Recall@100": {
+        "mean": 0.017206,
+        "std": 0.001057,
+        "per_seed": [
+          0.018217,
+          0.016108,
+          0.017292
+        ],
+        "spread_ratio": 0.0614
+      },
+      "NDCG@100": {
+        "mean": 0.005163,
+        "std": 0.000267,
+        "per_seed": [
+          0.005206,
+          0.004877,
+          0.005405
+        ],
+        "spread_ratio": 0.0517
+      },
+      "HitRate@100": {
+        "mean": 0.037333,
+        "std": 0.001756,
+        "per_seed": [
+          0.039,
+          0.0355,
+          0.0375
+        ],
+        "spread_ratio": 0.047
+      },
+      "Precision@100": {
+        "mean": 0.000387,
+        "std": 2.1e-05,
+        "per_seed": [
+          0.00041,
+          0.00037,
+          0.00038
+        ],
+        "spread_ratio": 0.0538
+      }
+    },
+    "fusion": {
+      "Recall@20": {
+        "mean": 0.004967,
+        "std": 0.00138,
+        "per_seed": [
+          0.005967,
+          0.005542,
+          0.003392
+        ],
+        "spread_ratio": 0.2779
+      },
+      "NDCG@20": {
+        "mean": 0.002698,
+        "std": 0.000691,
+        "per_seed": [
+          0.003457,
+          0.00253,
+          0.002107
+        ],
+        "spread_ratio": 0.2559
+      },
+      "HitRate@20": {
+        "mean": 0.0105,
+        "std": 0.003464,
+        "per_seed": [
+          0.0125,
+          0.0125,
+          0.0065
+        ],
+        "spread_ratio": 0.3299
+      },
+      "Precision@20": {
+        "mean": 0.000525,
+        "std": 0.000173,
+        "per_seed": [
+          0.000625,
+          0.000625,
+          0.000325
+        ],
+        "spread_ratio": 0.3299
+      },
+      "Recall@100": {
+        "mean": 0.013919,
+        "std": 0.003061,
+        "per_seed": [
+          0.015325,
+          0.016025,
+          0.010408
+        ],
+        "spread_ratio": 0.2199
+      },
+      "NDCG@100": {
+        "mean": 0.004624,
+        "std": 0.000963,
+        "per_seed": [
+          0.005489,
+          0.004795,
+          0.003587
+        ],
+        "spread_ratio": 0.2082
+      },
+      "HitRate@100": {
+        "mean": 0.029833,
+        "std": 0.006371,
+        "per_seed": [
+          0.033,
+          0.034,
+          0.0225
+        ],
+        "spread_ratio": 0.2135
+      },
+      "Precision@100": {
+        "mean": 0.000305,
+        "std": 6.9e-05,
+        "per_seed": [
+          0.000345,
+          0.000345,
+          0.000225
+        ],
+        "spread_ratio": 0.2272
+      }
+    },
+    "ranked": {
+      "Recall@20": {
+        "mean": 0.006014,
+        "std": 0.000783,
+        "per_seed": [
+          0.00515,
+          0.006675,
+          0.006217
+        ],
+        "spread_ratio": 0.1301
+      },
+      "NDCG@20": {
+        "mean": 0.00316,
+        "std": 0.000697,
+        "per_seed": [
+          0.002576,
+          0.002972,
+          0.003932
+        ],
+        "spread_ratio": 0.2207
+      },
+      "HitRate@20": {
+        "mean": 0.013167,
+        "std": 0.001528,
+        "per_seed": [
+          0.0115,
+          0.0145,
+          0.0135
+        ],
+        "spread_ratio": 0.116
+      },
+      "Precision@20": {
+        "mean": 0.000667,
+        "std": 6.3e-05,
+        "per_seed": [
+          0.0006,
+          0.000725,
+          0.000675
+        ],
+        "spread_ratio": 0.0944
+      },
+      "Recall@100": {
+        "mean": 0.013919,
+        "std": 0.003061,
+        "per_seed": [
+          0.015325,
+          0.016025,
+          0.010408
+        ],
+        "spread_ratio": 0.2199
+      },
+      "NDCG@100": {
+        "mean": 0.004916,
+        "std": 7.7e-05,
+        "per_seed": [
+          0.004849,
+          0.005,
+          0.0049
+        ],
+        "spread_ratio": 0.0156
+      },
+      "HitRate@100": {
+        "mean": 0.029833,
+        "std": 0.006371,
+        "per_seed": [
+          0.033,
+          0.034,
+          0.0225
+        ],
+        "spread_ratio": 0.2135
+      },
+      "Precision@100": {
+        "mean": 0.000305,
+        "std": 6.9e-05,
+        "per_seed": [
+          0.000345,
+          0.000345,
+          0.000225
+        ],
+        "spread_ratio": 0.2272
+      }
+    },
+    "final": {
+      "Recall@20": {
+        "mean": 0.005406,
+        "std": 0.000877,
+        "per_seed": [
+          0.00445,
+          0.006175,
+          0.005592
+        ],
+        "spread_ratio": 0.1623
+      },
+      "NDCG@20": {
+        "mean": 0.003009,
+        "std": 0.000704,
+        "per_seed": [
+          0.002384,
+          0.002872,
+          0.003771
+        ],
+        "spread_ratio": 0.2338
+      },
+      "HitRate@20": {
+        "mean": 0.012167,
+        "std": 0.002021,
+        "per_seed": [
+          0.01,
+          0.014,
+          0.0125
+        ],
+        "spread_ratio": 0.1661
+      },
+      "Precision@20": {
+        "mean": 0.000617,
+        "std": 8.8e-05,
+        "per_seed": [
+          0.000525,
+          0.0007,
+          0.000625
+        ],
+        "spread_ratio": 0.1424
+      },
+      "Recall@100": {
+        "mean": 0.005406,
+        "std": 0.000877,
+        "per_seed": [
+          0.00445,
+          0.006175,
+          0.005592
+        ],
+        "spread_ratio": 0.1623
+      },
+      "NDCG@100": {
+        "mean": 0.003009,
+        "std": 0.000704,
+        "per_seed": [
+          0.002384,
+          0.002872,
+          0.003771
+        ],
+        "spread_ratio": 0.2338
+      },
+      "HitRate@100": {
+        "mean": 0.012167,
+        "std": 0.002021,
+        "per_seed": [
+          0.01,
+          0.014,
+          0.0125
+        ],
+        "spread_ratio": 0.1661
+      },
+      "Precision@100": {
+        "mean": 0.000123,
+        "std": 1.8e-05,
+        "per_seed": [
+          0.000105,
+          0.00014,
+          0.000125
+        ],
+        "spread_ratio": 0.1424
+      }
+    }
+  },
+  "note": "跨种子 std 只反映训练随机性；用户抽样不确定性另见成对 bootstrap。所有种子共用同一份测试目标与同一候选预算。"
+}

@@ -1,15 +1,16 @@
-# Search 2 · Search Agent MVP（2026-11-09）
+# Phase 2 · 完整搜索系统 · Search Agent 多工具（2026-11-09）
 #
-# 复用 Search 1 的 KuaiSAR 小样本 BM25 索引；只读 index.json / sample.json，
-# 不重新采样、不重建索引、不扫原始 CSV。
-# Agent 通过原生 tool call 调用 search_bm25；最多 2 次检索、3 次模型请求。
-# 第一次必须原样使用 original_query_tokens；第二次只能从原查询里保留一部分 token。
+# 复用 Search 1 的 KuaiSAR 小样本 BM25 索引 + Phase 2 的搜索向量索引；
+# 只读 index.json / sample.json / vector 索引，不重新采样、不重建索引、不扫原始 CSV。
+# Agent 注册 search_bm25 / search_vector / search_hybrid / search_rerank 四个工具：
+# 首轮必须选一个检索工具且使用规范化后的原查询；之后可以停止、精排或做一次受约束的二次检索。
+# 预算：最多 2 次检索 + 1 次精排、3 次模型请求。
 
-schema_version = 1
+schema_version = 2
 
 [search_agent]
-phase = "Search 2 Search Agent MVP"
-description = "BM25 工具调用 + 一次反馈决策；第一次原查询，第二次可保留部分 token 再查"
+phase = "Phase 2 完整搜索系统 · Search Agent 多工具"
+description = "BM25 / FAISS 向量 / RRF 混合 / 精排四个工具 + 一次反馈决策"
 index_path = "artifacts/search/kuasar_bm25/index.json"
 sample_path = "artifacts/search/kuasar_bm25/sample.json"
 # Search 1 的产物身份：索引/样本被改动时直接 blocked，不静默换索引。
@@ -21,10 +22,30 @@ expected_vocab_size = 823
 default_session_id = "11208"
 max_results = 5
 max_search_calls = 2
+max_rerank_calls = 1
 max_model_requests = 3
 max_query_tokens = 64
 tool_name = "search_bm25"
 output_root = "experiments/2026-11-09-kuasar-search-agent"
+
+[search_backend]
+# 搜索向量索引独立于推荐索引；由 python -m recsys.search.build_vector_index 生成。
+vector_index_dir = "artifacts/search/kuasar_vector/vector"
+vector_manifest = "artifacts/search/kuasar_vector/manifest.json"
+# 留空表示不固定 manifest 哈希（重建向量索引不动 BM25）。
+expected_vector_manifest_sha256 = ""
+require_vector_manifest = true
+# KuaiSAR 只有匿名整数 token：使用无训练的本地 token 向量编码。
+encoder = "token_hash"
+encoder_dim = 4096
+encoder_seed = 20261109
+include_category = true
+category_weight = 0.25
+rrf_k = 60
+hybrid_pool = 50
+rerank_pool = 50
+prior_weight = 0.35
+coverage_weight = 0.65
 
 [llm]
 request_timeout_s = 30.0
@@ -39,7 +60,7 @@ api_key_env = "DSH_AGENT_LLM_API_KEY"
 training = 0
 index_rebuild = 0
 full_evaluation = 0
-vector_search = 0
-ranking = 0
+vector_search = 1
+ranking = 1
 raw_csv_scan = 0
 candidate_detail_persisted = false

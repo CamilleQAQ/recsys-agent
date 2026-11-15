@@ -158,6 +158,22 @@ class MatrixFactorizationAdapter(EmbeddingCheckpointAdapter):
     model_class = MatrixFactorization
 
 
+class DSSMAdapter(EmbeddingCheckpointAdapter):
+    """DSSM = 带侧特征 MLP 塔的双塔，checkpoint 由 ``train_dssm`` 写出。
+
+    结构与 Two-Tower 完全一致，因此直接复用其重建与向量出口；模型 id 不同，
+    便于在推荐链路里把两种训练配置作为独立召回通道比较。
+    """
+
+    model_id = "dssm"
+    model_type = "embedding"
+
+    @classmethod
+    def load(cls, checkpoint_path: Path, device: torch.device) -> "DSSMAdapter":
+        model, checkpoint = load_two_tower_model(checkpoint_path, device)
+        return cls(model, checkpoint, device)
+
+
 class SASRecAdapter(RecommenderAdapter):
     model_id = "sasrec"
     model_type = "sequence"
@@ -259,6 +275,7 @@ class PopularityAdapter(RecommenderAdapter):
 BUILTIN_ADAPTERS: tuple[type[RecommenderAdapter], ...] = (
     TwoTowerAdapter,
     MatrixFactorizationAdapter,
+    DSSMAdapter,
     SASRecAdapter,
     PopularityAdapter,
 )

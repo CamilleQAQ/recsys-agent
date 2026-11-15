@@ -1,0 +1,59 @@
+{
+  "scope": "Phase 1 v2 delivery smoke checks; NOT effect conclusions",
+  "dataset": "kuasar_small",
+  "split": "validation",
+  "recommendation_pipeline": {
+    "default_16_users": {
+      "users": 16,
+      "recall_two_tower_Recall@20": 0.0,
+      "recall_mind_Recall@20": 0.0,
+      "fusion_Recall@20": 0.0,
+      "ranked_Recall@20": 0.0,
+      "rerank_Recall@20": 0.0,
+      "elapsed_s": 4.86
+    }
+  },
+  "neural_rankers_smoke": {
+    "din": {"AUC": 0.5142755549808878, "LogLoss": 0.629094390661135, "NDCG@5": 0.8969787681093323, "rows": 1999, "requests": 534},
+    "dien": {"AUC": 0.5849, "LogLoss": 0.5686, "NDCG@5": 0.9223, "rows": 998, "requests": 456},
+    "dcnv2": {"AUC": 0.5136, "LogLoss": 0.6705, "NDCG@5": 0.9057, "rows": 998, "requests": 456},
+    "ultra_hstu": {"AUC": 0.5012, "LogLoss": 0.7427, "NDCG@5": 0.8984, "rows": 998, "requests": 456}
+  },
+  "recall_models_smoke": {
+    "note": "1 epoch / 2 batch (or 4 epoch for RQ-VAE); validation Recall@20 = 0 for all new recall models",
+    "models_trained": ["lightgcn", "dssm", "sasrec", "bert4rec", "hstu", "rqvae", "tiger", "mmrec_vbpr"],
+    "available_checkpoint_adapters": ["two_tower", "matrix_factorization", "dssm", "sasrec", "popularity", "mind", "lightgcn", "bert4rec", "hstu", "tiger", "mmrec_multimodal"]
+  },
+  "rqvae": {
+    "rqvae_unique_sids": 83,
+    "rq_kmeans_unique_sids": 43040,
+    "exported_code_method": "rq_kmeans_fallback",
+    "code_usage_per_level": [64, 64, 64]
+  },
+  "top20_diagnosis": {
+    "users": 128,
+    "targets": 362,
+    "targets_by_stage": {
+      "not_in_any_channel_top_k": 353,
+      "in_union_not_in_fusion_pool": 5,
+      "in_fusion_pool_not_top20": 4,
+      "in_fusion_top20_not_ranked_top20": 0,
+      "in_ranked_top20_not_final": 0,
+      "survived": 0
+    },
+    "channel_hits_at_100": {"two_tower": 2, "mind": 7, "union": 9},
+    "target_popularity_zero_share": 0.4144,
+    "artifact": "artifacts/kuasar_small/top20_diagnosis/diagnosis.json"
+  },
+  "rec_agent": {
+    "self_check": "7/7 local planner",
+    "real_llm": {"model": "deepseek-chat", "requests": 4, "tools": ["read_data_profile", "query_model_zoo", "run_pipeline", "evaluate_recommendations"], "status": "verified", "elapsed_s": 14.5},
+    "training_tools_verified": ["din", "matrix_factorization"]
+  },
+  "quality_gates": {
+    "zoo_check": "pass (25 models: ready=19, upstream_ready=2, blocked=4)",
+    "check_project": "0 errors, 9 warnings",
+    "smoke_adapters": "pass",
+    "smoke_phase1": "pass"
+  }
+}

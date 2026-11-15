@@ -1,13 +1,14 @@
 # Search 1：KuaiSAR 词表核验、小样本与 BM25
 
-> **状态**：2026-11-09 第一轮完成。只做「搜索数据准备 → BM25 建索引 → 查询接口/CLI」；
-> Search Agent 已在 [search-agent.md](search-agent.md) 接入；向量检索、排序/重排和
-> 全量检索评测留到后续。
+> **状态**：2026-11-09。§1–§9 是 Search 1（数据准备 → BM25 建索引 → 查询接口/CLI）；
+> §10 是 Phase 2 补齐的**搜索侧 FAISS 向量召回、RRF 混合检索与精排**（同一份 120 物品
+> 小样本）。Search Agent 见 [search-agent.md](search-agent.md)。
 >
 > **一句话结论**：仓库/数据包没有单独的词表文件，但论文说明 query 与 video title
 > 走同一套分词与整数哈希，且抽样观测显示 keyword 与 caption 的 token ID 范围一致、
 > 点击/曝光物品的 token 重合显著高于随机基线。因此本轮用 **KuaiSAR 原始 token ID**
-> 建索引，没有改用本地夹具。
+> 建索引，没有改用本地夹具；向量编码也只是同一套整数 token 的哈希表示，
+> **不代表中文语义**。
 
 ## 1. 本轮交付
 
@@ -302,3 +303,151 @@ python -m recsys.search.smoke --top-k 5 `
 Search 2 复用本轮的 120 物品索引与 `BM25Index.search`，新增 `search_bm25` 原生工具调用、
 查询子集校验、2 次检索 / 3 次请求预算和一次反馈决策。真实工作流与验收证据见
 [search-agent.md](search-agent.md)。
+
+## 10. Phase 2：搜索侧 FAISS 向量、混合检索与精排（2026-11-09）
+
+> 与 §1–§9 使用同一份 120 物品 / 30 会话小样本；**没有重建 BM25、没有扫描原始 CSV、
+> 没有训练或微调**。搜索向量索引独立于推荐侧 FAISS 索引。
+
+### 10.1 复用的 SkimSearchAgent 组件（固定提交 `4794575`）
+
+上游源码在 `third_party/skim-search-agent`，**未改动**；适配层
+[`src/recsys/search/upstream.py`](../src/recsys/search/upstream.py) 只把它加入 `sys.path`
+并再导出：
+
+| 上游组件 | 用途 | 项目侧适配 |
+| --- | --- | --- |
+| `agent_search.retrievers.dense.vector_index` | 索引基类、`doc_ids.json` + `meta.json` 原子落盘、`load_index` / `index_exists` | 新增 `FaissFlatIndex`（`faiss.IndexFlatIP`）并登记进上游 backend 表；增加整数 `item_id` 映射与 `add_items` |
+| `agent_search.retrievers.fusion.rrf.RRF` | RRF 融合（`1/(k+rank)`，只读名次） | 融合顺序直接调用上游；项目侧补来源/名次/分数 |
+| `agent_search.retrievers.rerankers.Reranker` + `register_reranker` | 精排契约与注册表 | `TokenOverlapReranker`（`kuasar_token_overlap`） |
+| `agent_search.retrievers.reranked.RerankedEngine` | `base retriever + reranker` 组合 | base 是混合检索适配器，先取候选池再精排 |
+
+上游 `HybridEngine` / `RerankedEngine` 只返回 doc id，不保留各路来源与分数，
+因此项目侧写薄适配；融合算法与精排流程仍由上游组件执行。
+
+### 10.2 模块与调用
+
+| 模块 | 作用 |
+| --- | --- |
+| [`encoders.py`](../src/recsys/search/encoders.py) | 可插拔 `SearchEncoder`；`TokenHashEncoder`（无训练）与 `TextSemanticEncoder`（有文本时启用） |
+| [`vector_index.py`](../src/recsys/search/vector_index.py) | `FaissFlatIndex` + `SearchVectorIndex`：编码、Top-K、item_id 映射、保存/重载/更新 |
+| [`hybrid.py`](../src/recsys/search/hybrid.py) | BM25 + 向量，按 item_id 去重，RRF 融合，来源追溯 |
+| [`rerank.py`](../src/recsys/search/rerank.py) | 融合候选池精排（上游 `Reranker` + `RerankedEngine`） |
+| [`service.py`](../src/recsys/search/service.py) | 四条检索入口的统一门面 |
+| [`query.py`](../src/recsys/search/query.py) | 查询规范化与受约束改写 |
+| [`build_vector_index.py`](../src/recsys/search/build_vector_index.py) | 从现有 BM25 索引构建搜索向量索引 |
+| [`acceptance.py`](../src/recsys/search/acceptance.py) | 小样本验收（9 项） |
+
+```python
+from recsys.search import build_encoder
+from recsys.search.service import SearchService
+
+encoder = build_encoder({"name": "token_hash", "dim": 4096, "seed": 20261109})
+service = SearchService.load(
+    "artifacts/search/kuasar_bm25/index.json",
+    "artifacts/search/kuasar_vector/vector",
+    encoder,
+)
+query = [3538762, 3181091, 4061567, 3525929]
+for hit in service.search("hybrid", query, top_k=5):
+    print(hit.rank, hit.item_id, round(hit.score, 6), hit.category,
+          [(s.source, s.rank, round(s.score, 4)) for s in hit.sources])
+```
+
+### 10.3 编码：无训练的整数 token 向量（查询/文档同配置）
+
+- KuaiSAR 只有匿名整数 token（query 与 caption 同一哈希空间），没有原文、词表或
+  预训练权重；`TokenHashEncoder` 用**稳定 blake2b** 把 `t:<id>` 映射到 4096 维带符号
+  桶，次线性词频加权，L2 归一化，再建内积索引。
+- **查询和文档使用同一个编码器实例与同一套配置**（dim / seed / 类别通道都相同）；
+  索引 meta 记录 `encoder` 描述与配置哈希，重载时校验，换编码器必须重建索引。
+- 文档侧可选类目词通道（`include_category`，权重 0.25）；查询侧没有类目。
+- 查询侧过滤索引词表外的 OOV token（与 BM25 查 posting 的行为一致），避免哈希碰撞
+  让「索引里没有的词」也召回文档。
+- 整数 token 转成 `t:<id>` 只是哈希键，**不当作中文语义**；`describe()` 里
+  `text_semantic=false` 明确标注。
+- `TextSemanticEncoder`（sentence-transformers）接口已留：缺 KuaiSAR 原文、缺本地权重、
+  当前环境也未安装 `sentence-transformers`，验收时给出具体报错；有文本/权重后换配置即可。
+
+### 10.4 搜索侧 FAISS 索引
+
+- 后端：`faiss.IndexFlatIP`（归一化向量上的精确余弦），**小样本也显式指定 FAISS**，
+  不会因为规模自动退回 NumPy；`backend_actual`、`faiss_version` 与 `faiss_search_calls`
+  都在 `describe()` 里可核对。
+- 索引目录：`artifacts/search/kuasar_vector/vector/`
+  （`doc_ids.json`、`meta.json`、`ann.faiss`）；`manifest.json` 记录来源 BM25 sha256、
+  编码器配置、维度、物品数、payload sha256。索引 120 物品 / 4096 维 / 1,966,125 B。
+- 物品 ID 映射：索引内部位置 ↔ 整数 `item_id`，搜索直接返回 `item_id`。
+- 保存/重载：复用上游 `save_index` / `load_index`（`meta.json` 最后写入作为完成标记）。
+- 更新：`SearchVectorIndex.add_items(items)` 追加物品并刷新词表；FAISS 直接 `index.add`，
+  NumPy 后端重建；更新后显式 `save()`。验收里做了 119 → 120 的更新并重载查询。
+
+```powershell
+python -m recsys.search.build_vector_index          # 构建/复用
+python -m recsys.search.build_vector_index --force  # 重建搜索向量索引（不动 BM25）
+python -m recsys.search.build_vector_index --check  # 重载 + 查询 + 后端核对
+```
+
+### 10.5 混合检索与来源追溯
+
+- 两路候选：BM25 Top-`pool` 与向量 Top-`pool`（默认 50）。
+- 融合顺序直接调用上游 `RRF(k=60).fuse(...)`；项目侧按 `item_id` 去重，
+  为每条结果保留 `sources=[{source, rank, score}]`，融合分 = Σ 1/(60+rank)。
+- 分数不混用：BM25 分是关键词分，向量分是余弦，融合分是 RRF 分，三者分别记录。
+
+```powershell
+python -m recsys.search --mode bm25   --tokens "3538762,3181091" --top-k 5
+python -m recsys.search --mode vector --tokens "3538762,3181091" --top-k 5
+python -m recsys.search --mode hybrid --tokens "3538762,3181091" --top-k 5
+python -m recsys.search --mode rerank --tokens "3538762,3181091" --top-k 5
+```
+
+### 10.6 精排
+
+- 接在**融合候选池**后面：`RerankedEngine(base=混合检索, reranker=TokenOverlapReranker)`。
+- 规则（不训练、不读点击标签）：
+  `coverage(d) = Σ_{t∈Q} idf(t)·1[t∈d] / Σ_{t∈Q} idf(t)`（idf 取自现有 BM25 索引），
+  `prior(d)` = 融合分在候选池内 min-max 归一化，
+  `score = 0.65·coverage + 0.35·prior`；排序 `(-score, item_id)`。
+- 精排对候选**重新打分**并返回最终 Top-K；结果保留 `coverage`、`prior_score`、
+  `prior_rank` 与来源明细。
+
+### 10.7 配置
+
+[`configs/search/kuasar_search_phase2.toml`](../configs/search/kuasar_search_phase2.toml)：
+编码器（`token_hash` / dim 4096 / seed 20261109 / 类别通道）、FAISS 后端、
+混合（`rrf_k=60`、`pool=50`）、精排（`pool=50`、权重 0.65/0.35）。
+
+### 10.8 验收结果（9/9，`python -m recsys.search.acceptance`）
+
+样本查询：会话 11208 的 `[3538762, 3181091, 4061567, 3525929]`；点击物品（仅核对，
+不参与打分）：`350728`、`80675`。
+
+| 检查 | 结果 |
+| --- | --- |
+| 旧 BM25 库入口与 CLI 一致 | pass（Top-1=80675，score 17.8641） |
+| FAISS 后端 + 查询计数 + 重载一致 | pass（`faiss.IndexFlatIP`，faiss 1.15.1，调用 +1，重载 Top-5 一致） |
+| 索引更新（119 → 120）保存/重载 | pass |
+| 混合去重 / 来源 / 融合分 / 上游 RRF 顺序 | pass（7 条，每条都有 bm25+vector 来源） |
+| 精排最终 Top-5 + 分数可复算 | pass（1.000000 / 0.735169 / 0.495818 / 0.436689 / 0.379380） |
+| Search Agent 脚本替身链路 | pass（`search_hybrid → search_rerank`，verified） |
+| Search Agent 真实 LLM 链路（1 次） | pass（`deepseek-chat` 自主选择混合检索 → 精排，verified，17/17） |
+| 空结果 / 空查询 / 首轮精排拒绝 | pass（无匹配 token：混合 0 条，Agent 链路 0 结果 verified；空查询与首轮精排被拒绝） |
+| 文本语义编码缺口 | pass（明确报错，不是静默回退） |
+| 只读约束（BM25/样本哈希） | pass |
+
+Top-5（精排）：`80675`（1.000000）、`135989`（0.735169）、`209624`（0.495818）、
+`350728`（0.436689）、`135058`（0.379380）；点击物品 80675、350728 都在 Top-5。
+完整证据见 [`acceptance.json`](../experiments/2026-11-09-kuasar-search-phase2/acceptance.json)
+与 [报告](../experiments/2026-11-09-kuasar-search-phase2/report.md)。
+
+### 10.9 限制
+
+1. **没有真实文本**：向量编码是 token 哈希，不是语义；当前样本上 BM25 与向量的候选集
+   高度重合（同一 token 空间），混合检索的价值主要在 RRF 排序融合与来源追溯，
+   语义扩展能力要等原文/预训练权重。
+2. **未做检索质量评测**：没有 Recall/MRR/NDCG 或人工相关性标注；点击只用于核对。
+3. **小样本**：120 物品 / 30 会话，覆盖率为前缀截断后的结果，不代表全量目录。
+4. **精排是规则**：没有可用的预训练精排器；`kuasar_token_overlap` 只使用 token 覆盖率与
+   融合先验。
+5. **索引词表过滤**：OOV 过滤依赖建索引时的词表；新增物品后需要 `add_items` 或重建。

@@ -58,8 +58,8 @@
 - 写入实验键：`24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f`；
 - `memory_saved=true`，索引 `entry_count=1`。
 
-证据：[run1/metrics.json](run1/metrics.json)、[run1/events.jsonl](run1/events.jsonl)、
-[run1/decision.json](run1/decision.json)。
+证据：run1/metrics.json（本地文件：`run1/metrics.json`）、run1/events.jsonl（本地文件：`run1/events.jsonl`）、
+run1/decision.json（本地文件：`run1/decision.json`）。
 
 ### 第二次：跨进程命中，零评测
 
@@ -70,14 +70,14 @@
 - `evaluation_count=0`，`evaluation=null`，events 中没有 `tool_executed` / `memory_saved`；
 - `memory_saved=false`，索引 `updated_at` 未被第二轮改写。
 
-证据：[run2/metrics.json](run2/metrics.json)、[run2/events.jsonl](run2/events.jsonl)、
-[run2/decision.json](run2/decision.json)、[two_run_check.json](two_run_check.json)。
+证据：run2/metrics.json（本地文件：`run2/metrics.json`）、run2/events.jsonl（本地文件：`run2/events.jsonl`）、
+run2/decision.json（本地文件：`run2/decision.json`）、[two_run_check.json](two_run_check.json)。
 
 ### 索引与工件
 
-- 索引：[memory/index.json](memory/index.json)，1 条记录；
-- run record：[24cc580d…07962f.json](memory/runs/24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f.json)；
-- 候选明细：[80_20/fusion.json](../../artifacts/kuasar_small/experiment_memory/cache_eval/80_20/fusion.json)；
+- 索引：memory/index.json（本地文件：`memory/index.json`），1 条记录；
+- run record：24cc580d…07962f.json（本地文件：`memory/runs/24cc580d24b4d237a119ceba8901fccc305221ca4a01524a05ba2c1a7207962f.json`）；
+- 候选明细：80_20/fusion.json（本地文件：`../../artifacts/kuasar_small/experiment_memory/cache_eval/80_20/fusion.json`）；
 - `fusion.json` sha256：`24f826fe8982f8ef20c1da7a23decb8c37dd79f8a0d7a20a43d79813e409554c`；
 - 索引 sha256：`842353de7de7533d5bac25a359d5eb52865ba77f4b10316e58b69dae07fb2e84`；
 - run record sha256：`c2ab46870eca5f397519267f0c5e5d692e219eaf34ccee67640df167a4b2619d`。
@@ -151,8 +151,8 @@ python -m recsys.experiments.history_first_agent --regression-publish-gate `
 回归检查 18/18 通过；被测 Agent 运行仍为 `partial`（模拟 CLI 2），回归命令自身退出 0。
 旧 `regression_publish_gate/` 递归 sha256 前后一致，预置 marker 内容未变，新结果写入另一个
 唯一目录。证据：[refactor_check.json](refactor_check.json)、
-[新回归 regression.json](../../artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/regression.json)、
-[新回归 metrics.json](../../artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/metrics.json)。
+新回归 regression.json（本地文件：`../../artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/regression.json`）、
+新回归 metrics.json（本地文件：`../../artifacts/kuasar_small/experiment_memory/regression_publish_gate/run-20261108T162817Z-10980/metrics.json`）。
 
 ## 匹配安全检查（不运行评测）
 
@@ -191,7 +191,7 @@ python -m recsys.experiments.history_first_agent --memory-safety-check `
 本地验收。`search_experiment_history` 增加可选 `memory_dir`；`evaluate_fusion_quota`
 未改。不带 `--memory-dir` 时不会自动入库，Phase 11 CLI 行为保持。
 Phase 11 兼容回归 `--regression-miss`（30/70，fake eval）通过：
-[regression_compat](regression_compat/regression_miss/regression_miss.json)。
+regression_compat（本地文件：`regression_compat/regression_miss/regression_miss.json`）。
 
 ## 复现
 
